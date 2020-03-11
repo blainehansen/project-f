@@ -7,7 +7,7 @@ type NonEmpty<T> = [T, ...T[]]
 declare const _reactive_brand: unique symbol
 // type TrueReactive<T> = { [_reactive_brand]: true, signal }
 type MutableReactive<T> = ((value: T) => void) & { [_reactive_brand]: true }
-type ImmutableReactive<T> = (() => T) & { [_reactive_brand]: _reactive_brand }
+type ImmutableReactive<T> = (() => T) & { [_reactive_brand]: true }
 type Reactive<T> = MutableReactive<T> & ImmutableReactive<T>
 
 // type FakeMutable<T> = (value: T) => void
@@ -74,6 +74,12 @@ class Signal<T> {
 // and the function has to return the new value of the tuple
 // and we can have a gated pipe that only fires when some condition is true?
 // and we can have an "optional" pipe that can return undefined to not update anything?
+// function f<T>(fn: (value: T) => boolean): void
+// function f<T, U extends T>(fn: (value: T) => value is U): void
+// function f<T>(fn: (value: T) => boolean) {
+//   return
+// }
+// f((n: number) => n === 0)
 
 function value<T extends Primitives>(initial: T): Mutable<T> {
 	const signal = new Signal(initial)
@@ -112,7 +118,9 @@ function computed<T>(fn: () => T): Immutable<T> {
 	return v
 }
 
-function watch<T>(signal: Reactive<T>, fn: (value: T) => unknown) {
+function watch<T>(reactive: Reactive<T>, fn: (value: T) => unknown) {
+	// const signal: Signal<T> = (reactive as any).signal
+	const signal = reactive.signal
 	fn(signal.sample())
 	signal.register(() => { fn(signal.sample()) })
 }
