@@ -102,14 +102,14 @@ function value<T extends Primitives>(initial: T): Mutable<T> {
 
 function computed<T>(fn: () => T): Immutable<T> {
 	// create some kind of new computation and register it as the listener
-	const computation = new Computation(fn)
+	const v = new Signal(fn())
+	const computation = new Computation(() => { v.mutate(fn()) })
 	const { listener: oldListener, mutationAllowed: oldMutationAllowed } = STATE
 	STATE.listener = computation
 	STATE.mutationAllowed = false
 	// fn() will add all the called dependencies to STATE.listeners
 	// and by passing it in to signal, it will pull all those dependencies off
 	// and save them internally, so it will know who to call whenever it's mutated
-	const v = new Signal(fn(), computation)
 	STATE.listener = oldListener
 	STATE.mutationAllowed = oldMutationAllowed
 	// in effectful computations, we'll need to add the computation to some owner
