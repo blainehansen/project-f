@@ -3,13 +3,18 @@ type NonEmpty<T> = [T, ...T[]]
 type Primitive = string | number | boolean | null | undefined
 type OnlyAllow<A, E> = A extends E ? A : never
 
+const noop = () => {}
+const always = () => true
+
 export type Fn = () => unknown
 export type Handle = () => void
+export type Registrar = (fn: Fn) => void
 
 // declare const _reactive_brand: unique symbol
 // // type TrueReactive<T> = { [_reactive_brand]: true, signal }
-// type Immutable<T> = (() => T) & { readonly _signal?: Signal<T> }
-export type Immutable<T> = () => T
+
+// export type Immutable<T> = (() => T) & { readonly signal?: Signal<T> }
+export type Immutable<T> = (() => T)
 export type Mutable<T> = ((value: T) => void) & Immutable<T>
 
 const STATE = {
@@ -24,31 +29,9 @@ class Signal<T = unknown> {
 	protected dependencies = new Set<Computation>()
 	constructor(
 		protected value: T,
+		// protected readonly comparator: (a: T, b: T) => boolean,
 		protected readonly STATE: STATE,
 	) {}
-
-	// consider overloading to require a comparator if not Primitive
-	static value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
-		const signal = new Signal(initial, STATE)
-
-		function value(): T
-		function value(next: T): void
-		function value(next?: T) {
-			if (arguments.length === 0)
-				return signal.read()
-
-			// UNSAFE: the checks above this line must guarantee that next is a T
-			// consider using a spread tuple type instead of overloads
-			signal.mutate(next!)
-			return
-		}
-
-		return value as T extends Primitive ? Mutable<T> : never
-	}
-
-	static sample<T>(signal: Signal<T>): T {
-		return signal.value
-	}
 
 	protected register(listener: Computation) {
 		this.dependencies.add(listener)
@@ -81,6 +64,63 @@ class Signal<T = unknown> {
 		}
 		batch.add(() => { this.value = next }, this.dependencies)
 	}
+
+	static sample<T, S extends Immutable<T>>(signalLike: S): T {
+		// UNSAFE: is there any other way to do this without exposing the signals?
+		// do we have to extend the Function class?
+		if (!(signalLike as any).signal)
+			return signalLike()
+		return (signalLike as any).signal.value
+	}
+
+	// consider overloading to require a comparator if not Primitive
+	static value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
+		const signal = new Signal(initial, STATE)
+
+		function value(): T
+		function value(next: T): void
+		function value(next?: T) {
+			if (arguments.length === 0)
+				return signal.read()
+
+			// UNSAFE: the checks above this line must guarantee that next is a T
+			// consider using a spread tuple type instead of overloads
+			signal.mutate(next!)
+			return
+		}
+		(value as any).signal = signal
+
+		return value as T extends Primitive ? Mutable<T> : never
+	}
+
+	static computed<T>(computer: () => T): Immutable<T> {
+		const thisComputation = new Computation(STATE => {
+			thisComputation.unregister()
+
+			const { listener, mutationAllowed } = STATE
+			STATE.listener = thisComputation
+			STATE.mutationAllowed = false
+			const value = computer()
+			STATE.listener = listener
+			STATE.mutationAllowed = mutationAllowed
+
+			signal.mutate(value)
+		}, STATE)
+
+		const { listener, mutationAllowed } = STATE
+		STATE.listener = thisComputation
+		STATE.mutationAllowed = false
+		const value = computer()
+		const signal = new Signal(value, STATE)
+		STATE.listener = listener
+		STATE.mutationAllowed = mutationAllowed
+
+		function computed(): T {
+			return signal.read()
+		}
+		(computed as any).signal = signal
+		return computed
+	}
 }
 
 class Computation {
@@ -93,7 +133,7 @@ class Computation {
 	register(signal: Signal) {
 		this.watched.add(signal)
 	}
-	protected unregister() {
+	unregister() {
 		for (const signal of this.watched)
 			signal.unregister(this)
 		this.watched.clear()
@@ -104,27 +144,33 @@ class Computation {
 			computation.fn(computation.STATE)
 	}
 
-	// static effect(fn: (destructor: Handle) => unknown)
-	static effect(fn: Fn) {
-		const thisComputation = new Computation(STATE => {
+	static effect(fn: (destructor: Registrar) => unknown): Handle {
+		let userDestructor = noop
+		const destructor = () => {
 			thisComputation.unregister()
+			userDestructor()
+		}
+
+		const thisComputation = new Computation(STATE => {
+			const destroy = (dest: Fn) => {
+				userDestructor = dest
+			}
+			destructor()
+
 			const { listener, mutationAllowed } = STATE
 			STATE.listener = thisComputation
 			STATE.mutationAllowed = false
-			fn()
+			fn(destroy)
 			STATE.listener = listener
 			STATE.mutationAllowed = mutationAllowed
 		}, STATE)
 
 		thisComputation.fn(thisComputation.STATE)
 
-		// we'll also need to create the destructor for this computation,
-		// and pass it both to the computation constructor and the function invocation
-
 		// at some point we'll need to attach thisComputation to some owner
 		// but not yet
 
-		// return stopHandle
+		return destructor
 	}
 }
 
@@ -157,3 +203,5 @@ export function batch(fn: Fn) {
 
 export const effect = Computation.effect
 export const value = Signal.value
+export const computed = Signal.computed
+export const sample = Signal.sample

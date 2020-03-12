@@ -1,7 +1,8 @@
 import 'mocha'
 import { expect } from 'chai'
 
-import { batch, effect, value } from './index'
+import { batch, effect, value, computed, sample } from './index'
+
 
 describe('value', () => it('works', () => {
 	const a = value('a')
@@ -13,6 +14,7 @@ describe('value', () => it('works', () => {
 	bad = value({})
 	bad = value(new Set())
 }))
+
 
 describe('simple effect', () => it('works', () => {
 	const a = value('a')
@@ -39,6 +41,7 @@ describe('simple effect', () => it('works', () => {
 	expect(currentMessage).equal('c')
 	expect(runCount).equal(3)
 }))
+
 
 describe('complex effect', () => it('works', () => {
 	const shouldRepeat = value(true)
@@ -78,6 +81,7 @@ describe('complex effect', () => it('works', () => {
 	expect(currentMessage).equal('initial')
 }))
 
+
 describe('batch', () => it('works', () => {
 	const str = value('initial')
 	const count = value(1)
@@ -107,4 +111,151 @@ describe('batch', () => it('works', () => {
 
 	expect(runCount).equal(2)
 	expect(currentMessage).equal('blahblahblahblah')
+}))
+
+
+describe('computed', () => it('works', () => {
+	const str = value('a')
+	let runCount = 0
+	const upper = computed(() => {
+		// I know these aren't supposed to have side effects but....
+		runCount++
+		return str().toUpperCase()
+	})
+
+	expect(upper() as string).equal('A')
+	expect(runCount).equal(1)
+
+	str('b')
+	expect(upper()).equal('B')
+	expect(runCount).equal(2)
+
+	str('b')
+	expect(upper()).equal('B')
+	expect(runCount).equal(2)
+}))
+
+
+describe('destructors', () => it('works', () => {
+	let totalRunCount = 0
+	let runCount = 0
+	const s = value(true)
+
+	const stop = effect(destroy => {
+		s()
+		runCount++
+		totalRunCount++
+		destroy(() => { runCount = 0 })
+	})
+
+	expect(runCount).equal(1)
+	expect(runCount).equal(1)
+
+	s(false)
+	expect(runCount).equal(1)
+	expect(totalRunCount).equal(2)
+
+	s(true)
+	expect(runCount).equal(1)
+	expect(totalRunCount).equal(3)
+
+	stop()
+	expect(runCount).equal(0)
+	expect(totalRunCount).equal(3)
+
+	// all watching should have stopped
+	s(false)
+	expect(runCount).equal(0)
+	expect(totalRunCount).equal(3)
+
+	s(true)
+	expect(runCount).equal(0)
+	expect(totalRunCount).equal(3)
+}))
+
+
+describe('sample', () => it('works', () => {
+	const a = value('a')
+	const b = value('b')
+
+	let runCount = 0
+	let currentMessage = ''
+
+	effect(() => {
+		runCount++
+		currentMessage = `${sample(a)} ${b()}`
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('a b')
+
+	a('aa')
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('a b')
+
+	b('bb')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('aa bb')
+
+	a('a')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('aa bb')
+
+	b('b')
+	expect(runCount).equal(3)
+	expect(currentMessage).equal('a b')
+}))
+
+
+describe('nested computations', () => it('works', () => {
+	const logging = value(true)
+	const a = value('a')
+	const b = value('b')
+	let aRunCount = 0
+	let aMessage = ''
+	let bRunCount = 0
+	let bMessage = ''
+
+	effect(() => {
+		if (!logging()) return
+		effect(destroy => {
+			aRunCount++
+			aMessage = a()
+			destroy(() => { aMessage = '' })
+		})
+		effect(() => {
+			bRunCount++
+			bMessage = b()
+			destroy(() => { bMessage = '' })
+		})
+	})
+
+	expect(aRunCount).equal(1)
+	expect(aMessage).equal('a')
+	expect(bRunCount).equal(1)
+	expect(bMessage).equal('b')
+
+	batch(() => { a('aa'); b('bb') })
+	expect(aRunCount).equal(2)
+	expect(aMessage).equal('aa')
+	expect(bRunCount).equal(2)
+	expect(bMessage).equal('bb')
+
+	logging(false)
+	expect(aRunCount).equal(3)
+	expect(aMessage).equal('')
+	expect(bRunCount).equal(3)
+	expect(bMessage).equal('')
+
+	batch(() => { a('a'); b('b') })
+	expect(aRunCount).equal(4)
+	expect(aMessage).equal('')
+	expect(bRunCount).equal(4)
+	expect(bMessage).equal('')
+
+	logging(false)
+	expect(aRunCount).equal(4)
+	expect(aMessage).equal('a')
+	expect(bRunCount).equal(4)
+	expect(bMessage).equal('b')
 }))
