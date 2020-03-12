@@ -208,7 +208,7 @@ describe('sample', () => it('works', () => {
 
 
 describe('nested computations', () => it('works', () => {
-	const logging = value(true)
+	const active = value(true)
 	const a = value('a')
 	const b = value('b')
 	let aRunCount = 0
@@ -217,13 +217,13 @@ describe('nested computations', () => it('works', () => {
 	let bMessage = ''
 
 	effect(() => {
-		if (!logging()) return
+		if (!active()) return
 		effect(destroy => {
 			aRunCount++
 			aMessage = a()
 			destroy(() => { aMessage = '' })
 		})
-		effect(() => {
+		effect(destroy => {
 			bRunCount++
 			bMessage = b()
 			destroy(() => { bMessage = '' })
@@ -241,21 +241,68 @@ describe('nested computations', () => it('works', () => {
 	expect(bRunCount).equal(2)
 	expect(bMessage).equal('bb')
 
-	logging(false)
-	expect(aRunCount).equal(3)
+	active(false)
+	expect(aRunCount).equal(2)
 	expect(aMessage).equal('')
-	expect(bRunCount).equal(3)
+	expect(bRunCount).equal(2)
 	expect(bMessage).equal('')
 
 	batch(() => { a('a'); b('b') })
-	expect(aRunCount).equal(4)
+	expect(aRunCount).equal(2)
 	expect(aMessage).equal('')
-	expect(bRunCount).equal(4)
+	expect(bRunCount).equal(2)
 	expect(bMessage).equal('')
 
-	logging(false)
-	expect(aRunCount).equal(4)
+	active(true)
+	expect(aRunCount).equal(3)
 	expect(aMessage).equal('a')
-	expect(bRunCount).equal(4)
+	expect(bRunCount).equal(3)
 	expect(bMessage).equal('b')
 }))
+
+
+describe('nested computed', () => it('works', () => {
+	const active = value(true)
+	const a = value('a')
+	const b = value('b')
+
+	let aRunCount = 0
+	let bRunCount = 0
+
+	effect(() => {
+		if (!active()) return
+		computed(() => {
+			aRunCount++
+			return a()
+		})
+		computed(() => {
+			bRunCount++
+			return b()
+		})
+	})
+
+	expect(aRunCount).equal(1)
+	expect(bRunCount).equal(1)
+
+	a('aa')
+	expect(aRunCount).equal(2)
+	expect(bRunCount).equal(1)
+	b('bb')
+	expect(aRunCount).equal(2)
+	expect(bRunCount).equal(2)
+
+	active(false)
+	expect(aRunCount).equal(2)
+	expect(bRunCount).equal(2)
+
+	batch(() => { a('a'); b('b') })
+	expect(aRunCount).equal(2)
+	expect(bRunCount).equal(2)
+
+	active(true)
+	expect(aRunCount).equal(3)
+	expect(bRunCount).equal(3)
+}))
+
+fail
+// do one nested computation that's three deep

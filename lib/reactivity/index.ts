@@ -19,8 +19,9 @@ export type Mutable<T> = ((value: T) => void) & Immutable<T>
 
 const STATE = {
 	mutationAllowed: true,
-	listener: null as null | Computation,
 	batch: null as null | Batch,
+	owner: null as null | Computation,
+	listener: null as null | Computation,
 }
 type STATE = typeof STATE
 
@@ -97,23 +98,31 @@ class Signal<T = unknown> {
 		const thisComputation = new Computation(STATE => {
 			thisComputation.unregister()
 
-			const { listener, mutationAllowed } = STATE
+			const { owner, listener, mutationAllowed } = STATE
+			STATE.owner = thisComputation
 			STATE.listener = thisComputation
 			STATE.mutationAllowed = false
 			const value = computer()
+			STATE.owner = owner
 			STATE.listener = listener
 			STATE.mutationAllowed = mutationAllowed
+			if (owner !== null)
+				owner.add(thisComputation)
 
 			signal.mutate(value)
-		}, STATE)
+		}, noop, STATE)
 
-		const { listener, mutationAllowed } = STATE
+		const { owner, listener, mutationAllowed } = STATE
+		STATE.owner = thisComputation
 		STATE.listener = thisComputation
 		STATE.mutationAllowed = false
 		const value = computer()
 		const signal = new Signal(value, STATE)
+		STATE.owner = owner
 		STATE.listener = listener
 		STATE.mutationAllowed = mutationAllowed
+		if (owner !== null)
+			owner.add(thisComputation)
 
 		function computed(): T {
 			return signal.read()
@@ -125,8 +134,10 @@ class Signal<T = unknown> {
 
 class Computation {
 	protected watched = new Set<Signal>()
+	protected children = new Set<Computation>()
 	constructor(
 		protected readonly fn: (STATE: STATE) => void,
+		protected readonly destructor: Fn,
 		protected readonly STATE: STATE,
 	) {}
 
@@ -137,6 +148,14 @@ class Computation {
 		for (const signal of this.watched)
 			signal.unregister(this)
 		this.watched.clear()
+
+		for (const child of this.children)
+			child.unregister()
+		this.children.clear()
+		this.destructor()
+	}
+	add(child: Computation) {
+		this.children.add(child)
 	}
 
 	static run(computations: Iterable<Computation>) {
@@ -146,29 +165,27 @@ class Computation {
 
 	static effect(fn: (destructor: Registrar) => unknown): Handle {
 		let userDestructor = noop
-		const destructor = () => {
-			thisComputation.unregister()
-			userDestructor()
-		}
+		const destructor = () => { userDestructor() }
 
 		const thisComputation = new Computation(STATE => {
-			const destroy = (dest: Fn) => {
-				userDestructor = dest
-			}
+			const destroy = (dest: Fn) => { userDestructor = dest }
+			thisComputation.unregister()
 			destructor()
 
-			const { listener, mutationAllowed } = STATE
+			const { owner, listener, mutationAllowed } = STATE
+			STATE.owner = thisComputation
 			STATE.listener = thisComputation
 			STATE.mutationAllowed = false
 			fn(destroy)
+			STATE.owner = owner
 			STATE.listener = listener
 			STATE.mutationAllowed = mutationAllowed
-		}, STATE)
+
+			if (owner !== null)
+				owner.add(thisComputation)
+		}, destructor, STATE)
 
 		thisComputation.fn(thisComputation.STATE)
-
-		// at some point we'll need to attach thisComputation to some owner
-		// but not yet
 
 		return destructor
 	}
