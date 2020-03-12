@@ -8,7 +8,6 @@
   	"test:dev": "mocha -r ts-node/register lib/compiler/grammar.spec.ts",
   	"clean": "rm -rf dist",
   	"build": "npm run clean && tsc -p tsconfig.build.json",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint --fix --ext .ts lib/",
 
     "ts:ast": "ts-creator lib/compiler/_generate_from.ts --use-tabs true --trailing-comma 'all' -o lib/compiler/_generate_to.ts",

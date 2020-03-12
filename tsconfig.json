@@ -4,8 +4,7 @@
 		"declaration": true,
 		"sourceMap": true,
 		"target": "esnext",
-		// "module": "commonjs",
-		"module": "esnext",
+		"module": "commonjs",
 		"outDir": "dist",
 		"baseUrl": "./lib",
 		"paths": {
