@@ -5,11 +5,9 @@
 		"sourceMap": true,
 		"target": "esnext",
 		"module": "commonjs",
+		"moduleResolution": "node",
 		"outDir": "dist",
-		"baseUrl": "./lib",
-		"paths": {
-			"@/*": ["*"]
-		}
+		"baseUrl": "."
 	},
 	"include": [
 		"lib/**/*"

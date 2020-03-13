@@ -136,7 +136,47 @@ describe('computed', () => it('works', () => {
 }))
 
 
+describe('computed diamond', () => it('works', () => {
+	const str = value('a')
+	const evenLetters = computed(() => str().length % 2 === 0)
+	const upperStr = computed(() => str().toUpperCase())
+
+	expect(str()).equal('a')
+	expect(evenLetters()).equal(false)
+	expect(upperStr()).equal('A')
+
+	let runCount = 0
+	let currentMessage = ''
+
+	effect(() => {
+		runCount++
+		currentMessage = evenLetters() ? `${upperStr()} even` : upperStr()
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('A')
+
+	str('aa')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('AA even')
+}))
+
+
+describe('computed circular reference', () => it('works', () => {
+	const str = value('a')
+	const upperStr = computed(() => {
+		return alreadyUpper() ? str() : str().toUpperCase()
+	})
+	const alreadyUpper = computed(() => {
+		return upperStr() === str()
+	})
+
+	expect(() => str('b')).throw('circular reference')
+}))
+
+
 describe('destructors', () => it('works', () => {
+	let destructorRunCount = 0
 	let totalRunCount = 0
 	let runCount = 0
 	const s = value(true)
@@ -145,32 +185,41 @@ describe('destructors', () => it('works', () => {
 		s()
 		runCount++
 		totalRunCount++
-		destroy(() => { runCount = 0 })
+		destroy(() => {
+			destructorRunCount++
+			runCount = 0
+		})
 	})
 
 	expect(runCount).equal(1)
-	expect(runCount).equal(1)
+	expect(totalRunCount).equal(1)
+	expect(destructorRunCount).equal(0)
 
 	s(false)
 	expect(runCount).equal(1)
 	expect(totalRunCount).equal(2)
+	expect(destructorRunCount).equal(1)
 
 	s(true)
 	expect(runCount).equal(1)
 	expect(totalRunCount).equal(3)
+	expect(destructorRunCount).equal(2)
 
 	stop()
 	expect(runCount).equal(0)
 	expect(totalRunCount).equal(3)
+	expect(destructorRunCount).equal(3)
 
 	// all watching should have stopped
 	s(false)
 	expect(runCount).equal(0)
 	expect(totalRunCount).equal(3)
+	expect(destructorRunCount).equal(3)
 
 	s(true)
 	expect(runCount).equal(0)
 	expect(totalRunCount).equal(3)
+	expect(destructorRunCount).equal(3)
 }))
 
 
@@ -260,6 +309,88 @@ describe('nested computations', () => it('works', () => {
 	expect(bMessage).equal('b')
 }))
 
+describe('deep nested computations', () => it('works', () => {
+	const active = value(true)
+	const a = value('a')
+	const b = value('b')
+	let aRunCount = 0
+	let aDestructorRunCount = 0
+	let aMessage = ''
+	let bRunCount = 0
+	let bDestructorRunCount = 0
+	let bMessage = ''
+
+	effect(() => {
+		if (!active()) return
+		effect(destroy => {
+			aRunCount++
+			aMessage = a()
+			destroy(() => { aDestructorRunCount++; aMessage = '' })
+
+			effect(destroy => {
+				bRunCount++
+				bMessage = b()
+				destroy(() => { bDestructorRunCount++; bMessage = '' })
+			})
+		})
+	})
+
+	expect(aRunCount).equal(1)
+	expect(aDestructorRunCount).equal(0)
+	expect(aMessage).equal('a')
+	expect(bRunCount).equal(1)
+	expect(bDestructorRunCount).equal(0)
+	expect(bMessage).equal('b')
+
+	a('aa')
+	expect(aRunCount).equal(2)
+	expect(aDestructorRunCount).equal(1)
+	expect(aMessage).equal('aa')
+	expect(bRunCount).equal(2)
+	expect(bDestructorRunCount).equal(1)
+	expect(bMessage).equal('b')
+
+	b('bb')
+	expect(aRunCount).equal(2)
+	expect(aDestructorRunCount).equal(1)
+	expect(aMessage).equal('aa')
+	expect(bRunCount).equal(3)
+	expect(bDestructorRunCount).equal(2)
+	expect(bMessage).equal('bb')
+
+	batch(() => { a('a'); b('b') })
+	expect(aRunCount).equal(3)
+	expect(aDestructorRunCount).equal(2)
+	expect(aMessage).equal('a')
+	expect(bRunCount).equal(4)
+	expect(bDestructorRunCount).equal(3)
+	expect(bMessage).equal('b')
+
+	active(false)
+	expect(aRunCount).equal(3)
+	expect(aDestructorRunCount).equal(3)
+	expect(aMessage).equal('')
+	expect(bRunCount).equal(4)
+	expect(bDestructorRunCount).equal(4)
+	expect(bMessage).equal('')
+
+	batch(() => { a('aa'); b('bb') })
+	expect(aRunCount).equal(3)
+	expect(aDestructorRunCount).equal(3)
+	expect(aMessage).equal('')
+	expect(bRunCount).equal(4)
+	expect(bDestructorRunCount).equal(4)
+	expect(bMessage).equal('')
+
+	active(true)
+	expect(aRunCount).equal(4)
+	expect(aDestructorRunCount).equal(3)
+	expect(aMessage).equal('aa')
+	expect(bRunCount).equal(5)
+	expect(bDestructorRunCount).equal(4)
+	expect(bMessage).equal('bb')
+}))
+
 
 describe('nested computed', () => it('works', () => {
 	const active = value(true)
@@ -304,5 +435,5 @@ describe('nested computed', () => it('works', () => {
 	expect(bRunCount).equal(3)
 }))
 
-fail
+// fail
 // do one nested computation that's three deep
