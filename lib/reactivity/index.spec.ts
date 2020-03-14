@@ -1,7 +1,7 @@
 import 'mocha'
 import { expect } from 'chai'
 
-import { batch, effect, value, computed, sample } from './index'
+import { batch, effect, value, computed, sample, Immutable } from './index'
 
 
 describe('value', () => it('works', () => {
@@ -40,6 +40,12 @@ describe('simple effect', () => it('works', () => {
 	a('c')
 	expect(currentMessage).equal('c')
 	expect(runCount).equal(3)
+}))
+
+
+describe('effect disallows mutation', () => it('works', () => {
+	const a = value('a')
+	expect(() => effect(() => a('b'))).throw('readonly')
 }))
 
 
@@ -164,14 +170,16 @@ describe('computed diamond', () => it('works', () => {
 
 describe('computed circular reference', () => it('works', () => {
 	const str = value('a')
-	const upperStr = computed(() => {
-		return alreadyUpper() ? str() : str().toUpperCase()
+	const upperStr: Immutable<string> = computed(() => {
+		return str() === str().toUpperCase()
+			? alreadyUpper() ? str() : str()
+			: str().toUpperCase()
 	})
-	const alreadyUpper = computed(() => {
+	const alreadyUpper: Immutable<boolean> = computed(() => {
 		return upperStr() === str()
 	})
 
-	expect(() => str('b')).throw('circular reference')
+	expect(() => str('A')).throw('circular reference')
 }))
 
 
@@ -434,6 +442,3 @@ describe('nested computed', () => it('works', () => {
 	expect(aRunCount).equal(3)
 	expect(bRunCount).equal(3)
 }))
-
-// fail
-// do one nested computation that's three deep

@@ -12,17 +12,27 @@ const STATE = {
 }
 type STATE = typeof STATE
 
+function resetState() {
+	STATE.mutationAllowed = true
+	STATE.batch = null
+	STATE.owner = null
+	STATE.listener = null
+}
+
+const EMPTY: unique symbol = Symbol()
 
 class Signal<T = unknown> {
-	protected descendants = new Set<Computation>()
-	protected pending = false
-	protected next: T
+	readonly descendants = new Set<Computation>()
+	protected next: T | typeof EMPTY = EMPTY
+	protected _pending = false
 	constructor(
 		protected value: T,
 		// protected readonly comparator: (a: T, b: T) => boolean,
 		protected readonly STATE: STATE,
-	) {
-		this.next = value
+	) {}
+
+	get pending() {
+		return this._pending || this.next !== EMPTY
 	}
 
 	register(listener: Computation) {
@@ -48,8 +58,6 @@ class Signal<T = unknown> {
 
 		// if (this.comparator(this.value, next)) return
 		if (this.value === next) return
-
-		this.pending = true
 		this.next = next
 
 		const { batch: globalBatch } = this.STATE
@@ -59,37 +67,50 @@ class Signal<T = unknown> {
 
 		batch.addSignal(this)
 
-		if (runImmediate)
+		if (runImmediate) {
 			batch.run()
+			this.STATE.batch = globalBatch
+		}
+	}
+	wake() {
+		this._pending = true
 	}
 	finalize() {
+		if (this.next === EMPTY) return
 		this.value = this.next
-		this.pending = false
+		this.next = EMPTY
+		this._pending = false
 	}
 }
 
-const enum Status {
-	Complete, Pending, Stalled,
-}
-class Computation {
-	protected status = Status.Complete
-	protected readonly signal: Signal | undefined
+class Computation<T = unknown> {
+	protected _pending = false
 	protected readonly ancestors = new Set<Signal>()
 	protected readonly children = new Set<Computation>()
 	constructor(
-		protected readonly fn: (STATE: STATE) => void,
+		protected readonly fn: () => T,
 		protected readonly destructor: Fn,
 		protected readonly STATE: STATE,
+		protected signal: Signal<T> | undefined,
 	) {}
 
 	get pending() {
-		return this.status !== Status.Complete
+		return this._pending
 	}
+	get ready() {
+		for (const ancestor of this.ancestors)
+			if (ancestor.pending) return false
+		return true
+	}
+
+	giveSignal(signal: Signal<T>) {
+		this.signal = signal
+	}
+
 	wake() {
-		this.status = Status.Pending
-	}
-	stall() {
-		this.status = Status.Stalled
+		this._pending = true
+		if (this.signal)
+			this.signal.wake()
 	}
 
 	register(signal: Signal) {
@@ -104,18 +125,36 @@ class Computation {
 			child.unregister()
 		this.children.clear()
 		this.destructor()
-		this.status = Status.Complete
+		this._pending = false
 	}
 	add(child: Computation) {
 		this.children.add(child)
 	}
 
 	run() {
-		// this.unregister()
-		this.fn(this.STATE)
-		// this.status = Status.Complete
+		this.unregister()
+		const value = this.initialize()
+		// this._pending = false
+		if (this.signal)
+			this.signal.mutate(value)
+	}
+
+	initialize() {
+		const { owner, listener, mutationAllowed } = this.STATE
+		this.STATE.owner = this
+		this.STATE.listener = this
+		this.STATE.mutationAllowed = false
+		const value = this.fn()
+		this.STATE.owner = owner
+		this.STATE.listener = listener
+		this.STATE.mutationAllowed = mutationAllowed
+		if (owner !== null)
+			owner.add(this)
+
+		return value
 	}
 }
+
 
 class Batch {
 	protected readonly signals: Signal[] = []
@@ -127,65 +166,41 @@ class Batch {
 	}
 
 	run() {
-		while (signals.length > 0 || computations.length > 0) {
-			const signals = this.signals.slice()
+		while (this.signals.length > 0 || this.computations.length > 0) {
 			let signal
-			while (signal = signals.pop()) {
+			while (signal = this.signals.pop()) {
 				if (!signal.pending) continue
 				signal.finalize()
-				Array.prototype.unshift.apply(computations, [...signal.descendants])
+				Array.prototype.unshift.apply(this.computations, [...signal.descendants])
+				continue
 			}
 
-			const computations = this.computations.slice()
+			const nextComputations = []
 			let runCount = 0
 			let computation
-			while (computation = computations.pop()) {
+			while (computation = this.computations.pop()) {
 				if (!computation.pending) continue
 
-				if (!computation.ancestorsReady()){
-					computation.status = Status.Stalled
-					this.computations.unshift(computation)
+				if (!computation.ready) {
+					// this.computations.unshift(computation)
+					nextComputations.unshift(computation)
 					continue
 				}
 
-				computation.run()
 				runCount++
+				computation.run()
 			}
 
-			if (this.computations.length > 0 && runCount === 0)
+			this.computations.splice(0, nextComputations.length, ...nextComputations)
+
+			if (this.computations.length > 0 && runCount === 0) {
+				// TODO I don't like this
+				resetState()
 				throw new Error('circular reference')
+			}
 		}
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -228,58 +243,21 @@ export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
 
 export function effect(fn: (destructor: Registrar) => unknown): Handle {
 	let userDestructor = noop
-
-	const thisComputation = new Computation(STATE => {
-		const destructorRegistrar = (dest: Fn) => { userDestructor = dest }
-		thisComputation.unregister()
-
-		const { owner, listener, mutationAllowed } = STATE
-		STATE.owner = thisComputation
-		STATE.listener = thisComputation
-		STATE.mutationAllowed = false
+	const destructorRegistrar = (dest: Fn) => { userDestructor = dest }
+	const computation = new Computation(() => {
 		fn(destructorRegistrar)
-		STATE.owner = owner
-		STATE.listener = listener
-		STATE.mutationAllowed = mutationAllowed
+	}, () => { userDestructor() }, STATE, undefined)
 
-		if (owner !== null)
-			owner.add(thisComputation)
-	}, () => { userDestructor() }, STATE)
+	computation.initialize()
 
-	thisComputation.run()
-
-	return () => { thisComputation.unregister() }
+	return () => { computation.unregister() }
 }
 
-export function computed<T>(computer: () => T): Immutable<T> {
-	const thisComputation = new Computation(STATE => {
-		thisComputation.unregister()
-
-		const { owner, listener, mutationAllowed } = STATE
-		STATE.owner = thisComputation
-		STATE.listener = thisComputation
-		STATE.mutationAllowed = false
-		const value = computer()
-		STATE.owner = owner
-		STATE.listener = listener
-		STATE.mutationAllowed = mutationAllowed
-		if (owner !== null)
-			owner.add(thisComputation)
-
-		signal.mutate(value)
-	}, noop, STATE)
-
-	const { owner, listener, mutationAllowed } = STATE
-	STATE.owner = thisComputation
-	STATE.listener = thisComputation
-	STATE.mutationAllowed = false
-	const value = computer()
+export function computed<T>(fn: () => T): Immutable<T> {
+	const computation = new Computation(fn, noop, STATE, undefined)
+	const value = computation.initialize()
 	const signal = new Signal(value, STATE)
-	STATE.owner = owner
-	STATE.listener = listener
-	STATE.mutationAllowed = mutationAllowed
-	if (owner !== null)
-		owner.add(thisComputation)
+	computation.giveSignal(signal)
 
 	function computed(): T {
 		return signal.read()
