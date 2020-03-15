@@ -168,6 +168,51 @@ describe('computed diamond', () => it('works', () => {
 }))
 
 
+describe('complex computed diamond', () => it('works', () => {
+	const append = value('append')
+	const str = value('a')
+
+	let evenLettersRunCount = 0
+	const evenLetters = computed(() => {
+		evenLettersRunCount++
+		return str().length % 2 === 0
+	})
+	let transformedStrRunCount = 0
+	const transformedStr = computed(() => {
+		transformedStrRunCount++
+		const app = ` ${append()}`
+		return evenLetters()
+			? str().toUpperCase() + app
+			: str() + app
+	})
+
+	expect(append()).equal('append')
+	expect(str()).equal('a')
+	expect(evenLetters()).equal(false)
+	expect(transformedStr()).equal('a append')
+	expect(evenLettersRunCount).equal(1)
+	expect(transformedStrRunCount).equal(1)
+
+	let runCount = 0
+	let currentMessage = ''
+	effect(() => {
+		runCount++
+		currentMessage = evenLetters() ? `${transformedStr()} even` : transformedStr()
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('a append')
+	expect(evenLettersRunCount).equal(1)
+	expect(transformedStrRunCount).equal(1)
+
+	str('aa')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('AA append even')
+	expect(evenLettersRunCount).equal(2)
+	expect(transformedStrRunCount).equal(2)
+}))
+
+
 describe('computed circular reference', () => it('works', () => {
 	const str = value('a')
 	const upperStr: Immutable<string> = computed(() => {
