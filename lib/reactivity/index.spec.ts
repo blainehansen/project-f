@@ -1,7 +1,8 @@
 import 'mocha'
 import { expect } from 'chai'
+import { assert_type as assert, tuple as t } from '@ts-std/types'
 
-import { batch, effect, value, computed, sample, Immutable } from './index'
+import { data, ref, value, channel, batch, effect, computed, sample, Immutable } from './index'
 
 
 describe('value', () => it('works', () => {
@@ -13,6 +14,89 @@ describe('value', () => it('works', () => {
 	let bad: never = value([])
 	bad = value({})
 	bad = value(new Set())
+}))
+
+describe('data', () => it('works', () => {
+	const a = data([0, 0, 0], (left, right) => left.length === right.length)
+	expect(a()).eql([0, 0, 0])
+
+	// we don't just not alert dependencies
+	// we drop the value on the ground
+	a([1, 2, 3])
+	expect(a()).eql([0, 0, 0])
+
+	let runCount = 0
+	let currentMessage = ''
+	effect(() => {
+		runCount++
+		currentMessage = a().join(', ')
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('0, 0, 0')
+
+	a([1])
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('1')
+
+	a([0])
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('1')
+}))
+
+
+describe('channel', () => it('works', () => {
+	const a = channel([0, 0, 0])
+	expect(a()).eql([0, 0, 0])
+
+	a([1, 2, 3])
+	expect(a()).eql([1, 2, 3])
+
+	let runCount = 0
+	let currentMessage = ''
+	effect(() => {
+		runCount++
+		currentMessage = a().join(', ')
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('1, 2, 3')
+
+	a([1])
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('1')
+
+	a([0])
+	expect(runCount).equal(3)
+	expect(currentMessage).equal('0')
+}))
+
+
+describe('readonly ref', () => it('works', () => {
+	const a = value('a')
+	const r = ref(a)
+	assert.values_callable(r, t(), true)
+	assert.values_callable(r, t('b'), false)
+
+	expect(r()).equal('a')
+
+	let runCount = 0
+	let currentMessage = ''
+	effect(() => {
+		runCount++
+		currentMessage = r()
+	})
+
+	expect(runCount).equal(1)
+	expect(currentMessage).equal('a')
+
+	a('b')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('b')
+
+	a('b')
+	expect(runCount).equal(2)
+	expect(currentMessage).equal('b')
 }))
 
 
@@ -124,10 +208,11 @@ describe('computed', () => it('works', () => {
 	const str = value('a')
 	let runCount = 0
 	const upper = computed(() => {
-		// I know these aren't supposed to have side effects but....
 		runCount++
 		return str().toUpperCase()
 	})
+	assert.values_callable(upper, t(), true)
+	assert.values_callable(upper, t('b'), false)
 
 	expect(upper() as string).equal('A')
 	expect(runCount).equal(1)

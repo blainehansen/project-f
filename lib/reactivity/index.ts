@@ -1,12 +1,25 @@
-import { noop, Primitive, Fn, Handle, Registrar } from '../utils'
+import { noop, eq, alwaysFalse, Primitive, Comparator, Fn, Handle, Registrar } from '../utils'
 
 // export type Immutable<T> = (() => T) & { readonly signal?: Signal<T> }
 export type Immutable<T> = (() => T)
 export type Mutable<T> = ((value: T) => void) & Immutable<T>
 
-// declare const brand: unique symbol
-// export type ReactiveImmutable<T> = Immutable<T> & { [brand]: true }
-// export type ReactiveMutable<T> = Mutable<T> & { [brand]: true }
+// abstract class ReactiveContainer<T> {
+// 	protected readonly abstract signal: Signal<T>
+// }
+
+// type ReactiveImmutable<T> = ReactiveContainer<T> & Immutable<T>
+// type ReactiveMutable<T> = ReactiveContainer<T> & Mutable<T>
+// type UnsafeReactiveContainer<T> = { signal: Signal<T> }
+
+// function make(value: number): ReactiveImmutable<number> {
+// 	function f() {
+// 		return value
+// 	}
+// 	f.signal = value
+// 	return f as unknown as ReactiveImmutable<number>
+// }
+
 
 const STATE = {
 	mutationAllowed: true,
@@ -35,7 +48,7 @@ class Signal<T = unknown> {
 	protected _pending = false
 	constructor(
 		protected value: T,
-		// protected readonly comparator: (a: T, b: T) => boolean,
+		protected readonly comparator: Comparator<T>,
 		protected readonly STATE: STATE,
 	) {}
 
@@ -54,7 +67,7 @@ class Signal<T = unknown> {
 		const { listener } = this.STATE
 		if (listener !== null) {
 			this.register(listener)
-			listener.register(this)
+			listener.register(this as Signal)
 		}
 
 		return this.value
@@ -64,8 +77,7 @@ class Signal<T = unknown> {
 		if (!this.STATE.mutationAllowed)
 			throw new ReactivityPanic(`attempted to mutate ${this.value} with ${next} in a readonly context`)
 
-		// if (this.comparator(this.value, next)) return
-		if (this.value === next) return
+		if (this.comparator(this.value, next)) return
 		this.next = next
 
 		const { batch: globalBatch } = this.STATE
@@ -73,7 +85,7 @@ class Signal<T = unknown> {
 			? [this.STATE.batch = new Batch(), true]
 			: [globalBatch, false]
 
-		batch.addSignal(this)
+		batch.addSignal(this as Signal)
 
 		if (runImmediate) {
 			batch.run()
@@ -126,7 +138,7 @@ class Computation<T = unknown> {
 	}
 	unregister() {
 		for (const signal of this.ancestors)
-			signal.unregister(this)
+			signal.unregister(this as Computation)
 		this.ancestors.clear()
 
 		for (const child of this.children)
@@ -142,22 +154,21 @@ class Computation<T = unknown> {
 	run() {
 		this.unregister()
 		const value = this.initialize()
-		// this._pending = false
 		if (this.signal)
 			this.signal.mutate(value)
 	}
 
 	initialize() {
 		const { owner, listener, mutationAllowed } = this.STATE
-		this.STATE.owner = this
-		this.STATE.listener = this
+		this.STATE.owner = this as Computation
+		this.STATE.listener = this as Computation
 		this.STATE.mutationAllowed = false
 		const value = this.fn()
 		this.STATE.owner = owner
 		this.STATE.listener = listener
 		this.STATE.mutationAllowed = mutationAllowed
 		if (owner !== null)
-			owner.add(this)
+			owner.add(this as Computation)
 
 		return value
 	}
@@ -190,7 +201,6 @@ class Batch {
 				if (!computation.pending) continue
 
 				if (!computation.ready) {
-					// this.computations.unshift(computation)
 					nextComputations.unshift(computation)
 					continue
 				}
@@ -207,8 +217,6 @@ class Batch {
 	}
 }
 
-
-
 export function batch(fn: Fn) {
 	const thisBatch = new Batch()
 	const { batch } = STATE
@@ -218,6 +226,43 @@ export function batch(fn: Fn) {
 	thisBatch.run()
 }
 
+export function data<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
+	const signal = new Signal(initial, comparator, STATE)
+
+	function mut(): T
+	function mut(next: T): void
+	function mut(next?: T) {
+		if (arguments.length === 0)
+			return signal.read()
+
+		// UNSAFE: the checks above this line must guarantee that next is a T
+		signal.mutate(next!)
+		return
+	}
+	(mut as any).signal = signal
+	return mut
+}
+
+export function ref<T>(mutable: Mutable<T> | Immutable<T>): Immutable<T> {
+	return mutable as Immutable<T>
+}
+
+// function immutable(): Immutable<T> {
+// 	function computed(): T {
+// 		return signal.read()
+// 	}
+// 	(computed as any).signal = signal
+// }
+
+export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
+	return data(initial, eq) as T extends Primitive ? Mutable<T> : never
+}
+
+export function channel<T>(initial: T): Mutable<T> {
+	return data(initial, alwaysFalse)
+}
+
+
 export function sample<T, S extends Immutable<T>>(signalLike: S): T {
 	// UNSAFE: is there any other way to do this without exposing the signals?
 	// do we have to extend the Function class?
@@ -226,29 +271,10 @@ export function sample<T, S extends Immutable<T>>(signalLike: S): T {
 	return (signalLike as any).signal.value
 }
 
-// consider overloading to require a comparator if not Primitive
-export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
-	const signal = new Signal(initial, STATE)
-
-	function value(): T
-	function value(next: T): void
-	function value(next?: T) {
-		if (arguments.length === 0)
-			return signal.read()
-
-		// UNSAFE: the checks above this line must guarantee that next is a T
-		// consider using a spread tuple type instead of overloads
-		signal.mutate(next!)
-		return
-	}
-	(value as any).signal = signal
-
-	return value as T extends Primitive ? Mutable<T> : never
-}
 
 export function effect(fn: (destructor: Registrar) => unknown): Handle {
 	let userDestructor = noop
-	const destructorRegistrar = (dest: Fn) => { userDestructor = dest }
+	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
 	const computation = new Computation(() => {
 		fn(destructorRegistrar)
 	}, () => { userDestructor() }, STATE, undefined)
@@ -258,10 +284,10 @@ export function effect(fn: (destructor: Registrar) => unknown): Handle {
 	return () => { computation.unregister() }
 }
 
-export function computed<T>(fn: () => T): Immutable<T> {
+export function computed<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> {
 	const computation = new Computation(fn, noop, STATE, undefined)
 	const value = computation.initialize()
-	const signal = new Signal(value, STATE)
+	const signal = new Signal(value, comparator || eq, STATE)
 	computation.giveSignal(signal)
 
 	function computed(): T {
