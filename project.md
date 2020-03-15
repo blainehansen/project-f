@@ -14,8 +14,6 @@ reactive tuple (probably achievable with above and generics)
 reactive dictionary
 reactive object (probably achievable with above and generics)
 
-"actors", for controlling mutability from outside (in a single threaded environment, actors are really just about access control, and the invariants that come along with it)
-
 "watchGuard", a watcher that only fires when some boolean function (which can be a type guard!) returns true, this makes it so we can wait until something particular happens. also could have a version that either returns the arguments of the computation function or undefined to indicate not to run ("watchFilter" for one that perhaps returns args and "watchGate" or something for other)
 
 "reducer" that takes an initial value and an accumulator function

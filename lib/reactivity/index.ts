@@ -242,24 +242,43 @@ export function data<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
 	(mut as any).signal = signal
 	return mut
 }
+export namespace data {
+	export function protect<T>(initial: T, comparator: Comparator<T>): [Immutable<T>, Mutable<T>] {
+		const d = data(initial, comparator)
+		return [ref(d), d]
+	}
+}
 
 export function ref<T>(mutable: Mutable<T> | Immutable<T>): Immutable<T> {
 	return mutable as Immutable<T>
 }
 
+
 // function immutable(): Immutable<T> {
-// 	function computed(): T {
+// 	function _immutable(): T {
 // 		return signal.read()
 // 	}
-// 	(computed as any).signal = signal
+// 	(_immutable as any).signal = signal
 // }
 
 export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
 	return data(initial, eq) as T extends Primitive ? Mutable<T> : never
 }
+export namespace value {
+	export function protect<T>(initial: T): T extends Primitive ? [Immutable<T>, Mutable<T>] : never {
+		const d = value(initial)
+		return [ref(d), d] as unknown as T extends Primitive ? [Immutable<T>, Mutable<T>] : never
+	}
+}
 
 export function channel<T>(initial: T): Mutable<T> {
 	return data(initial, alwaysFalse)
+}
+export namespace channel {
+	export function protect<T>(initial: T): [Immutable<T>, Mutable<T>] {
+		const d = data(initial, alwaysFalse)
+		return [ref(d), d]
+	}
 }
 
 
@@ -290,9 +309,23 @@ export function computed<T>(fn: () => T, comparator?: Comparator<T>): Immutable<
 	const signal = new Signal(value, comparator || eq, STATE)
 	computation.giveSignal(signal)
 
-	function computed(): T {
+	function _computed(): T {
 		return signal.read()
 	}
-	(computed as any).signal = signal
-	return computed
+	(_computed as any).signal = signal
+	return _computed
+}
+
+export function thunk<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> {
+	let signal = undefined as undefined | Signal<T>
+	function _thunk(): T {
+		if (signal === undefined) {
+			const computation = new Computation(fn, noop, STATE, undefined)
+			const value = computation.initialize()
+			signal = new Signal(value, comparator || eq, STATE)
+			;(_thunk as any).signal = signal
+		}
+		return signal.read()
+	}
+	return _thunk
 }
