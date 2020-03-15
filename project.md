@@ -1,5 +1,4 @@
 # reactivity
-"crossed diamond" computed test with unmutated secondary signal
 comparator stuff
 watch
 computed with manual dependency declaration

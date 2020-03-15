@@ -16,12 +16,16 @@ const STATE = {
 }
 type STATE = typeof STATE
 
-function resetState() {
-	STATE.mutationAllowed = true
-	STATE.batch = null
-	STATE.owner = null
-	STATE.listener = null
+class ReactivityPanic extends Error {
+	constructor(message: string) {
+		STATE.mutationAllowed = true
+		STATE.batch = null
+		STATE.owner = null
+		STATE.listener = null
+		super(message)
+	}
 }
+
 
 const EMPTY: unique symbol = Symbol()
 
@@ -57,10 +61,8 @@ class Signal<T = unknown> {
 	}
 
 	mutate(next: T) {
-		if (!this.STATE.mutationAllowed) {
-			resetState()
-			throw new Error(`attempted to mutate ${this.value} with ${next} in a readonly context`)
-		}
+		if (!this.STATE.mutationAllowed)
+			throw new ReactivityPanic(`attempted to mutate ${this.value} with ${next} in a readonly context`)
 
 		// if (this.comparator(this.value, next)) return
 		if (this.value === next) return
@@ -199,11 +201,8 @@ class Batch {
 
 			this.computations.splice(0, nextComputations.length, ...nextComputations)
 
-			if (this.computations.length > 0 && runCount === 0) {
-				// TODO I don't like this
-				resetState()
-				throw new Error('circular reference')
-			}
+			if (this.computations.length > 0 && runCount === 0)
+				throw new ReactivityPanic('circular reference')
 		}
 	}
 }
