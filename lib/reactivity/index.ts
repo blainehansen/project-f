@@ -57,8 +57,10 @@ class Signal<T = unknown> {
 	}
 
 	mutate(next: T) {
-		if (!this.STATE.mutationAllowed)
+		if (!this.STATE.mutationAllowed) {
+			resetState()
 			throw new Error(`attempted to mutate ${this.value} with ${next} in a readonly context`)
+		}
 
 		// if (this.comparator(this.value, next)) return
 		if (this.value === next) return
