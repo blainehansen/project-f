@@ -4,6 +4,10 @@ import { noop, Primitive, Fn, Handle, Registrar } from '../utils'
 export type Immutable<T> = (() => T)
 export type Mutable<T> = ((value: T) => void) & Immutable<T>
 
+// declare const brand: unique symbol
+// export type ReactiveImmutable<T> = Immutable<T> & { [brand]: true }
+// export type ReactiveMutable<T> = Mutable<T> & { [brand]: true }
+
 const STATE = {
 	mutationAllowed: true,
 	batch: null as null | Batch,
