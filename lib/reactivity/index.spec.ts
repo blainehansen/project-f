@@ -2,7 +2,7 @@ import 'mocha'
 import { expect } from 'chai'
 import { assert_type as assert, tuple as t } from '@ts-std/types'
 
-import { data, ref, value, channel, batch, effect, computed, sample, Immutable } from './index'
+import { data, ref, value, channel, batch, effect, computed, thunk, sample, Immutable } from './index'
 
 
 describe('value', () => it('works', () => {
@@ -310,6 +310,20 @@ describe('computed circular reference', () => it('works', () => {
 	})
 
 	expect(() => str('A')).throw('circular reference')
+}))
+
+
+describe('thunk', () => it('works', () => {
+	const str = value('a')
+	let runCount = 0
+	const upperStr = thunk(() => {
+		runCount++
+		return str().toUpperCase()
+	})
+
+	expect(runCount).equal(0)
+	expect(upperStr()).equal('A')
+	expect(runCount).equal(1)
 }))
 
 

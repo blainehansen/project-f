@@ -10,7 +10,7 @@ export type Mutable<T> = ((value: T) => void) & Immutable<T>
 
 // type ReactiveImmutable<T> = ReactiveContainer<T> & Immutable<T>
 // type ReactiveMutable<T> = ReactiveContainer<T> & Mutable<T>
-// type UnsafeReactiveContainer<T> = { signal: Signal<T> }
+// type UnsafeReactiveContainer<T> = { readonly signal: Signal<T> }
 
 // function make(value: number): ReactiveImmutable<number> {
 // 	function f() {
@@ -42,6 +42,9 @@ class ReactivityPanic extends Error {
 
 const EMPTY: unique symbol = Symbol()
 
+type UnsafeSignal<T = unknown> = {
+	readonly value: T
+}
 class Signal<T = unknown> {
 	readonly descendants = new Set<Computation>()
 	protected next: T | typeof EMPTY = EMPTY
@@ -245,12 +248,29 @@ export function data<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
 export namespace data {
 	export function protect<T>(initial: T, comparator: Comparator<T>): [Immutable<T>, Mutable<T>] {
 		const d = data(initial, comparator)
-		return [ref(d), d]
+		return [d, d]
 	}
 }
 
+// export function reducer<T>(initial: T, fn: (current: T, next: T) => T, comparator?: Comparator<T>): Mutable<T> {
+// 	const signal = new Signal(initial, comparator || eq, STATE)
+
+// 	function mut(): T
+// 	function mut(next: T): void
+// 	function mut(next?: T) {
+// 		if (arguments.length === 0)
+// 			return signal.read()
+
+// 		// UNSAFE: the checks above this line must guarantee that next is a T
+// 		signal.mutate(fn(sample(signal), next!))
+// 		return
+// 	}
+// 	(mut as any).signal = signal
+// 	return mut
+// }
+
 export function ref<T>(mutable: Mutable<T> | Immutable<T>): Immutable<T> {
-	return mutable as Immutable<T>
+	return mutable
 }
 
 
@@ -267,7 +287,7 @@ export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
 export namespace value {
 	export function protect<T>(initial: T): T extends Primitive ? [Immutable<T>, Mutable<T>] : never {
 		const d = value(initial)
-		return [ref(d), d] as unknown as T extends Primitive ? [Immutable<T>, Mutable<T>] : never
+		return [d, d] as unknown as T extends Primitive ? [Immutable<T>, Mutable<T>] : never
 	}
 }
 
@@ -277,7 +297,7 @@ export function channel<T>(initial: T): Mutable<T> {
 export namespace channel {
 	export function protect<T>(initial: T): [Immutable<T>, Mutable<T>] {
 		const d = data(initial, alwaysFalse)
-		return [ref(d), d]
+		return [d, d]
 	}
 }
 
@@ -287,7 +307,7 @@ export function sample<T, S extends Immutable<T>>(signalLike: S): T {
 	// do we have to extend the Function class?
 	if (!(signalLike as any).signal)
 		return signalLike()
-	return (signalLike as any).signal.value
+	return ((signalLike as any).signal as UnsafeSignal<T>).value
 }
 
 
