@@ -58,5 +58,8 @@ typings/
 .env
 
 dist
+lib/macros/transformed
 
 .local*
+lab/_generate.from.ts
+lab/_generate.to.ts
