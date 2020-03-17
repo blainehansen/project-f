@@ -1,9 +1,10 @@
 # reactivity
 watch
-computed with manual dependency declaration
-"pipe", computed with both manual and automatic dependencies that modifies multiple signals, tuple or object?
+"combine" or maybe "join", computed with manual dependency declaration, especially useful to create a tuple or object spread since that produces multiple signals all with those same precise dependencies
+"pipe", probably the automatic version of the above "combine"
 "drifter", a computed that you can mutate in the interim (all we've done is relax the invariant that the value is always equal to the result of that computation)
-computed with a "setter" rule
+
+computed with a "setter" rule, this is perhaps a simple version of actors that only mediates a single value
 
 tuple spread value creator
 object spread value creator

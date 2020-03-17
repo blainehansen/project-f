@@ -1,3 +1,79 @@
+import * as ts from 'typescript'
+
+function compiler(configFilePath: string) {
+	const host: ts.ParseConfigFileHost = ts.sys as any
+	// Fix after https://github.com/Microsoft/TypeScript/issues/18217
+	// host.onUnRecoverableConfigFileDiagnostic = printDiagnostic
+	const parsedCmd = ts.getParsedCommandLineOfConfigFile(configFilePath, {}, host)
+	// host.onUnRecoverableConfigFileDiagnostic = undefined
+	if (!parsedCmd)
+		throw new Error()
+
+	const { options, fileNames } = parsedCmd
+
+	const program = ts.createProgram({
+		rootNames: fileNames,
+		options,
+	})
+
+	// program.getTypeChecker()
+	const [p] = program.getRootFileNames()
+	const sourceFile = program.getSourceFile(p)!
+	const transformedSourceFile = ts.getMutableClone(sourceFile)
+	// a.toFixed()
+
+	const emitResult = program.emit(
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		{
+			before: [],
+			after: [],
+			afterDeclarations: [],
+		}
+	)
+
+	const diagnostics = ts.getPreEmitDiagnostics(program)
+
+	diagnostics
+		// .concat(emitResult.diagnostics)
+		.forEach(diagnostic => {
+			let msg = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+			if (diagnostic.file) {
+				const {line, character} = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start!)
+				msg = `${diagnostic.file.fileName} (${line + 1},${character + 1}): ${msg}`
+			}
+			console.error(msg)
+		})
+
+	const exitCode = emitResult.emitSkipped ? 1 : 0
+	if (exitCode) {
+		console.log(`Process exiting with code '${exitCode}'.`)
+		process.exit(exitCode)
+	}
+}
+
+
+export default function(program: ts.Program, pluginOptions: {}) {
+	return (ctx: ts.TransformationContext) => {
+		return (sourceFile: ts.SourceFile) => {
+			function visitor(node: ts.Node): ts.Node {
+				// if (ts.isCallExpression(node)) {
+				//     return ts.createLiteral('call')
+				// }
+				return ts.visitEachChild(node, visitor, ctx)
+			}
+			return ts.visitEachChild(sourceFile, visitor, ctx)
+		}
+	}
+}
+
+compiler('./lab/macros/tsconfig.json')
+
+
+
+
 // import ts from "typescript"
 
 // // hardcode our input file

@@ -2,6 +2,7 @@ https://github.com/cevek/ttypescript
 https://github.com/madou/typescript-transformer-handbook/blob/master/translations/en/transformer-handbook.md
 https://levelup.gitconnected.com/writing-a-custom-typescript-ast-transformer-731e2b0b66e6
 https://github.com/phenomnomnominal/tsquery
+https://convincedcoder.com/2019/01/19/Processing-TypeScript-using-TypeScript/
 
 Ideally the api would look something like this:
 
