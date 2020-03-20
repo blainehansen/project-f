@@ -5,10 +5,10 @@ import { InsertValue, InsertScalar, InsertArray } from './insert'
 export function content(parent: HTMLElement, value: InsertValue, current: string | Node | Node[]): string | Node | Node[] {
 	const t = typeof value
 
-	if (current === value) {
-		// nothing to do
-	}
-	else if (t === 'string')
+	if (current === value)
+		return current
+
+	if (t === 'string')
 	// if a Text node already exists, it's faster to set its .data than set the parent.textContent
 		if (current !== '' && typeof current === 'string') {
 			current = (parent.firstChild as Text).data = value as string

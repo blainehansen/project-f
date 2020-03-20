@@ -8,6 +8,8 @@
 
 // const el = createSvg('circle')
 
+// file:///home/blaine/lab/project-f/lib/dom/index.html
+
 (window as any).main = function() {
 	const div = document.createElement('div')
 	div.textContent = 'yo yo yo'
