@@ -55,3 +55,27 @@ const me = new BankAccount()
 me.deposit(1000)
 me.withdraw(50)
 me.withdraw(1000)
+
+// type SafeVersions<P, O, F extends Dict<(state: P & O, ...args: any[]) => any>> = {
+// 	[K in keyof F]: F[K] extends (state: P & O, ...args: infer A) => infer R
+// 		? (...args: A) => R
+// 		: never
+// }
+
+// export function Actor<A extends any[], P, O, F extends Dict<(P & O, ...args: any[]) => any> = {}>(
+// 	setup: (...args: A) => [P, O],
+// 	functions: F = {},
+// ): (...args: A) => O & SafeVersions<F> {
+// 	return function(...args: A) {
+// 		const [protectedState, openState] = setup(...args)
+// 		const internalState = { ...protectedState, ...openState } as P & O
+
+// 		const safeVersions = {} as SafeVersions<F>
+// 		for (const key in functions) {
+// 			const fn = functions[key]
+// 			safeVersions[key] = (...fnArgs) => fn(internalState, ...fnArgs)
+// 		}
+
+// 		return { ...openState, ...safeVersions }
+// 	}
+// }

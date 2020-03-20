@@ -1,3 +1,12 @@
+The `Rigor` stack. `thin-ql` and whatever forms of typed api contract stuff on backend, along with managed sql migrations and rust sql macros. then the front uses result oriented http with generated api definitions from backend, the router and top level management are also generated.
+
+# typescript macros
+It's official, the typescript project is too much of a past-locked mangle, it isn't worth chasing my tail to fix their idiot mistakes and try to make that ecosystem bearable. If you really want to go all the way, you can just work on carbon. But if you want to gain some recognition and independence in the meantime then it makes more sense to just go with these simpler projects. Just keep everything possible in rust and only deal with typescript in the smallest necessary ways.
+
+Just have some very specific target files that you manually ingest with `createProgram` walk/transform yourself.
+Another flavor is to simply generate templates based on some external definition, and then import/check the actual code to ensure it meets the definition. When doing things where that makes sense go that route for now.
+
+
 # reactivity
 watch
 "combine" or maybe "join", computed with manual dependency declaration, especially useful to create a tuple or object spread since that produces multiple signals all with those same precise dependencies
