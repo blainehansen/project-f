@@ -63,3 +63,4 @@ lab/macros/transformed
 .local*
 lab/_generate.from.ts
 lab/_generate.to.ts
+*.js
