@@ -1,6 +1,5 @@
 import { noop, eq, alwaysFalse, Primitive, Comparator, Fn, Handle, Registrar } from '../utils'
 
-// export type Immutable<T> = (() => T) & { readonly signal?: Signal<T> }
 export type Immutable<T> = (() => T)
 export type Mutable<T> = ((value: T) => void) & Immutable<T>
 

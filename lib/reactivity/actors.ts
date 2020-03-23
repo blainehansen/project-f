@@ -39,6 +39,39 @@ class BankAccount {
 	}
 }
 
+// const BankAccount = Actor(() => {
+// 	const [_checking, checking] = value.protect(0)
+// 	const [_savings, savings] = value.protect(0)
+
+// 	effect(() => {
+// 		console.log('== Your accounts ==')
+// 		console.log(`Checking: ${checking()}`)
+// 		console.log(`Savings: ${savings()}`)
+// 		console.log()
+// 	})
+
+// 	return [{ _checking, _savings }, { checking, savings }]
+// }, {
+// 	deposit({ _checking, _savings }, amount: number, useChecking = true) {
+// 		const account = useChecking ? _checking : _savings
+// 		const balance = account() + amount
+// 		console.log(`made deposit of ${amount} to ${useChecking ? 'checking' : 'savings'}`)
+// 		account(balance)
+// 	},
+// 	withdraw({ _checking, _savings }, amount: number, useChecking = true) {
+// 		const account = useChecking ? _checking : _savings
+// 		const current = account()
+// 		if (current >= amount) {
+// 			const balance = current - amount
+// 			console.log(`made withdrawal of ${amount} from ${useChecking ? 'checking' : 'savings'}`)
+// 			account(balance)
+// 			return
+// 		}
+
+// 		console.log(`unable to withdraw ${amount} from ${useChecking ? 'checking' : 'savings'}`)
+// 	},
+// })
+
 
 // type ActorVisitor<A extends any[], R> = (state, ...args: A) => R
 
@@ -62,6 +95,7 @@ me.withdraw(1000)
 // 		: never
 // }
 
+// we want to include readonly stuff here
 // export function Actor<A extends any[], P, O, F extends Dict<(P & O, ...args: any[]) => any> = {}>(
 // 	setup: (...args: A) => [P, O],
 // 	functions: F = {},

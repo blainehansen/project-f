@@ -12,6 +12,7 @@ watch
 "combine" or maybe "join", computed with manual dependency declaration, especially useful to create a tuple or object spread since that produces multiple signals all with those same precise dependencies
 "pipe", probably the automatic version of the above "combine"
 "drifter", a computed that you can mutate in the interim (all we've done is relax the invariant that the value is always equal to the result of that computation)
+"refresher" for computeds, it will run the underlying computation again
 
 computed with a "setter" rule, this is perhaps a simple version of actors that only mediates a single value
 
@@ -36,3 +37,11 @@ what's the potential utility of write only signals?
 thunks
 
 # framework
+
+https://developer.mozilla.org/en-US/docs/Mozilla/Firefox/Performance_best_practices_for_Firefox_fe_engineers
+https://developer.mozilla.org/en-US/docs/Web/API/Window/requestIdleCallback
+https://hacks.mozilla.org/2016/11/cooperative-scheduling-with-requestidlecallback/
+
+use a `requestAnimationFrame` eternal loop to create a new batch every frame, and maybe even slower than that (skip every other frame?).
+at the beginning of the frame function, run the old batch with `batch.run()`. then create a new batch that will intercept all signal mutations
+all the signals triggered in "tick" will not actually produce any dom operations until the frame function begins and

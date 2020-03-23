@@ -1,3 +1,55 @@
+// framework.ts
+type Dict<T> = { [key: string]: T }
+
+type Immutable<T> = () => T
+type Mutable<T> = Immutable<T> & ((value: T) => void)
+
+type Props<T> = T extends { props: Dict<any> }
+	? { [K in keyof T['props']]: Immutable<T['props'][K]> }
+	: {}
+
+type Syncs<T> = T extends { syncs: Dict<any> }
+	? { [K in keyof T['syncs']]: Mutable<T['syncs'][K]> }
+	: {}
+
+type Args<T> = Props<T> & Syncs<T>
+// this needs some conditional ? : never on the overlap of Args<C> and ReturnType<F> to ensure you aren't overwriting the props stuff
+export type Context<C, F extends (args: Args<C>) => any> = Args<C> & ReturnType<F>
+
+
+// component.rigor / component.iron
+// this render is built from the parsed template
+// we have to destructure this fully since otherwise we'd have to prepend every expression with the context
+// this shouldn't be impossible to do, since we can simply find the return statement in their Component function and the Component type and discover their keys
+// it does however mean that they can't have the return statement buried in conditionals or other complex things
+function render({ a, b, c, m }: Context<Component, typeof Component>) {
+    //
+}
+// this is generated into every file
+export default { setup: Component, render }
+
+// this is the actual source
+type Component = {
+	props: { a: number, b: string | undefined },
+	syncs: { c: boolean },
+}
+function Component({ a, b, c }: Args<Component>) {
+	const d = c()
+	c(a() > 3)
+
+	return { m: 5 }
+}
+
+
+
+
+
+
+
+
+
+
+
 // // reactivity types
 // const _reactive_brand: unique symbol = Symbol()
 // type _reactive_brand = typeof _reactive_brand
