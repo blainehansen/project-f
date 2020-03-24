@@ -1,0 +1,15 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"strict": true,
+		"declaration": false,
+		"sourceMap": false,
+		"target": "esnext",
+		"module": "system",
+		"outFile": "index.js",
+		"moduleResolution": "node",
+		"baseUrl": "."
+	},
+	"files": ["index.ts"],
+	"include": [],
+}
