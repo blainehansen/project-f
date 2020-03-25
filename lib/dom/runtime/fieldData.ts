@@ -11,29 +11,29 @@ export const enum FieldFlags {
 
 export type FieldData = [ string, string | null, FieldFlags ]
 
-const
-	// pre-seed the caches with a few special cases, so we don't need to check for them in the common cases
-	htmlFieldCache = {
-		// special props
-		style: ['style', null, FieldFlags.Assign],
-		ref: ['ref', null, FieldFlags.Ignore],
-		fn: ['fn', null, FieldFlags.Ignore],
-		// attr compat
-		class: ['className', null, FieldFlags.Property],
-		for: ['htmlFor', null, FieldFlags.Property],
-		'accept-charset': ['acceptCharset', null, FieldFlags.Property],
-		'http-equiv': ['httpEquiv', null, FieldFlags.Property],
-		// a few React oddities, mostly disagreeing about casing
-		onDoubleClick: ['ondblclick', null, FieldFlags.Property],
-		spellCheck: ['spellcheck', null, FieldFlags.Property],
-		allowFullScreen: ['allowFullscreen', null, FieldFlags.Property],
-		autoCapitalize: ['autocapitalize', null, FieldFlags.Property],
-		autoFocus: ['autofocus', null, FieldFlags.Property],
-		autoPlay: ['autoplay', null, FieldFlags.Property],
-		// other
-		// role is part of the ARIA spec but not caught by the aria- attr filter
-		role: ['role', null, FieldFlags.Attribute],
-	} as { [ field: string ]: FieldData }
+// pre-seed the caches with a few special cases, so we don't need to check for them in the common cases
+const htmlFieldCache = {
+	// special props
+	style: ['style', null, FieldFlags.Assign],
+	ref: ['ref', null, FieldFlags.Ignore],
+	fn: ['fn', null, FieldFlags.Ignore],
+	// attr compat
+	class: ['className', null, FieldFlags.Property],
+	for: ['htmlFor', null, FieldFlags.Property],
+	'accept-charset': ['acceptCharset', null, FieldFlags.Property],
+	'http-equiv': ['httpEquiv', null, FieldFlags.Property],
+	// a few React oddities, mostly disagreeing about casing
+	onDoubleClick: ['ondblclick', null, FieldFlags.Property],
+	spellCheck: ['spellcheck', null, FieldFlags.Property],
+	allowFullScreen: ['allowFullscreen', null, FieldFlags.Property],
+	autoCapitalize: ['autocapitalize', null, FieldFlags.Property],
+	autoFocus: ['autofocus', null, FieldFlags.Property],
+	autoPlay: ['autoplay', null, FieldFlags.Property],
+	// other
+	// role is part of the ARIA spec but not caught by the aria- attr filter
+	role: ['role', null, FieldFlags.Attribute],
+} as { [ field: string ]: FieldData }
+
 const svgFieldCache = {
 	// special props
 	style: ['style', null, FieldFlags.Assign],
@@ -109,8 +109,7 @@ const svgFieldCache = {
 	zoomAndPan: ['zoomAndPan', null, FieldFlags.Attribute],
 } as { [ field: string ]: FieldData }
 
-const
-	attributeOnlyRx = /-/
+const attributeOnlyRx = /-/
 const deepAttrRx = /^style-/
 const isAttrOnlyField = (field: string) => attributeOnlyRx.test(field) && !deepAttrRx.test(field)
 const propOnlyRx = /^(on|style)/
@@ -138,20 +137,19 @@ const buildAttrData = (attr: string): FieldData => {
 	return m ? [m[2], attrNamespaces[m[1]], FieldFlags.Attribute] : [attr, null, FieldFlags.Attribute]
 }
 
-export const
-	getFieldData = (field: string, svg: boolean): FieldData => {
-		const cache = svg ? svgFieldCache : htmlFieldCache
-		let cached = cache[field]
+export const getFieldData = (field: string, svg: boolean): FieldData => {
+	const cache = svg ? svgFieldCache : htmlFieldCache
+	let cached = cache[field]
 
-		if (cached) return cached
+	if (cached) return cached
 
-		const attr = svg && !isPropOnlyField(field)
-                || !svg && isAttrOnlyField(field)
-		const name = attr ? getAttrName(field) : getPropName(field)
+	const attr = svg && !isPropOnlyField(field)
+              || !svg && isAttrOnlyField(field)
+	const name = attr ? getAttrName(field) : getPropName(field)
 
-		if (name !== field && (cached = cache[name])) return cached
+	if (name !== field && (cached = cache[name])) return cached
 
-		const data = attr ? buildAttrData(name) : buildPropData(name)
+	const data = attr ? buildAttrData(name) : buildPropData(name)
 
-		return cache[field] = data
-	}
+	return cache[field] = data
+}

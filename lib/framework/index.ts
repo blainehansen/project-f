@@ -1,20 +1,38 @@
 // framework.ts
-type Dict<T> = { [key: string]: T }
+import { Dict, TupleLike } from '../utils'
+import { Immutable, Mutable } from '../reactivity'
 
-type Immutable<T> = () => T
-type Mutable<T> = Immutable<T> & ((value: T) => void)
 
-type Props<T> = T extends { props: Dict<any> }
+export type Props<T> = T extends { props: Dict<any> }
 	? { [K in keyof T['props']]: Immutable<T['props'][K]> }
 	: {}
 
-type Syncs<T> = T extends { syncs: Dict<any> }
+export type Syncs<T> = T extends { syncs: Dict<any> }
 	? { [K in keyof T['syncs']]: Mutable<T['syncs'][K]> }
 	: {}
 
-type Args<T> = Props<T> & Syncs<T>
-// this needs some conditional ? : never on the overlap of Args<C> and ReturnType<F> to ensure you aren't overwriting the props stuff
-export type Context<C, F extends (args: Args<C>) => any> = Args<C> & ReturnType<F>
+export type Events<T> = T extends { events: Dict<any> }
+	? {
+		[K in keyof T['events']]: TupleLike<T['events'][K]> extends true
+			? (...args: T['events'][K]) => void
+			: (arg: T['events'][K]) => void
+	}
+	: {}
+
+export type Slots<T> = T extends { slots: Dict<any> }
+	? {
+		[K in keyof T['slots']]: TupleLike<T['events'][K]> extends true
+			? (...args: T['events'][K]) => HTML
+			: (arg: T['events'][K]) => HTML
+	}
+	: {}
+
+// export type DomContent
+
+export type Args<T> = Props<T> & Syncs<T> & Events<T>
+export type FullArgs<T> = Args<T> & Slots<T>
+// this needs some conditional ? : never on the overlap of FullArgs<C> and ReturnType<F> to ensure you aren't overwriting the props stuff
+export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnType<F>
 
 
 // component.rigor / component.iron
@@ -23,7 +41,7 @@ export type Context<C, F extends (args: Args<C>) => any> = Args<C> & ReturnType<
 // this shouldn't be impossible to do, since we can simply find the return statement in their Component function and the Component type and discover their keys
 // it does however mean that they can't have the return statement buried in conditionals or other complex things
 function render({ a, b, c, m }: Context<Component, typeof Component>) {
-    //
+	//
 }
 // this is generated into every file
 export default { setup: Component, render }
@@ -63,62 +81,62 @@ function Component({ a, b, c }: Args<Component>) {
 // type FakeReactive<T> = FakeMutable<T> & FakeImmutable<T>
 
 
-// // component
-// type HTML = unknown
+// component
+type HTML = unknown
 
-// type Args = Dict<any>
+type Args = Dict<any>
 
-// // design the input types of components such that the caller can always lie to the callee. it can pass handles that aren't actually reactive or reactively mutable
+// design the input types of components such that the caller can always lie to the callee. it can pass handles that aren't actually reactive or reactively mutable
 
-// // this can or can not be reactive
-// type Prop<T> = () => T
-// type Props = Dict<Prop<any>>
-// type MakeProps<D extends Dict<any>> = { [K in keyof D]: Prop<D[K]> }
+// this can or can not be reactive
+type Prop<T> = () => T
+type Props = Dict<Prop<any>>
+type MakeProps<D extends Dict<any>> = { [K in keyof D]: Prop<D[K]> }
 
-// // same here, the caller can lie
-// type Sync<T> = ((value: T) => void) & (() => T)
-// type Syncs = Dict<Sync<any>>
-// type MakeSyncs<D extends Dict<any>> = { [K in keyof D]: Sync<D[K]> }
+// same here, the caller can lie
+type Sync<T> = ((value: T) => void) & (() => T)
+type Syncs = Dict<Sync<any>>
+type MakeSyncs<D extends Dict<any>> = { [K in keyof D]: Sync<D[K]> }
 
-// type Slot<I extends Dict<any>> = (input: I) => HTML
-// type Slots = Dict<Slot<Dict<any>>>
-// type MakeSlots<D extends Dict<Dict<any>>> = { [K in keyof D]: Slot<D[K]> }
+type Slot<I extends Dict<any>> = (input: I) => HTML
+type Slots = Dict<Slot<Dict<any>>>
+type MakeSlots<D extends Dict<Dict<any>>> = { [K in keyof D]: Slot<D[K]> }
 
-// type Ev<I extends any[]> = (...args: I) => void
-// type Evs = Dict<Ev<any[]>>
-// type MakeEvs<D extends Dict<any[]>> = { [K in keyof D]: Ev<D[K]> }
+type Ev<I extends any[]> = (...args: I) => void
+type Evs = Dict<Ev<any[]>>
+type MakeEvs<D extends Dict<any[]>> = { [K in keyof D]: Ev<D[K]> }
 
-// // it would make a lot of sense to have some sort of EventProxy type that lets you list component types and a list of events that you'll just pass along
+// it would make a lot of sense to have some sort of EventProxy type that lets you list component types and a list of events that you'll just pass along
 
-// type Component<A extends Args = {}, P extends Props = {}, Y extends Syncs = {}, S extends Slots = {}, E extends Evs = {}> =
-// 	(i: A & P, Y: Y, S: S, E: E) => HTML
+type Component<A extends Args = {}, P extends Props = {}, Y extends Syncs = {}, S extends Slots = {}, E extends Evs = {}> =
+	(i: A & P, Y: Y, S: S, E: E) => HTML
 
-// class ComponentBuilder<A extends Args, P extends Props, Y extends Syncs, S extends Slots, E extends Evs> {
-// 	protected constructor() {}
+class ComponentBuilder<A extends Args, P extends Props, Y extends Syncs, S extends Slots, E extends Evs> {
+	protected constructor() {}
 
-// 	static build() {
-// 		return new ComponentBuilder<{}, {}, {}, {}, {}>()
-// 	}
-// 	args<NA extends Dict<any> = {}>() {
-// 		return this as unknown as ComponentBuilder<NA, P, Y, S, E>
-// 	}
-// 	props<NP extends Dict<any> = {}>() {
-// 		return this as unknown as ComponentBuilder<A, MakeProps<NP>, Y, S, E>
-// 	}
-// 	syncs<NY extends Dict<any> = {}>() {
-// 		return this as unknown as ComponentBuilder<A, P, MakeSyncs<NY>, S, E>
-// 	}
-// 	slots<NS extends Dict<Dict<any>> = {}>() {
-// 		return this as unknown as ComponentBuilder<A, P, Y, MakeSlots<NS>, E>
-// 	}
-// 	events<NE extends Dict<any[]> = {}>() {
-// 		return this as unknown as ComponentBuilder<A, P, Y, S, MakeEvs<NE>>
-// 	}
+	static build() {
+		return new ComponentBuilder<{}, {}, {}, {}, {}>()
+	}
+	args<NA extends Dict<any> = {}>() {
+		return this as unknown as ComponentBuilder<NA, P, Y, S, E>
+	}
+	props<NP extends Dict<any> = {}>() {
+		return this as unknown as ComponentBuilder<A, MakeProps<NP>, Y, S, E>
+	}
+	syncs<NY extends Dict<any> = {}>() {
+		return this as unknown as ComponentBuilder<A, P, MakeSyncs<NY>, S, E>
+	}
+	slots<NS extends Dict<Dict<any>> = {}>() {
+		return this as unknown as ComponentBuilder<A, P, Y, MakeSlots<NS>, E>
+	}
+	events<NE extends Dict<any[]> = {}>() {
+		return this as unknown as ComponentBuilder<A, P, Y, S, MakeEvs<NE>>
+	}
 
-// 	finish<T>(setup: (i: A & P & Y & S & E) => T): Component<A, P, Y, S, E> {
-// 		throw new Error()
-// 	}
-// }
+	finish<T>(setup: (i: A & P & Y & S & E) => T): Component<A, P, Y, S, E> {
+		throw new Error()
+	}
+}
 
 
 // // there are two types of events:

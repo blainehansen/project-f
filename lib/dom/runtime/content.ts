@@ -67,7 +67,6 @@ export function content(parent: HTMLElement, value: InsertValue, current: string
 		else
 			reconcileArrays(parent, [parent.firstChild!], array)
 
-
 		current = array as Node[]
 	}
 	else
@@ -397,7 +396,6 @@ function longestPositiveIncreasingSubsequence(ns: number[]) {
 
 	for (i = is[l]; l >= 0; i = pre[i], l--)
 		seq[l] = i
-
 
 	return seq
 }

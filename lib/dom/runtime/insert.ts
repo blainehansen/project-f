@@ -31,16 +31,22 @@ export function insert(range: Range, value: InsertValue) {
 	//}
 
 	if (t === 'string' || t === 'number') {
-		value = value!.toString()
+		const newText = value!.toString()
+		// value = value!.toString()
 		if (test.nodeType === TEXT_NODE) {
-			(<Text>test).data = value
+			// (<Text>test).data = value
+			(<Text>test).data = newText
 			good = test
 		}
 		else {
-			value = document.createTextNode(value)
-			parent.replaceChild(value, test)
-			if (range.end === test) range.end = value
-			range.start = good = value
+			// value = document.createTextNode(value)
+			const newNode = document.createTextNode(newText)
+			// parent.replaceChild(value, test)
+			parent.replaceChild(newNode, test)
+			// if (range.end === test) range.end = value
+			if (range.end === test) range.end = newNode
+			// range.start = good = value
+			range.start = good = newNode
 		}
 	}
 	else if (value instanceof Node) {

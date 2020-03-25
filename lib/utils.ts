@@ -12,3 +12,7 @@ export const eq = <T>(left: T, right: T) => left === right
 export type Fn = () => unknown
 export type Handle = () => void
 export type Registrar = (fn: Fn) => void
+
+export type Equivalent<T, U> = T extends U ? U extends T ? true : false : false
+export type Negate<B extends boolean> = B extends true ? false : true
+export type TupleLike<T> = T extends any[] ? Negate<Equivalent<T, any[]>> : false
