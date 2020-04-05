@@ -8,7 +8,7 @@
 
 // const el = createSvg('circle')
 
-// file:///home/blaine/lab/project-f/lib/dom/index.html
+// file:///home/blaine/lab/project-f/lib/dom/main.html
 
 (window as any).main = function() {
 	const div = document.createElement('div')
