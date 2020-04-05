@@ -70,7 +70,7 @@ function render({
 
 export default function(args: FullArgs<Component>) {
 	const setupData = setup(args as Args<Component>)
-	render({ ...args, ...setupData })
+	return render({ ...args, ...setupData })
 }
 
 type Component = {
@@ -81,7 +81,7 @@ type Component = {
 }
 
 function setup({ todo, celebrateCompletion }: Args<Component>) {
-	const { description, completed } = object(todo)
+	const { description, completed } = spreadOdbject(todo)
 	const stateClass = computed((): string => completed() ? 'text-strike' : '')
 
 	const editing = value(false)
