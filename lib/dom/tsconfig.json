@@ -4,12 +4,12 @@
 		"strict": true,
 		"declaration": false,
 		"sourceMap": false,
-		"target": "esnext",
+		"target": "es5",
 		"module": "system",
 		"outFile": "main.js",
 		"moduleResolution": "node",
 		"baseUrl": "."
 	},
 	"files": ["main.ts"],
-	"include": [],
+	"include": []
 }

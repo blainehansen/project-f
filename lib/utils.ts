@@ -1,5 +1,4 @@
 export type Dict<T> = { [key: string]: T }
-export type NonEmpty<T> = [T, ...T[]]
 export type Primitive = string | number | boolean | null | undefined
 export type OnlyAllow<A, E> = A extends E ? A : never
 export type Comparator<T> = (left: T, right: T) => boolean
@@ -16,3 +15,8 @@ export type Registrar = (fn: Fn) => void
 export type Equivalent<T, U> = T extends U ? U extends T ? true : false : false
 export type Negate<B extends boolean> = B extends true ? false : true
 export type TupleLike<T> = T extends any[] ? Negate<Equivalent<T, any[]>> : false
+
+export type NonEmpty<T> = [T, ...T[]]
+export type NonLone<T> = [T, T, ...T[]]
+
+export type NonRedundant<T> = null | undefined | T | NonLone<T>
