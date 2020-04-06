@@ -12,9 +12,8 @@ import { NonEmpty, NonLone, NonRedundant } from '../utils'
 // 	| { type: ContentStateType.many, nodes: NonLone<Node> }
 
 export type ContentState = undefined | Text | Element | NonLone<Node>
+// export type ContentState = { parent: HTMLElement } & ({ type: , undefined | Text | Element | NonLone<Node> })
 
-
-// // simply displayed
 // // numbers and booleans are notably absent, since displaying them is probably a mistake
 // // pipe them through a simple string transformer first
 // export type BaseDisplayable = string | Node
@@ -92,6 +91,68 @@ export function reconcileContent(
 	clearContent(parent)
 	return appendAll(parent, values)
 }
+
+
+// export type Range = { parent: HTMLElement } & (
+// 	| { type: 'empty', position: Comment }
+// 	| { type: 'single', node: Text | Element }
+// 	| { type: 'many', items: NonLone<Node>, end: Comment }
+// )
+
+// // export type Range = { parent: Node, start: Node, end: Node }
+// export function replaceRange(
+// 	range: Range,
+// 	value: Displayable,
+// ): Range {
+// 	//
+// }
+
+// let's pretend that we always have comment fences marking the range
+function replaceRange(
+	parent: HTMLElement,
+	begin: Comment, end: Comment,
+	value: Displayable,
+) {
+	// INVARIANT: since we expect the parent to certainly have at least `begin` and `end`,
+	// the nextSibling is either some real node or `end`
+	const firstNode = begin.nextSibling
+
+	let currentNode = exec((): Node => {
+		if (value === undefined || value === null || value === '')
+			return begin
+
+		if (typeof value === 'string') {
+			// check if the existing range already has one
+			if (firstNode instanceof Text) {
+				firstChild.data = value
+				return firstNode
+			}
+
+			const newText = document.createTextNode(value)
+			// you either have to replace the firstNode with this one
+			// or you have to append it if that firstNode doesn't exist
+			return
+		}
+
+		if (value instanceof Element) {
+			// same here, we either replace or append
+			throw
+			return value
+		}
+
+		// value: NonLone<Node>
+		// when inserting all of these, it might be nice to use appendAll and just grab the last node
+		// it returns, and use its nextSibling as the deletionCursor
+	})
+
+	// not unsafe, merely instructing typescript that this assignment expression
+	// will never actually cause currentNode to have a useable invalid value
+	while ((currentNode = currentNode.nextSibling!) && currentNode !== end)
+		parent.removeChild(currentNode)
+
+	return [begin, end]
+}
+
 
 export function appendAll(parent: HTMLElement, values: NonLone<string | Node>): NonLone<Node> {
 	const fragment = new DocumentFragment()
