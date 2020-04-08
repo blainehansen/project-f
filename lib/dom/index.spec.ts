@@ -195,14 +195,17 @@ describe('replaceRange', () => {
 	for (const [displayable, html] of cases)
 		for (const range of ranges)
 			it(`replacing ${displayRange(range)} with ${html}`, () => {
+				body.appendChild(makeText('begin'))
 				switch (range.type) {
 				case RangeType.empty: body.appendChild(range.placeholder); break
 				case RangeType.single: body.appendChild(range.node); break
 				case RangeType.many: appendAll(body, range.nodes); break
 				}
+				body.appendChild(makeText('end'))
 
 				replaceRange(body, range, displayable)
-				expect(body.innerHTML).equal(html === '' ? '<!---->' : html)
+				const baseHtml = html === '' ? '<!---->' : html
+				expect(body.innerHTML).equal(`begin${baseHtml}end`)
 			})
 })
 

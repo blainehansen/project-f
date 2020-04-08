@@ -108,13 +108,13 @@ export function replaceContent(
 export function reconcileArrays(
 	parent: HTMLElement,
 	existing: NonEmpty<Node>,
-	values: NonLone<string | Node>,
+	values: NonLone<Node>,
 ) {
 	const begin = existing[0]
 	const end = existing[existing.length - 1]
 	removeAllAfter(begin, end)
-	parent.removeChild(begin)
-	return appendAll(parent, values)
+	parent.replaceChild(makeDocumentFragment(values), begin)
+	return values
 }
 
 
