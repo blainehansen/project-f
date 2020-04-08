@@ -76,86 +76,145 @@ export function replaceContent(
 	if (current === undefined)
 		return appendAll(parent, value)
 
-	if (Array.isArray(current))
-		return reconcileContent(parent, current, value)
-
-	return reconcileContent(parent, [current], value)
+	return reconcileArrays(parent, Array.isArray(current) ? current : [current], value)
 }
 
 // TODO this is a dumb version for now
-export function reconcileContent(
+export function reconcileArrays(
 	parent: HTMLElement,
-	current: NonEmpty<Node>,
+	existing: NonEmpty<Node>,
 	values: NonLone<string | Node>,
 ) {
-	clearContent(parent)
+	const begin = existing[0]
+	const end = existing[existing.length - 1]
+	removeAllAfter(parent, begin, end)
+	parent.removeChild(begin)
 	return appendAll(parent, values)
 }
 
 
-// export type Range = { parent: HTMLElement } & (
-// 	| { type: 'empty', position: Comment }
-// 	| { type: 'single', node: Text | Element }
-// 	| { type: 'many', items: NonLone<Node>, end: Comment }
-// )
+export const enum RangeType { empty, single, many }
+export type Range =
+	| { type: RangeType.empty, placeholder: Comment }
+	| { type: RangeType.single, node: Text | Element }
+	| { type: RangeType.many, nodes: NonLone<Node> }
 
-// // export type Range = { parent: Node, start: Node, end: Node }
-// export function replaceRange(
-// 	range: Range,
-// 	value: Displayable,
-// ): Range {
-// 	//
-// }
-
-// let's pretend that we always have comment fences marking the range
-function replaceRange(
+export function replaceRange(
 	parent: HTMLElement,
-	begin: Comment, end: Comment,
+	existing: Range,
 	value: Displayable,
-) {
-	// INVARIANT: since we expect the parent to certainly have at least `begin` and `end`,
-	// the nextSibling is either some real node or `end`
-	const firstNode = begin.nextSibling
+): Range {
+	switch (existing.type) {
+	case RangeType.empty: {
+		if (value === null || value === undefined || value === '')
+			// do nothing
+			return existing
 
-	let currentNode = exec((): Node => {
-		if (value === undefined || value === null || value === '')
-			return begin
+		if (Array.isArray(value)) {
+			const fragment = document.createDocumentFragment()
+			for (const item of value)
+				fragment.appendChild(item)
+
+			parent.replaceChild(fragment, existing.placeholder)
+			return { type: RangeType.many, nodes: value }
+		}
+
+		const newNode = typeof value === 'string' ? document.createTextNode(value) : value
+		parent.replaceChild(newNode, existing.placeholder)
+		return { type: RangeType.single, node: newNode }
+	}
+
+	case RangeType.single: {
+		if (value === null || value === undefined || value === '') {
+			// replace with nothing
+			const placeholder = new Comment()
+			parent.replaceChild(placeholder, existing.node)
+			return { type: RangeType.empty, placeholder }
+		}
+		if (value === existing.node)
+			return existing
 
 		if (typeof value === 'string') {
-			// check if the existing range already has one
-			if (firstNode instanceof Text) {
-				firstChild.data = value
-				return firstNode
+			if (existing.node instanceof Text) {
+				existing.node.data = value
+				return existing
 			}
 
-			const newText = document.createTextNode(value)
-			// you either have to replace the firstNode with this one
-			// or you have to append it if that firstNode doesn't exist
-			return
+			const newNode = document.createTextNode(value)
+			parent.replaceChild(newNode, existing.node)
+			existing.node = newNode
+			return existing
 		}
 
-		if (value instanceof Element) {
-			// same here, we either replace or append
-			throw
-			return value
+		if (Array.isArray(value)) {
+			parent.replaceChild(makeDocumentFragment(value), existing.node)
+			return { type: RangeType.many, nodes: value }
 		}
 
-		// value: NonLone<Node>
-		// when inserting all of these, it might be nice to use appendAll and just grab the last node
-		// it returns, and use its nextSibling as the deletionCursor
-	})
+		parent.replaceChild(value, existing.node)
+		existing.node = value
+		return existing
+	}
 
-	// not unsafe, merely instructing typescript that this assignment expression
-	// will never actually cause currentNode to have a useable invalid value
-	while ((currentNode = currentNode.nextSibling!) && currentNode !== end)
-		parent.removeChild(currentNode)
+	case RangeType.many:
+		const { nodes } = existing
+		const start = nodes[0]
+		const end = nodes[nodes.length - 1]
 
-	return [begin, end]
+		if (value === null || value === undefined || value === '') {
+			const placeholder = new Comment()
+			parent.replaceChild(placeholder, start)
+			removeAllAfter(parent, placeholder, end)
+			return { type: RangeType.empty, placeholder }
+		}
+
+		if (Array.isArray(value)) {
+			const nodes = reconcileArrays(parent, existing.nodes, value)
+			return { type: RangeType.many, nodes }
+		}
+
+		const newNode = typeof value === 'string' ? document.createTextNode(value) : value
+		// parent.insertBefore(newNode, start)
+		parent.replaceChild(newNode, start)
+		removeAllAfter(parent, newNode, end)
+		// const range = document.createRange()
+		// // range.setStartBefore(start)
+		// range.setStartAfter(newNode)
+		// range.setEndAfter(end)
+		// range.deleteContents()
+		return { type: RangeType.single, node: newNode }
+	}
+}
+
+export function removeAllAfter(
+	parent: HTMLElement,
+	start: Node,
+	end: Node,
+) {
+	const range = document.createRange()
+	range.setStartAfter(start)
+	range.setEndAfter(end)
+	range.deleteContents()
+
+	// let currentNode = start.nextSibling
+	// while (currentNode !== null) {
+	// 	const nextNode = currentNode.nextSibling
+	// 	parent.removeChild(currentNode)
+	// 	if (currentNode === end) break
+	// 	currentNode = nextNode
+	// }
 }
 
 
+export function makeDocumentFragment(nodes: NonLone<Node>) {
+	const fragment = document.createDocumentFragment()
+	for (const node of nodes)
+		fragment.appendChild(node)
+	return fragment
+}
+
 export function appendAll(parent: HTMLElement, values: NonLone<string | Node>): NonLone<Node> {
-	const fragment = new DocumentFragment()
+	const fragment = document.createDocumentFragment()
 	// UNSAFE: loop must add at least two elements
 	const nodes = [] as unknown as NonLone<Node>
 	for (const value of values) {

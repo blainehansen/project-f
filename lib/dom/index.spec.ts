@@ -2,7 +2,7 @@ import 'mocha'
 import { expect } from 'chai'
 import { boilString } from '../utils.spec'
 
-import { ContentState, Displayable, replaceContent, appendAll, clearContent } from './index'
+import { ContentState, Displayable, replaceContent, Range, RangeType, replaceRange, appendAll, clearContent } from './index'
 
 beforeEach(() => {
 	document.body.textContent = ''
@@ -30,6 +30,18 @@ function setupState(state: ContentState) {
 	for (const item of toArray(state))
 		body.appendChild(item)
 }
+
+const cases: [Displayable, string][] = [
+	[null, ''],
+	[undefined, ''],
+	['', ''],
+	['yoyo', 'yoyo'],
+	[makeDiv(), divText()],
+	[makeDiv('stuff'), divText('stuff')],
+	[[makeDiv(), makeDiv()], `${divText()}${divText()}`],
+	[[makeDiv('something'), makeDiv(), makeDiv()], `${divText('something')}${divText()}${divText()}`],
+	[[makeDiv('something'), makeDiv(), makeText('a'), makeText('b'), makeDiv()], `${divText('something')}${divText()}ab${divText()}`],
+]
 
 
 describe('replaceContent', () => {
@@ -93,18 +105,6 @@ describe('replaceContent', () => {
 		})
 
 
-	const cases: [Displayable, string][] = [
-		[null, ''],
-		[undefined, ''],
-		['', ''],
-		['yoyo', 'yoyo'],
-		[makeDiv(), divText()],
-		[makeDiv('stuff'), divText('stuff')],
-		[[makeDiv(), makeDiv()], `${divText()}${divText()}`],
-		[[makeDiv('something'), makeDiv(), makeDiv()], `${divText('something')}${divText()}${divText()}`],
-		[[makeDiv('something'), makeDiv(), makeText('a'), makeText('b'), makeDiv()], `${divText('something')}${divText()}ab${divText()}`],
-	]
-
 	function displayState(state: ContentState): string {
 		if (state === undefined) return 'empty'
 		if (state instanceof Text) return `text ${state.data}`
@@ -121,6 +121,94 @@ describe('replaceContent', () => {
 				expect(body.innerHTML).equal(html)
 			})
 })
+
+describe('replaceRange', () => {
+	it('replacing empty with nothing', () => {
+		const placeholder = new Comment()
+		body.appendChild(placeholder)
+
+		replaceRange(body, { type: RangeType.empty, placeholder }, undefined)
+		expect(body.innerHTML).equal('<!---->')
+		expect(body.childNodes.length).equal(1)
+		expect(body.firstChild).equal(placeholder)
+	})
+
+	it('replacing empty with single', () => {
+		const placeholder = new Comment()
+		body.appendChild(placeholder)
+
+		replaceRange(body, { type: RangeType.empty, placeholder }, 'yoyo')
+		expect(body.innerHTML).equal('yoyo')
+		expect(body.childNodes.length).equal(1)
+	})
+
+	it('replacing empty with multiple', () => {
+		const placeholder = new Comment()
+		body.appendChild(placeholder)
+
+		replaceRange(body, { type: RangeType.empty, placeholder }, [makeDiv('stuff'), makeText('dudes')])
+		expect(body.innerHTML).equal(`${divText('stuff')}dudes`)
+		expect(body.childNodes.length).equal(2)
+	})
+
+	it('replacing text with text', () => {
+		const node = makeText('wassup')
+		body.appendChild(node)
+
+		replaceRange(body, { type: RangeType.single, node }, 'wassup dudes')
+		expect(body.innerHTML).equal('wassup dudes')
+		expect(body.firstChild).equal(node)
+		expect(node.data).equal('wassup dudes')
+	})
+
+	it('replacing single with itself', () => {
+		const d = makeDiv('stuff')
+		body.appendChild(d)
+
+		const r = d
+		replaceRange(body, { type: RangeType.single, node: d }, r)
+		expect(body.innerHTML).equal(divText('stuff'))
+		expect(body.firstChild).equal(d)
+	})
+
+	const ranges: Range[] = [
+		{ type: RangeType.empty, placeholder: new Comment() },
+		{ type: RangeType.single, node: makeText('') },
+		{ type: RangeType.single, node: makeText('some text') },
+		{ type: RangeType.single, node: makeDiv() },
+		{ type: RangeType.single, node: makeDiv('') },
+		{ type: RangeType.single, node: makeDiv('single node div') },
+		{ type: RangeType.many, nodes: [makeText(''), makeText('other')] },
+		{ type: RangeType.many, nodes: [makeText(''), makeDiv(), makeText('other')] },
+		{ type: RangeType.many, nodes: [makeText('dudes'), makeDiv('something'), makeText('other')] },
+	]
+
+	function displayRange(range: Range) {
+		const d = (n: Text | Element) => n instanceof Text ? n.data : n.outerHTML
+		switch (range.type) {
+		case RangeType.empty: return 'empty'
+		case RangeType.single: return `single ${d(range.node as Element)}`
+		case RangeType.many: return `array ${range.nodes.map(n => d(n as Element)).join('')}`
+		}
+	}
+
+	for (const [displayable, html] of cases)
+		for (const range of ranges)
+			it(`replacing ${displayRange(range)} with ${html}`, () => {
+				switch (range.type) {
+				case RangeType.empty: body.appendChild(range.placeholder); break
+				case RangeType.single: body.appendChild(range.node); break
+				case RangeType.many: appendAll(body, range.nodes); break
+				}
+
+				replaceRange(body, range, displayable)
+				expect(body.innerHTML).equal(html === '' ? '<!---->' : html)
+			})
+})
+
+// describe('reconcileContent', () => {
+// 	//
+// })
 
 describe('appendAll', () => {
 	it('all text nodes', () => {

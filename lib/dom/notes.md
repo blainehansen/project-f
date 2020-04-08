@@ -2,6 +2,8 @@ https://dev.to/grandemayta/javascript-dom-manipulation-to-improve-performance-45
 https://developer.mozilla.org/en-US/docs/Web/API/Document/createDocumentFragment
 https://javascript.info/basic-dom-node-properties
 
+https://stackoverflow.com/questions/14048432/create-reusable-document-fragment-from-the-dom
+
 
 ```ts
 parentNode.replaceChild(newChild, oldChild)
