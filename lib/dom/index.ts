@@ -1,5 +1,30 @@
 import { NonEmpty, NonLone, NonRedundant } from '../utils'
 
+// the most general case is to have a parent, some begin and some end
+// we need to be able to
+// - quickly delete sequences (we can use range deleteContents for this)
+// - quickly add many elements to the sequence (we can use DocumentFragment for this)
+// - the next step is quick reconciliation, which is quite complicated
+
+// the begin and end might be the same, in which case we can replaceChild/removeChild
+// there might not be a begin or end or both, which means we act on the parent through appends rather than replaces
+
+
+// cases for begin/end (therefore implied "from many"):
+// # distinct
+// - set to empty: parent.replaceChild(Comment, begin); range.deleteContents(Comment, end)
+// - set to single: parent.replaceChild(node, begin); range.deleteContents(node, end)
+// - set to many: complex array reconciliation
+
+// # null begin or end, simply default their usage above with parent.firstChild and parent.lastChild
+
+// # both null (dealing with entire parent contents)
+// - set to empty: textContent = ''
+// - set to single: parent.appendChild(node)
+// - set to many: complex array reconciliation
+
+
+
 // export const enum ContentStateType { text, single, many }
 // export type ContentState =
 // 	// no content, perform textContent or just appendChild
@@ -87,7 +112,7 @@ export function reconcileArrays(
 ) {
 	const begin = existing[0]
 	const end = existing[existing.length - 1]
-	removeAllAfter(parent, begin, end)
+	removeAllAfter(begin, end)
 	parent.removeChild(begin)
 	return appendAll(parent, values)
 }
@@ -164,7 +189,7 @@ export function replaceRange(
 		if (value === null || value === undefined || value === '') {
 			const placeholder = new Comment()
 			parent.replaceChild(placeholder, start)
-			removeAllAfter(parent, placeholder, end)
+			removeAllAfter(placeholder, end)
 			return { type: RangeType.empty, placeholder }
 		}
 
@@ -174,35 +199,17 @@ export function replaceRange(
 		}
 
 		const newNode = typeof value === 'string' ? document.createTextNode(value) : value
-		// parent.insertBefore(newNode, start)
 		parent.replaceChild(newNode, start)
-		removeAllAfter(parent, newNode, end)
-		// const range = document.createRange()
-		// // range.setStartBefore(start)
-		// range.setStartAfter(newNode)
-		// range.setEndAfter(end)
-		// range.deleteContents()
+		removeAllAfter(newNode, end)
 		return { type: RangeType.single, node: newNode }
 	}
 }
 
-export function removeAllAfter(
-	parent: HTMLElement,
-	start: Node,
-	end: Node,
-) {
+export function removeAllAfter(start: Node, end: Node) {
 	const range = document.createRange()
 	range.setStartAfter(start)
 	range.setEndAfter(end)
 	range.deleteContents()
-
-	// let currentNode = start.nextSibling
-	// while (currentNode !== null) {
-	// 	const nextNode = currentNode.nextSibling
-	// 	parent.removeChild(currentNode)
-	// 	if (currentNode === end) break
-	// 	currentNode = nextNode
-	// }
 }
 
 
