@@ -10,7 +10,7 @@
     "macros:dev": "ts-node lab/macros/index.ts",
 
     "test": "mocha -r ts-node/register lib/**/*.spec.ts",
-    "test:dev": "mocha -r ts-node/register lib/compiler/grammar.spec.ts",
+    "test:dev": "mocha -r ts-node/register lib/reactivity/**/*.spec.ts",
     "test:dom": "mocha -r jsdom-global/register -r ts-node/register lib/dom/**/*.spec.ts",
 
     "build": "npm run clean && tsc -p tsconfig.build.json",

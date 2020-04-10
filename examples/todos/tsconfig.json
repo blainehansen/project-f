@@ -6,10 +6,10 @@
 		"sourceMap": false,
 		"target": "esnext",
 		"module": "system",
-		"outFile": "index.js",
+		"outFile": "main.js",
 		"moduleResolution": "node",
 		"baseUrl": "."
 	},
-	"files": ["index.ts"],
+	"files": ["main.ts"],
 	"include": [],
 }

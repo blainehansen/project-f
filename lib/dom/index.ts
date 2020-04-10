@@ -1,4 +1,4 @@
-import { NonEmpty, NonLone, NonRedundant } from '../utils'
+import { Panic, NonEmpty, NonLone, NonRedundant } from '../utils'
 
 // the most general case is to have a parent, some begin and some end
 // we need to be able to
@@ -106,7 +106,7 @@ export function replaceContent(
 
 // TODO this is a dumb version for now
 export function reconcileArrays(
-	parent: HTMLElement,
+	parent: Node,
 	existing: NonEmpty<Node>,
 	values: NonLone<Node>,
 ) {
@@ -125,21 +125,21 @@ export type Range =
 	| { type: RangeType.many, nodes: NonLone<Node> }
 
 export function replaceRange(
-	parent: HTMLElement,
 	existing: Range,
 	value: Displayable,
 ): Range {
 	switch (existing.type) {
 	case RangeType.empty: {
+		const parent = existing.placeholder.parentNode
+		if (parent === null)
+			throw new Panic("unattached node")
+
 		if (value === null || value === undefined || value === '')
 			// do nothing
 			return existing
 
 		if (Array.isArray(value)) {
-			const fragment = document.createDocumentFragment()
-			for (const item of value)
-				fragment.appendChild(item)
-
+			const fragment = makeDocumentFragment(value)
 			parent.replaceChild(fragment, existing.placeholder)
 			return { type: RangeType.many, nodes: value }
 		}
@@ -150,6 +150,10 @@ export function replaceRange(
 	}
 
 	case RangeType.single: {
+		const parent = existing.node.parentNode
+		if (parent === null)
+			throw new Panic("unattached node")
+
 		if (value === null || value === undefined || value === '') {
 			// replace with nothing
 			const placeholder = new Comment()
@@ -185,6 +189,10 @@ export function replaceRange(
 		const { nodes } = existing
 		const start = nodes[0]
 		const end = nodes[nodes.length - 1]
+
+		const parent = start.parentNode
+		if (parent === null)
+			throw new Panic("unattached node")
 
 		if (value === null || value === undefined || value === '') {
 			const placeholder = new Comment()

@@ -1,3 +1,41 @@
+// (function () {
+// 	var __, __insert1, __button2
+// 	__ = Surplus.createElement("div", "Todo", null)
+// 	__insert1 = Surplus.createTextNode('', __)
+// 	__button2 = Surplus.createElement("button", null, __)
+// 	__button2.onclick = addTodo
+// 	__button2.textContent = "click me"
+
+// 	Surplus.S.effect(function (__range) {
+// 		return Surplus.insert(__range, editing()
+// 			? (function () {
+// 				var __
+// 				__ = Surplus.createElement("input", null, null)
+// 				Surplus.S.effect(function () {
+// 					__.type = "text"
+// 					__.value = description()
+// 				})
+// 				return __
+// 			})()
+
+// 			: (function () {
+// 				var __
+// 				__ = Surplus.createElement("div", null, null)
+// 				Surplus.S.effect(function (__current) { return Surplus.content(__, description(), __current) }, '')
+// 				Surplus.S.effect(function () { __.className = stateClass() })
+// 				return __
+// 			})()
+// 		)
+// 	}, { start: __insert1, end: __insert1 })
+
+// 	return __
+// })()
+
+
+
+
+
+
 // so we've decided on a few things:
 // "syncs" use the :prefix syntax to indicate. the expression is expected to be a Mutable,
 // and if they don't use a single token we assume they're calling the "setter" function with an Immutable with some setter function
@@ -20,8 +58,8 @@ function render({
 	const component = document.createElement('div')
 	component.className = "Todo"
 
-	const insertionPoint = document.createTextNode('')
-	component.appendChild(insertionPoint)
+	const placeholder = new Comment()
+	component.appendChild(placeholder)
 
 	statefulEffect(range => {
 		const content = editing()
@@ -51,8 +89,8 @@ function render({
 				return div
 			})
 
-		return domInsert(range, content)
-	}, { start: insertionPoint, end: insertionPoint })
+		return replaceRange(range, content)
+	}, { type: RangeType.empty, placeholder })
 
 	const checkboxInput = document.createElement('input')
 	checkboxInput.type = "checkbox"
@@ -77,11 +115,11 @@ type Component = {
 	props: { descriptionColor: string },
 	syncs: { todo: Todo },
 	events: { archive: [], celebrateCompletion: string },
-	slots: {  },
+	// slots: {},
 }
 
 function setup({ todo, celebrateCompletion }: Args<Component>) {
-	const { description, completed } = spreadOdbject(todo)
+	const { description, completed } = splitObject(todo)
 	const stateClass = computed((): string => completed() ? 'text-strike' : '')
 
 	const editing = value(false)

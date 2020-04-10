@@ -20,3 +20,5 @@ export type NonEmpty<T> = [T, ...T[]]
 export type NonLone<T> = [T, T, ...T[]]
 
 export type NonRedundant<T> = null | undefined | T | NonLone<T>
+
+export class Panic extends Error {}

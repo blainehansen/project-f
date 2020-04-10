@@ -127,7 +127,7 @@ describe('replaceRange', () => {
 		const placeholder = new Comment()
 		body.appendChild(placeholder)
 
-		replaceRange(body, { type: RangeType.empty, placeholder }, undefined)
+		replaceRange({ type: RangeType.empty, placeholder }, undefined)
 		expect(body.innerHTML).equal('<!---->')
 		expect(body.childNodes.length).equal(1)
 		expect(body.firstChild).equal(placeholder)
@@ -137,7 +137,7 @@ describe('replaceRange', () => {
 		const placeholder = new Comment()
 		body.appendChild(placeholder)
 
-		replaceRange(body, { type: RangeType.empty, placeholder }, 'yoyo')
+		replaceRange({ type: RangeType.empty, placeholder }, 'yoyo')
 		expect(body.innerHTML).equal('yoyo')
 		expect(body.childNodes.length).equal(1)
 	})
@@ -146,7 +146,7 @@ describe('replaceRange', () => {
 		const placeholder = new Comment()
 		body.appendChild(placeholder)
 
-		replaceRange(body, { type: RangeType.empty, placeholder }, [makeDiv('stuff'), makeText('dudes')])
+		replaceRange({ type: RangeType.empty, placeholder }, [makeDiv('stuff'), makeText('dudes')])
 		expect(body.innerHTML).equal(`${divText('stuff')}dudes`)
 		expect(body.childNodes.length).equal(2)
 	})
@@ -155,7 +155,7 @@ describe('replaceRange', () => {
 		const node = makeText('wassup')
 		body.appendChild(node)
 
-		replaceRange(body, { type: RangeType.single, node }, 'wassup dudes')
+		replaceRange({ type: RangeType.single, node }, 'wassup dudes')
 		expect(body.innerHTML).equal('wassup dudes')
 		expect(body.firstChild).equal(node)
 		expect(node.data).equal('wassup dudes')
@@ -166,7 +166,7 @@ describe('replaceRange', () => {
 		body.appendChild(d)
 
 		const r = d
-		replaceRange(body, { type: RangeType.single, node: d }, r)
+		replaceRange({ type: RangeType.single, node: d }, r)
 		expect(body.innerHTML).equal(divText('stuff'))
 		expect(body.firstChild).equal(d)
 	})
@@ -203,7 +203,7 @@ describe('replaceRange', () => {
 				}
 				body.appendChild(makeText('end'))
 
-				replaceRange(body, range, displayable)
+				replaceRange(range, displayable)
 				const baseHtml = html === '' ? '<!---->' : html
 				expect(body.innerHTML).equal(`begin${baseHtml}end`)
 			})

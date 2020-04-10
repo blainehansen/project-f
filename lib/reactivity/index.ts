@@ -105,16 +105,17 @@ class Signal<T = unknown> {
 	}
 }
 
-class Computation<T = unknown> {
+abstract class Computation<T = unknown> {
 	protected _pending = false
 	protected readonly ancestors = new Set<Signal>()
 	protected readonly children = new Set<Computation>()
 	constructor(
-		protected readonly fn: () => T,
 		protected readonly destructor: Fn,
 		protected readonly STATE: STATE,
 		protected signal: Signal<T> | undefined,
 	) {}
+
+	abstract initialize(): T
 
 	get pending() {
 		return this._pending
@@ -158,6 +159,46 @@ class Computation<T = unknown> {
 		const value = this.initialize()
 		if (this.signal)
 			this.signal.mutate(value)
+	}
+}
+
+
+class StatefulComputation<T> extends Computation<T> {
+	constructor(
+		protected readonly fn: (state: T) => T,
+		protected state: T,
+		destructor: Fn,
+		STATE: STATE,
+		signal: Signal<T> | undefined,
+	) {
+		super(destructor, STATE, signal)
+	}
+
+	initialize() {
+		const { owner, listener, mutationAllowed } = this.STATE
+		this.STATE.owner = this as Computation
+		this.STATE.listener = this as Computation
+		this.STATE.mutationAllowed = false
+		const value = this.fn(this.state)
+		this.state = value
+		this.STATE.owner = owner
+		this.STATE.listener = listener
+		this.STATE.mutationAllowed = mutationAllowed
+		if (owner !== null)
+			owner.add(this as Computation)
+
+		return value
+	}
+}
+
+class StatelessComputation<T> extends Computation<T> {
+	constructor(
+		protected readonly fn: () => T,
+		destructor: Fn,
+		STATE: STATE,
+		signal: Signal<T> | undefined,
+	) {
+		super(destructor, STATE, signal)
 	}
 
 	initialize() {
@@ -310,12 +351,32 @@ export function sample<T, S extends Immutable<T>>(signalLike: S): T {
 }
 
 
-export function effect(fn: (destructor: Registrar) => unknown): Handle {
+export function effect(
+	fn: (destructor: Registrar) => unknown,
+): Handle {
 	let userDestructor = noop
 	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
-	const computation = new Computation(() => {
-		fn(destructorRegistrar)
-	}, () => { userDestructor() }, STATE, undefined)
+	const computation = new StatelessComputation(
+		() => { fn(destructorRegistrar) },
+		() => { userDestructor() },
+		STATE, undefined,
+	)
+
+	computation.initialize()
+
+	return () => { computation.unregister() }
+}
+export function statefulEffect<T>(
+	fn: (state: T, destructor: Registrar) => T,
+	initialState: T,
+): Handle {
+	let userDestructor = noop
+	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
+	const computation = new StatefulComputation(
+		state => fn(state, destructorRegistrar), initialState,
+		() => { userDestructor() },
+		STATE, undefined,
+	)
 
 	computation.initialize()
 
@@ -323,7 +384,7 @@ export function effect(fn: (destructor: Registrar) => unknown): Handle {
 }
 
 export function computed<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> {
-	const computation = new Computation(fn, noop, STATE, undefined)
+	const computation = new StatelessComputation(fn, noop, STATE, undefined)
 	const value = computation.initialize()
 	const signal = new Signal(value, comparator || eq, STATE)
 	computation.giveSignal(signal)
@@ -339,7 +400,7 @@ export function thunk<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> 
 	let signal = undefined as undefined | Signal<T>
 	function _thunk(): T {
 		if (signal === undefined) {
-			const computation = new Computation(fn, noop, STATE, undefined)
+			const computation = new StatelessComputation(fn, noop, STATE, undefined)
 			const value = computation.initialize()
 			signal = new Signal(value, comparator || eq, STATE)
 			;(_thunk as any).signal = signal
