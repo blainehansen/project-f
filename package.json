@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "dev": "tsc -p lib/dom/tsconfig.json",
+    "dev": "ts-node lib/framework/routing.ts",
     "todos": "tsc -w -p examples/todos/tsconfig.json",
     "dom": "tsc -w -p lib/dom/tsconfig.json",
     "macros": "rm -rf lab/macros/transformed/ && ts-node ./lab/macros/transformer.ts && ttsc -P ./lab/macros/tsconfig.json",

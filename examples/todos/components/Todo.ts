@@ -98,10 +98,12 @@ function render({
 	effect(() => {
 		checkboxInput.checked = completed()
 	})
+	component.appendChild(checkboxInput)
 
 	const buttonArchive = document.createElement('button')
 	buttonArchive.textContent = "Archive"
 	buttonArchive.onclick = archive
+	component.appendChild(buttonArchive)
 
 	return component
 }
@@ -111,7 +113,7 @@ export default function(args: FullArgs<Component>) {
 	return render({ ...args, ...setupData })
 }
 
-type Component = {
+export type Component = {
 	props: { descriptionColor: string },
 	syncs: { todo: Todo },
 	events: { archive: [], celebrateCompletion: string },
@@ -142,8 +144,3 @@ export function Todo(description: string, completed: boolean) {
 	return { description, completed }
 }
 export type Todo = ReturnType<typeof Todo>
-
-
-// function object() {
-// 	//
-// }
