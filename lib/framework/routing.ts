@@ -35,33 +35,55 @@ split('/?<Query>')
 
 
 
+type UnionToIntersection<U> =
+	(U extends any ? (k: U) => void : never) extends ((k: infer I) => void) ? I : never
+
+type AllKeys<L extends any[]> = {
+	[K in keyof L]: keyof L[K]
+}[number]
+
+type Extend<O, Keys extends string | number | symbol> = UnionToIntersection<{
+	[K in Keys]: O extends Record<K, any>
+		? { [_ in K]: O[K] }
+		: { [_ in K]: undefined }
+}[Keys]>
+
+type Unify<L extends any[]> = {
+	[I in keyof L]: {
+		[K in AllKeys<L>]: Extend<L[I], AllKeys<L>>
+	}[AllKeys<L>]
+}[number]
+
+
+type L = [A, B]
+type O = Unify<L>
+
+
 
 import { Dict } from '../utils'
 
 // there are a small number of primitive types that we don't have to derive anything for
 // number, string, boolean
 export type Route =
-	// since there are two possibilities, we need to infer that id could be missing? and therefore null
-	// the biggest point is that we need to create a unified type
 	| '/todo'
 	| '/todo/:id<number>?<Query>'
 
 type RouteHandler<P extends string, T extends Dict<any>> = { path: P, matcher: RegExp, decoder: Decoder<T> }
 
-type ProduceRouteType<R extends RouteHandler<string, Dict<any>>[]> = {
-	[K in keyof R]: R[K] extends RouteHandler<infer P, infer T>
+type ProduceRouteType<R extends RouteHandler<string, Dict<any>>[]> = Unify<{
+	[K in keyof R]: R[K] extends RouteHandler<any, infer T>
 		? T
 		: never
-}[number]
+}>
 
 type Handlers = [
-	{ path: '/todo', matcher: RegExp, decoder: Decoder<{ id: undefined, query: {} }> },
-	{ path: '/todo/:id<number>?<Query>', matcher: RegExp, decoder: Decoder<{ id: number, query: {} | Query }> },
+	{ path: '/todo', matcher: RegExp, decoder: Decoder<{ query: Partial<Query> }> },
+	{ path: '/todo/:id<number>?<Query>', matcher: RegExp, decoder: Decoder<{ id: number, query: Partial<Query> }> },
 ]
 // here the above Route would end up in this state at the end
 type Route = ProduceRouteType<Handlers>
 // with a final unified type of:
-// type Route = { id: number | undefined, query: {} | Query }
+// type Route = { id: number | undefined, query: Partial<Query> }
 
 
 
@@ -79,39 +101,13 @@ type ProduceNamedRouteType<R extends NamedRouteHandler<string, Dict<any>>[]> = {
 
 type Handlers = [
 	{ name: 'new', path: '/todo', matcher: RegExp, decoder: Decoder<{}> },
-	{ name: 'detail', path: '/todo/:id<number>?<Query>', matcher: RegExp, decoder: Decoder<{ id: number, query: {} | Query }> },
+	{ name: 'detail', path: '/todo/:id<number>?<Query>', matcher: RegExp, decoder: Decoder<{ id: number, query: Partial<Query> }> },
 ]
 // here the above Route would end up in this state at the end
 type Route = ProduceNamedRouteType<Handlers>
 // with a final discriminated type of:
-// type Route = { path: 'new' } | { path: 'detail', id: number }
-
-// the most reasonable way to handle this is to do the most "convenient" thing first, the unified type
-// and then have a stricter variant like `DiscriminatedRoute` that does the safer thing
-// that way we give everyone what they want with a simple opt in and a name change
-
-// export type Handler = [
-// 	// { path: '/todo', matcher: RegExp, decoder: Decoder<{}> },
-// 	{ path: '/todo/:id<number?>', matcher: RegExp, decoder: Decoder<{ id?: number }> },
-// ]
-
-// export type Handler = [
-// 	{ path: '/todo', matcher: RegExp, decoder: Decoder<{ id: undefined }> },
-// 	{ path: '/todo/:id<number>', matcher: RegExp, decoder: Decoder<{ id: number }> },
-// 	{ path: '/todo/:id<string>', matcher: RegExp, decoder: Decoder<{ id: string }> },
-// ]
-
-type Route = ProduceRouteType<Handler>
-
-function r(d: Route) {
-	console.log(d.id)
-}
-
-
-// the simple way to create a unified type for this is to simply create a discriminated union
-// with the route text as the discriminant! then we just fill in the rest of the types from there
+// type Route = { path: 'new' } | { path: 'detail', id: number, query: Partial<Query> }
 
 // at the end of the day this will involve producing:
-// - a type for the whole thing
 // - the implied decoders (the reasonable thing to do here is just stamp out a decoder directly and use the TypeOf helper to extract the type)
 // - the regex that tests for each variant, and maybe a union regex to test if this route specifically is on deck
