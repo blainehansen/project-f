@@ -2,7 +2,7 @@ import 'mocha'
 import { expect } from 'chai'
 import { assert_type as assert, tuple as t } from '@ts-std/types'
 
-import { data, ref, value, channel, batch, effect, computed, thunk, sample, Immutable } from './index'
+import { data, ref, value, channel, batch, effect, statefulEffect, computed, thunk, sample, Immutable } from './index'
 
 
 describe('value', () => it('works', () => {
@@ -126,6 +126,50 @@ describe('simple effect', () => it('works', () => {
 	expect(runCount).equal(3)
 }))
 
+describe('statefulEffect', () => it('works', () => {
+	const a = channel(0)
+	let n = 0
+	let runCount = 0
+	let destructorRunCount = 0
+	const stop = statefulEffect((b, destroy) => {
+		n = a() + b
+		runCount++
+		destroy(() => {
+			destructorRunCount++
+			n = 0
+		})
+
+		return ++b
+	}, 0)
+
+	expect(n).equal(0)
+	expect(runCount).equal(1)
+	expect(destructorRunCount).equal(0)
+
+	a(0)
+	expect(a()).equal(0)
+	expect(n).equal(1)
+	expect(runCount).equal(2)
+	expect(destructorRunCount).equal(1)
+
+	a(0)
+	expect(a()).equal(0)
+	expect(n).equal(2)
+	expect(runCount).equal(3)
+	expect(destructorRunCount).equal(2)
+
+	a(1)
+	expect(a()).equal(1)
+	expect(n).equal(4)
+	expect(runCount).equal(4)
+	expect(destructorRunCount).equal(3)
+
+	stop()
+	expect(a()).equal(1)
+	expect(n).equal(0)
+	expect(runCount).equal(4)
+	expect(destructorRunCount).equal(4)
+}))
 
 describe('effect disallows mutation', () => it('works', () => {
 	const a = value('a')
