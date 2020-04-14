@@ -2,11 +2,27 @@ https://dev.to/grandemayta/javascript-dom-manipulation-to-improve-performance-45
 https://developer.mozilla.org/en-US/docs/Web/API/Document/createDocumentFragment
 https://javascript.info/basic-dom-node-properties
 
+https://addyosmani.com/blog/rehydration/
+https://medium.com/@luke_schmuke/how-we-achieved-the-best-web-performance-with-partial-hydration-20fab9c808d5
+https://ssr.vuejs.org/guide/data.html#store-code-splitting
+
 https://stackoverflow.com/questions/14048432/create-reusable-document-fragment-from-the-dom
 
 
 ```ts
 parentNode.replaceChild(newChild, oldChild)
+
+
+
+// createElementNS<K extends keyof SVGElementTagNameMap>(namespaceURI: "http://www.w3.org/2000/svg", qualifiedName: K): SVGElementTagNameMap[K]
+
+const svgNS = 'http://www.w3.org/2000/svg' as const
+type SvgName = Parameters<typeof document.createElementNS>[1]
+function createSvg<K extends keyof SVGElementTagNameMap>(svgName: K): SVGElementTagNameMap[K] {
+  return document.createElementNS(svgNS, svgName)
+}
+
+const c = createSvg('circle')
 ```
 
 
