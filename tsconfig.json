@@ -4,7 +4,7 @@
 		"declaration": true,
 		"sourceMap": true,
 		"target": "esnext",
-		"module": "commonjs",
+		"module": "none",
 		"moduleResolution": "node",
 		"outDir": "dist",
 		"baseUrl": "."

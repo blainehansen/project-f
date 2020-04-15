@@ -4,17 +4,30 @@
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
 function reactiveText() {
-	//
-}
+	const div = document.createElement('div')
 
-(window as any).main = function() {
-	const button = document.createElement('button')
-	button.textContent = 'yoyo'
-	button.onclick = () => {
-		console.log('it works')
+	const text = value('')
+	const input = document.createElement('input')
+	input.type = 'text'
+	input.placeholder = 'yo yo'
+	input.oninput = e => {
+		text((e.target as typeof input).value)
 	}
+	effect(() => {
+		input.value = text()
+	})
 
-	document.body.appendChild(button)
-	// const range = document.createRange()
-	// const
+	const display = document.createTextNode('')
+	effect(() => {
+		display.data = text()
+	})
+
+
+	div.appendChild(input)
+	div.appendChild(display)
+
+	return div
 }
+
+const el = reactiveText()
+document.body.appendChild(el)

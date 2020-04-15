@@ -4,10 +4,10 @@
 		"strict": true,
 		"declaration": false,
 		"sourceMap": false,
-		"target": "es5",
-		"module": "system",
-		"outFile": "main.js",
+		"target": "esnext",
+		"module": "amd",
 		"moduleResolution": "node",
+		"outFile": "main.js",
 		"baseUrl": "."
 	},
 	"files": ["main.ts"],
