@@ -16,6 +16,13 @@ describe('value', () => it('works', () => {
 	bad = value(new Set())
 }))
 
+describe('boolean value', () => it('works', () => {
+	const v = value(true)
+	const a: boolean = v()
+	const b: void = v(false)
+	const c: void = v(true)
+}))
+
 describe('data', () => it('works', () => {
 	const a = data([0, 0, 0], (left, right) => left.length === right.length)
 	expect(a()).eql([0, 0, 0])

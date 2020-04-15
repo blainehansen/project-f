@@ -4,31 +4,57 @@
 // import { ContentState, Displayable, replaceContent, Range, RangeType, replaceRange } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
-function reactiveText() {
-	const div = document.createElement('div')
+// function Component() {
+// 	const component = document.createElement('div')
 
-	const text = value('')
+// 	const text = value('')
+// 	const input = document.createElement('input')
+// 	input.type = 'text'
+// 	input.placeholder = 'yo yo'
+// 	input.oninput = e => {
+// 		text((e.target as typeof input).value)
+// 	}
+// 	effect(() => {
+// 		input.value = text()
+// 	})
+
+// 	const display = document.createTextNode('')
+// 	effect(() => {
+// 		display.data = text()
+// 	})
+
+
+// 	component.appendChild(input)
+// 	component.appendChild(display)
+
+// 	return component
+// }
+
+
+// input(type="checkbox", :value=checked)
+function Component() {
+	const component = document.createElement('div')
+
+	const checked = value(true)
 	const input = document.createElement('input')
-	input.type = 'text'
-	input.placeholder = 'yo yo'
-	input.oninput = e => {
-		text((e.target as typeof input).value)
+	input.type = 'checkbox'
+
+	effect(() => {
+		input.checked = checked()
+	})
+	input.onchange = () => {
+		checked(input.checked)
 	}
+
+	const checkedDiv = document.createElement('div')
 	effect(() => {
-		input.value = text()
+		checkedDiv.textContent = checked() ? 'on' : 'off'
 	})
 
-	const display = document.createTextNode('')
-	effect(() => {
-		display.data = text()
-	})
-
-
-	div.appendChild(input)
-	div.appendChild(display)
-
-	return div
+	component.appendChild(input)
+	component.appendChild(checkedDiv)
+	return component
 }
 
-const el = reactiveText()
+const el = Component()
 document.body.appendChild(el)

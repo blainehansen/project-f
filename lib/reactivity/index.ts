@@ -282,6 +282,15 @@ export function data<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
 		signal.mutate(next!)
 		return
 	}
+
+	// type ArgsOrNothing<T> = [T] | []
+	// function mut<A extends ArgsOrNothing<T>>(...args: A): A extends [] ? T : void {
+	// 	if (args.length === 0)
+	// 		return signal.read()
+
+	// 	signal.mutate(args[0])
+	// 	return
+	// }
 	(mut as any).signal = signal
 	return mut
 }
@@ -321,13 +330,14 @@ export function ref<T>(mutable: Mutable<T> | Immutable<T>): Immutable<T> {
 // 	(_immutable as any).signal = signal
 // }
 
-export function value<T>(initial: T): T extends Primitive ? Mutable<T> : never {
-	return data(initial, eq) as T extends Primitive ? Mutable<T> : never
+// https://github.com/microsoft/TypeScript/issues/22596
+export function value<T>(initial: T): [T] extends [Primitive] ? Mutable<T> : never {
+	return data<T>(initial, eq) as [T] extends [Primitive] ? Mutable<T> : never
 }
 export namespace value {
-	export function protect<T>(initial: T): T extends Primitive ? [Immutable<T>, Mutable<T>] : never {
+	export function protect<T>(initial: T): [T] extends [Primitive] ? [Immutable<T>, Mutable<T>] : never {
 		const d = value(initial)
-		return [d, d] as unknown as T extends Primitive ? [Immutable<T>, Mutable<T>] : never
+		return [d, d] as unknown as [T] extends [Primitive] ? [Immutable<T>, Mutable<T>] : never
 	}
 }
 
