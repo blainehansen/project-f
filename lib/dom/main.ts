@@ -1,3 +1,4 @@
+// https://mattallan.me/posts/modern-javascript-without-a-bundler/
 // file:///home/blaine/lab/project-f/lib/dom/main.html
 
 // import { ContentState, Displayable, replaceContent, Range, RangeType, replaceRange } from './index'
