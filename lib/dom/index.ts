@@ -58,8 +58,8 @@ export type Displayable = null | undefined | string | Element | NonLone<Node>
 
 export function replaceContent(
 	parent: HTMLElement,
-	value: Displayable,
 	current: ContentState,
+	value: Displayable,
 ): ContentState {
 	if (value === undefined || value === null || value === '') {
 		// do nothing

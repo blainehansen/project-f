@@ -47,11 +47,11 @@ const cases: [Displayable, string][] = [
 describe('replaceContent', () => {
 	it('replacing nothing with nothing', () => {
 		let s
-		s = replaceContent(body, null, undefined)
+		s = replaceContent(body, undefined, null)
 		expect(s).undefined
 		s = replaceContent(body, undefined, undefined)
 		expect(s).undefined
-		s = replaceContent(body, '', undefined)
+		s = replaceContent(body, undefined, '')
 		expect(s).undefined
 	})
 
@@ -59,11 +59,11 @@ describe('replaceContent', () => {
 		const t = makeText('initial')
 		body.appendChild(t)
 		let s
-		s = replaceContent(body, 'a', t)
+		s = replaceContent(body, t, 'a')
 		expect(body.innerHTML).equal('a')
 		expect(s).equal(t)
 
-		s = replaceContent(body, 'b', t)
+		s = replaceContent(body, t, 'b')
 		expect(body.innerHTML).equal('b')
 		expect(s).equal(t)
 	})
@@ -71,7 +71,7 @@ describe('replaceContent', () => {
 	it('replacing nontext with text', () => {
 		const d = makeDiv()
 		body.appendChild(d)
-		const s = replaceContent(body, 'a', d)
+		const s = replaceContent(body, d, 'a')
 		expect(body.innerHTML).equal('a')
 		expect(s instanceof Text).true
 	})
@@ -88,7 +88,7 @@ describe('replaceContent', () => {
 			setupState(state)
 
 			const d = makeDiv('hello')
-			const s = replaceContent(body, d, state)
+			const s = replaceContent(body, state, d)
 			expect(s).equal(d)
 			expect(body.innerHTML).equal(divText('hello'))
 		})
@@ -97,7 +97,7 @@ describe('replaceContent', () => {
 		it(`replacing ${displayState(state)} with array`, () => {
 			setupState(state)
 
-			const s = replaceContent(body, [makeDiv('hello'), makeDiv('dude')], state)
+			const s = replaceContent(body, state, [makeDiv('hello'), makeDiv('dude')])
 			if (!Array.isArray(s)) throw new Error("bad outcoming state: " + displayState(s))
 			expect(s.length).equal(2)
 			expect(s.every(n => n instanceof HTMLDivElement)).true
@@ -117,7 +117,7 @@ describe('replaceContent', () => {
 			it(`replacing: ${displayState(state)} with: ${html}`, () => {
 				setupState(state)
 
-				replaceContent(body, displayable, state)
+				replaceContent(body, state, displayable)
 				expect(body.innerHTML).equal(html)
 			})
 })
