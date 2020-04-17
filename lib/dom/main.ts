@@ -89,7 +89,7 @@ function Component() {
 				return d
 			}) as unknown as NonLone<Node>,
 		)
-	}, { type: RangeType.empty, placeholder } as Range)
+	}, { parent: component, type: RangeType.empty, placeholder } as Range)
 
 	const input = document.createElement('input')
 	input.type = 'text'

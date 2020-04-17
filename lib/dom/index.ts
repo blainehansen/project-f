@@ -1,14 +1,4 @@
-import { Panic, NonEmpty, NonLone, NonRedundant } from '../utils'
-
-// the most general case is to have a parent, some begin and some end
-// we need to be able to
-// - quickly delete sequences (we can use range deleteContents for this)
-// - quickly add many elements to the sequence (we can use DocumentFragment for this)
-// - the next step is quick reconciliation, which is quite complicated
-
-// the begin and end might be the same, in which case we can replaceChild/removeChild
-// there might not be a begin or end or both, which means we act on the parent through appends rather than replaces
-
+import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 
 // cases for begin/end (therefore implied "from many"):
 // # distinct
@@ -23,195 +13,220 @@ import { Panic, NonEmpty, NonLone, NonRedundant } from '../utils'
 // - set to single: parent.appendChild(node)
 // - set to many: complex array reconciliation
 
+export const enum DisplayType { empty, text, node, many }
 
+// numbers and booleans are notably absent, pipe them through a string renderer first
+export type Displayable = null | undefined | string | Node | Node[]
 
-// export const enum ContentStateType { text, single, many }
-// export type ContentState =
-// 	// no content, perform textContent or just appendChild
-// 	| undefined
-// 	// text content, replace that text node or its data
-// 	| { type: ContentStateType.text, text: Text }
-// 	// single node content, replace that node
-// 	| { type: ContentStateType.single, node: Node }
-// 	// many nodes, reconcile
-// 	| { type: ContentStateType.many, nodes: NonLone<Node> }
+export type Value =
+	| { type: DisplayType.empty, value: undefined }
+	| { type: DisplayType.text, value: string }
+	| { type: DisplayType.node, value: Node }
+	| { type: DisplayType.many, value: NonLone<Node> }
 
-export type ContentState = undefined | Text | Element | NonLone<Node>
-// export type ContentState = { parent: HTMLElement } & ({ type: , undefined | Text | Element | NonLone<Node> })
-
-// // numbers and booleans are notably absent, since displaying them is probably a mistake
-// // pipe them through a simple string transformer first
-// export type BaseDisplayable = string | Node
-
-// export type Displayable =
-// 	// nothing displays
-// 	| null | undefined
-// 	| BaseDisplayable
-// 	// here we enforce that
-// 	| NonLone<BaseDisplayable>[]
-// 	// // the function is called
-// 	// // NOTE: this might be a reactive function?
-// 	// | () => BaseDisplayable | NonLone<BaseDisplayable>[]
-
-// export type Displayable = string | NonRedundant<Node>
-export type Displayable = null | undefined | string | Element | NonLone<Node>
-
-export function replaceContent(
-	parent: HTMLElement,
-	current: ContentState,
-	value: Displayable,
-): ContentState {
-	if (value === undefined || value === null || value === '') {
-		// do nothing
-		if (current === undefined) return current
-
-		clearContent(parent)
-		return undefined
+function normalizeDisplayable(value: Displayable): Value {
+	// this includes the empty string, which is fine
+	if (!value) return { type: DisplayType.empty, value: undefined }
+	if (Array.isArray(value)) {
+		switch (value.length) {
+			case 0: return { type: DisplayType.empty, value: undefined }
+			case 1: return { type: DisplayType.node, value: value[0] }
+			default: return { type: DisplayType.many, value: value as NonLone<Node> }
+		}
 	}
 
-	if (typeof value === 'string') {
-		if (current instanceof Text) {
-			current.data = value
+	if (typeof value === 'string') return { type: DisplayType.text, value }
+	return { type: DisplayType.node, value }
+}
+
+
+export type ContentState =
+	| { type: DisplayType.empty, content: undefined }
+	| { type: DisplayType.text, content: Text }
+	| { type: DisplayType.node, content: Node }
+	| { type: DisplayType.many, content: NonLone<Node> }
+
+export function replaceContent(
+	parent: Node,
+	current: ContentState,
+	input: Displayable,
+): ContentState {
+	const value = normalizeDisplayable(input)
+	switch (value.type) {
+	case DisplayType.empty: {
+		// do nothing
+		if (current.type === DisplayType.empty) return current
+		clearContent(parent)
+		return { type: DisplayType.empty, content: undefined }
+	}
+
+	case DisplayType.text: {
+		const text = value.value
+		if (current.type === DisplayType.text) {
+			current.content.data = text
 			return current
 		}
 
-		parent.textContent = value
+		parent.textContent = text
 		// UNSAFE: we assume here that after setting textContent to a string,
 		// that immediately afterwards the firstChild will be a Text
-		return parent.firstChild as Text
+		return { type: DisplayType.text, content: parent.firstChild as Text }
 	}
 
-	if (value instanceof Element) {
-		if (current === undefined)
-			return parent.appendChild(value)
-		if (Array.isArray(current)) {
-			// UNSAFE: since we're setting textContent to a string
-			// the parent will possibly have a firstChild of Text,
-			// appendChild will leave the parent with two children instead of one
+	case DisplayType.node: {
+		const node = value.value
+		switch (current.type) {
+		case DisplayType.empty:
+			parent.appendChild(node)
+			return { type: DisplayType.node, content: node }
+		case DisplayType.many:
 			clearContent(parent)
-			return parent.appendChild(value)
+			parent.appendChild(node)
+			return { type: DisplayType.node, content: node }
+		default:
+			if (node === current.content)
+				return current
+			parent.replaceChild(node, current.content)
+			return { type: DisplayType.node, content: node }
+		}
+	}
+
+	case DisplayType.many:
+		const nodes = value.value
+		switch (current.type) {
+		case DisplayType.empty:
+			return { type: DisplayType.many, content: appendAll(parent, nodes) }
+		case DisplayType.many:
+			return { type: DisplayType.many, content: reconcileArrays(parent, current.content, nodes) }
+		default:
+			const fragment = makeDocumentFragment(nodes)
+			parent.replaceChild(fragment, current.content)
+			return { type: DisplayType.many, content: nodes }
+		}
+	}
+}
+
+
+export type Range =
+	| { parent: Node | undefined, type: DisplayType.empty, item: Comment }
+	| { parent: Node | undefined, type: DisplayType.text, item: Text }
+	| { parent: Node | undefined, type: DisplayType.node, item: Node }
+	| { parent: Node | undefined, type: DisplayType.many, item: NonLone<Node> }
+
+export type ParentedRange =
+	| { parent: Node, type: DisplayType.empty, item: Comment }
+	| { parent: Node, type: DisplayType.text, item: Text }
+	| { parent: Node, type: DisplayType.node, item: Node }
+	| { parent: Node, type: DisplayType.many, item: NonLone<Node> }
+
+// export type ParentedRange = Range extends Range ? Overwrite<Range, { parent: Node }> : never
+
+class UnattachedNodePanic extends Panic {
+ 	constructor() { super("unattached node") }
+}
+
+function normalizeRange(range: Range): ParentedRange {
+	const maybeParent = range.parent
+	const parent = range.parent || (
+		range.type === DisplayType.many
+			? range.item[0].parentNode
+			: range.item.parentNode
+	)
+
+	if (!parent) throw new UnattachedNodePanic()
+	return { ...range, parent }
+}
+
+export function replaceRange(
+	range: Range,
+	input: Displayable,
+): ParentedRange {
+	const value = normalizeDisplayable(input)
+	const current = normalizeRange(range)
+	const parent = current.parent
+	switch (value.type) {
+	case DisplayType.empty:
+		switch (current.type) {
+		case DisplayType.empty:
+			return current
+		case DisplayType.many: {
+			const placeholder = new Comment()
+			replaceManyWithSingle(parent, current.item, placeholder)
+			return { parent, type: DisplayType.empty, item: placeholder }
 		}
 
-		// this handles both the Text and Element cases
-		parent.replaceChild(value, current)
-		return value
+		default:
+			const placeholder = new Comment()
+			parent.replaceChild(placeholder, current.item)
+			return { parent, type: DisplayType.empty, item: placeholder }
+		}
+
+	case DisplayType.text:
+		const str = value.value
+		switch (current.type) {
+		case DisplayType.text:
+			current.item.data = str
+			return current
+		case DisplayType.many: {
+			const text = document.createTextNode(str)
+			replaceManyWithSingle(parent, current.item, text)
+			return { parent, type: DisplayType.text, item: text }
+		}
+
+		default:
+			const text = document.createTextNode(str)
+			parent.replaceChild(text, current.item)
+			return { parent, type: DisplayType.text, item: text }
+		}
+
+	case DisplayType.node: {
+		const node = value.value
+		const content = { parent, type: DisplayType.node, item: node } as ParentedRange
+		if (current.type === DisplayType.many) {
+			replaceManyWithSingle(parent, current.item, node)
+			return content
+		}
+
+		parent.replaceChild(node, current.item)
+		return content
 	}
 
-	// value: NonLone<Node>
-	if (current === undefined)
-		return appendAll(parent, value)
+	case DisplayType.many:
+		const nodes = value.value
+		const content = { parent, type: DisplayType.many, item: nodes } as ParentedRange
+		if (current.type === DisplayType.many) {
+			reconcileArrays(parent, current.item, nodes)
+			return content
+		}
 
-	return reconcileArrays(parent, Array.isArray(current) ? current : [current], value)
+		const fragment = makeDocumentFragment(nodes)
+		parent.replaceChild(fragment, current.item)
+		return content
+	}
 }
+
+
+function replaceManyWithSingle(parent: Node, current: NonLone<Node>, node: Node) {
+	const first = current[0]
+	const last = current[current.length - 1]
+	parent.replaceChild(node, first)
+	removeAllAfter(node, last)
+}
+
 
 // TODO this is a dumb version for now
 export function reconcileArrays(
 	parent: Node,
-	existing: NonEmpty<Node>,
+	existing: NonLone<Node>,
 	values: NonLone<Node>,
 ) {
-	const begin = existing[0]
-	const end = existing[existing.length - 1]
-	removeAllAfter(begin, end)
-	parent.replaceChild(makeDocumentFragment(values), begin)
+	const first = existing[0]
+	const last = existing[existing.length - 1]
+	removeAllAfter(first, last)
+	parent.replaceChild(makeDocumentFragment(values), first)
 	return values
 }
 
-
-export const enum RangeType { empty, single, many }
-export type Range =
-	| { type: RangeType.empty, placeholder: Comment }
-	| { type: RangeType.single, node: Text | Element }
-	| { type: RangeType.many, nodes: NonLone<Node> }
-
-export function replaceRange(
-	existing: Range,
-	value: Displayable,
-): Range {
-	switch (existing.type) {
-	case RangeType.empty: {
-		const parent = existing.placeholder.parentNode
-		if (parent === null)
-			throw new Panic("unattached node")
-
-		if (value === null || value === undefined || value === '')
-			// do nothing
-			return existing
-
-		if (Array.isArray(value)) {
-			const fragment = makeDocumentFragment(value)
-			parent.replaceChild(fragment, existing.placeholder)
-			return { type: RangeType.many, nodes: value }
-		}
-
-		const newNode = typeof value === 'string' ? document.createTextNode(value) : value
-		parent.replaceChild(newNode, existing.placeholder)
-		return { type: RangeType.single, node: newNode }
-	}
-
-	case RangeType.single: {
-		const parent = existing.node.parentNode
-		if (parent === null)
-			throw new Panic("unattached node")
-
-		if (value === null || value === undefined || value === '') {
-			// replace with nothing
-			const placeholder = new Comment()
-			parent.replaceChild(placeholder, existing.node)
-			return { type: RangeType.empty, placeholder }
-		}
-		if (value === existing.node)
-			return existing
-
-		if (typeof value === 'string') {
-			if (existing.node instanceof Text) {
-				existing.node.data = value
-				return existing
-			}
-
-			const newNode = document.createTextNode(value)
-			parent.replaceChild(newNode, existing.node)
-			existing.node = newNode
-			return existing
-		}
-
-		if (Array.isArray(value)) {
-			parent.replaceChild(makeDocumentFragment(value), existing.node)
-			return { type: RangeType.many, nodes: value }
-		}
-
-		parent.replaceChild(value, existing.node)
-		existing.node = value
-		return existing
-	}
-
-	case RangeType.many:
-		const { nodes } = existing
-		const start = nodes[0]
-		const end = nodes[nodes.length - 1]
-
-		const parent = start.parentNode
-		if (parent === null)
-			throw new Panic("unattached node")
-
-		if (value === null || value === undefined || value === '') {
-			const placeholder = new Comment()
-			parent.replaceChild(placeholder, start)
-			removeAllAfter(placeholder, end)
-			return { type: RangeType.empty, placeholder }
-		}
-
-		if (Array.isArray(value)) {
-			const nodes = reconcileArrays(parent, existing.nodes, value)
-			return { type: RangeType.many, nodes }
-		}
-
-		const newNode = typeof value === 'string' ? document.createTextNode(value) : value
-		parent.replaceChild(newNode, start)
-		removeAllAfter(newNode, end)
-		return { type: RangeType.single, node: newNode }
-	}
-}
 
 export function removeAllAfter(start: Node, end: Node) {
 	const range = document.createRange()
@@ -220,7 +235,6 @@ export function removeAllAfter(start: Node, end: Node) {
 	range.deleteContents()
 }
 
-
 export function makeDocumentFragment(nodes: NonLone<Node>) {
 	const fragment = document.createDocumentFragment()
 	for (const node of nodes)
@@ -228,22 +242,14 @@ export function makeDocumentFragment(nodes: NonLone<Node>) {
 	return fragment
 }
 
-export function appendAll(parent: HTMLElement, values: NonLone<string | Node>): NonLone<Node> {
+export function appendAll(parent: Node, nodes: NonLone<Node>): NonLone<Node> {
 	const fragment = document.createDocumentFragment()
-	// UNSAFE: loop must add at least two elements
-	const nodes = [] as unknown as NonLone<Node>
-	for (const value of values) {
-		const node = typeof value === 'string'
-			? document.createTextNode(value)
-			: value
-		nodes.push(node)
+	for (const node of nodes)
 		fragment.appendChild(node)
-	}
 
 	parent.appendChild(fragment)
 	return nodes
 }
-
 
 export function clearContent(node: Node) {
 	node.textContent = ''
