@@ -207,8 +207,8 @@ export function replaceRange(
 function replaceManyWithSingle(parent: Node, current: NonLone<Node>, node: Node) {
 	const first = current[0]
 	const last = current[current.length - 1]
+	removeAllAfter(first, last)
 	parent.replaceChild(node, first)
-	removeAllAfter(node, last)
 }
 
 
