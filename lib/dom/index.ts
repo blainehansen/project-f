@@ -27,12 +27,10 @@ export type Value =
 function normalizeDisplayable(value: Displayable): Value {
 	// this includes the empty string, which is fine
 	if (!value) return { type: DisplayType.empty, value: undefined }
-	if (Array.isArray(value)) {
-		switch (value.length) {
-			case 0: return { type: DisplayType.empty, value: undefined }
-			case 1: return { type: DisplayType.node, value: value[0] }
-			default: return { type: DisplayType.many, value: value as NonLone<Node> }
-		}
+	if (Array.isArray(value)) switch (value.length) {
+		case 0: return { type: DisplayType.empty, value: undefined }
+		case 1: return { type: DisplayType.node, value: value[0] }
+		default: return { type: DisplayType.many, value: value as NonLone<Node> }
 	}
 
 	if (typeof value === 'string') return { type: DisplayType.text, value }
@@ -253,6 +251,4 @@ export function appendAll(parent: Node, nodes: NonLone<Node>): NonLone<Node> {
 
 export function clearContent(node: Node) {
 	node.textContent = ''
-	// node.textContent = null
-	// null is what document or CDATA types have
 }
