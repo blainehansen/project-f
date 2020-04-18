@@ -2,73 +2,86 @@
 // file:///home/blaine/lab/project-f/lib/dom/main.html
 
 import { NonLone } from '../utils'
-import { ContentState, Displayable, replaceContent, Range, RangeType, replaceRange } from './index'
+import { replaceContent, replaceRange, Displayable, DisplayType, Range, ContentState } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
-// function Component() {
-// 	const component = document.createElement('div')
+// div
+// 	input(type="text", placeholder="yo yo", :value=text)
+// 	| {{ text() }}
+function TextInput() {
+	const component = document.createElement('div')
 
-// 	const text = value('')
-// 	const input = document.createElement('input')
-// 	input.type = 'text'
-// 	input.placeholder = 'yo yo'
-// 	input.oninput = e => {
-// 		text((e.target as typeof input).value)
-// 	}
-// 	effect(() => {
-// 		input.value = text()
-// 	})
+	const text = value('')
+	const input = document.createElement('input')
+	input.type = 'text'
+	input.placeholder = 'yo yo'
+	input.oninput = e => {
+		text((e.target as typeof input).value)
+	}
+	effect(() => {
+		input.value = text()
+	})
 
-// 	const display = document.createTextNode('')
-// 	effect(() => {
-// 		display.data = text()
-// 	})
+	const display = document.createTextNode('')
+	effect(() => {
+		display.data = text()
+	})
+
+	component.appendChild(input)
+	component.appendChild(display)
+
+	return component
+}
 
 
-// 	component.appendChild(input)
-// 	component.appendChild(display)
+// div
+// 	input(type="checkbox", :value=checked)
+// 	div
+// 		@if (checked()) hello checked world
+// 		@else: b oh no!
+function CheckboxIfElseBlock() {
+	const component = document.createElement('div')
 
-// 	return component
-// }
+	const checked = value(true)
+	const input = document.createElement('input')
+	input.type = 'checkbox'
+	effect(() => {
+		input.checked = checked()
+	})
+	input.onchange = () => {
+		checked(input.checked)
+	}
 
+	const contentDiv = document.createElement('div')
+	const elseDiv = document.createElement('b')
+	elseDiv.textContent = 'oh no!'
+	statefulEffect(current => {
+		return replaceContent(
+			contentDiv, current,
+			checked()
+				? 'hello checked world'
+				: elseDiv
+				// : null
+				// undefined for a branch with no else
+				// and chain these ternaries for an else-if chain
+		)
+	}, { type: DisplayType.empty, content: undefined } as ContentState)
+	// effect(() => {
+	// 	contentDiv.textContent = checked() ? 'on' : 'off'
+	// })
 
-// function Component() {
-// 	const component = document.createElement('div')
+	component.appendChild(input)
+	component.appendChild(contentDiv)
+	return component
+}
 
-// 	const checked = value(true)
-// 	const input = document.createElement('input')
-// 	input.type = 'checkbox'
-
-// 	effect(() => {
-// 		input.checked = checked()
-// 	})
-// 	input.onchange = () => {
-// 		checked(input.checked)
-// 	}
-
-// 	const contentDiv = document.createElement('div')
-// 	const elseDiv = document.createElement('b')
-// 	elseDiv.textContent = 'oh no!'
-// 	statefulEffect(current => {
-// 		return replaceContent(
-// 			contentDiv, current,
-// 			checked()
-// 				? 'hello checked world'
-// 				: elseDiv
-// 				// undefined for a branch with no else
-// 				// and chain these ternaries for an else-if chain
-// 		)
-// 	}, undefined as ContentState)
-// 	// effect(() => {
-// 	// 	contentDiv.textContent = checked() ? 'on' : 'off'
-// 	// })
-
-// 	component.appendChild(input)
-// 	component.appendChild(contentDiv)
-// 	return component
-// }
-
-function Component() {
+// div
+// 	h1 Here are some letters:
+// 	@map (list(), letter, index): div
+// 		i the letter: {{ letter() }}
+// 		button(@click={ deleteItem(index) }) delete this letter
+// 	input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
+function ForLoop() {
 	const component = document.createElement('div')
 
 	const header = document.createElement('h1')
@@ -81,15 +94,29 @@ function Component() {
 	statefulEffect(current => {
 		return replaceRange(
 			current,
-			list().map(letter => {
+			list().map((letter, index) => {
 				const d = document.createElement('div')
+
 				const item = document.createElement('i')
 				item.textContent = `the letter: "${letter}"`
 				d.appendChild(item)
+
+				const deleteButton = document.createElement('button')
+				deleteButton.textContent = "delete this letter"
+				// function deleteItem(index) {
+				// 	list.splice(index, 1)
+				// }
+				deleteButton.onclick = () => {
+					const currentList = list()
+					currentList.splice(index, 1)
+					list(currentList)
+				}
+				d.appendChild(deleteButton)
+
 				return d
-			}) as unknown as NonLone<Node>,
+			}),
 		)
-	}, { parent: component, type: RangeType.empty, placeholder } as Range)
+	}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
 
 	const input = document.createElement('input')
 	input.type = 'text'
@@ -109,5 +136,6 @@ function Component() {
 	return component
 }
 
-const el = Component()
-document.body.appendChild(el)
+document.body.appendChild(TextInput())
+document.body.appendChild(CheckboxIfElseBlock())
+document.body.appendChild(ForLoop())
