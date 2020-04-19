@@ -77,7 +77,9 @@ function CheckboxIfElseBlock() {
 
 // div
 // 	h1 Here are some letters:
-// 	@map (list(), letter, index): div
+// 	@map (letter in list()): div
+// 	@map ((letter: string) in list()): div
+// 	@map ((letter, index) in list()): div
 // 		i the letter: {{ letter() }}
 // 		button(@click={ deleteItem(index) }) delete this letter
 // 	input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
