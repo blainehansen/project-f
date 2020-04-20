@@ -1,5 +1,33 @@
 import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 
+// export function createElement<K extends keyof HTMLElementTagNameMap>(
+// 	parent: Node,
+// 	tagName: K,
+// ): HTMLElementTagNameMap[K] {
+//   const el = document.createElement(tagName)
+//   parent.appendChild(el)
+//   return el
+// }
+
+// export function createTextNode(
+// 	parent: Node,
+// 	content: string,
+// ): Text {
+// 	const el = document.createTextNode(content)
+// 	parent.appendChild(el)
+// 	return el
+// }
+
+// const svgNS = 'http://www.w3.org/2000/svg' as const
+// export function createSvg<K extends keyof SVGElementTagNameMap>(
+// 	parent: Node,
+// 	svgName: K,
+// ): SVGElementTagNameMap[K] {
+// 	const el = document.createElementNS(svgNS, svgName)
+// 	parent.appendChild(el)
+//   return el
+// }
+
 // cases for begin/end (therefore implied "from many"):
 // # distinct
 // - set to empty: parent.replaceChild(Comment, begin); range.deleteContents(Comment, end)

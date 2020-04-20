@@ -11,22 +11,6 @@ https://stackoverflow.com/questions/14048432/create-reusable-document-fragment-f
 
 ```ts
 parentNode.replaceChild(newChild, oldChild)
-
-
-
-// createElementNS<K extends keyof SVGElementTagNameMap>(namespaceURI: "http://www.w3.org/2000/svg", qualifiedName: K): SVGElementTagNameMap[K]
-const svgNS = 'http://www.w3.org/2000/svg' as const
-type SvgName = Parameters<typeof document.createElementNS>[1]
-function createSvg<K extends keyof SVGElementTagNameMap>(svgName: K): SVGElementTagNameMap[K] {
-  return document.createElementNS(svgNS, svgName)
-}
-
-// createElement<K extends keyof HTMLElementTagNameMap>(tagName: K, options?: ElementCreationOptions): HTMLElementTagNameMap[K];
-function appendCreateElement<K extends keyof HTMLElementTagNameMap>(tagName: K, parent: Node): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tagName)
-  parent.appendChild(parent)
-  return el
-}
 ```
 
 

@@ -8,8 +8,9 @@ import { Immutable, Mutable, effect, statefulEffect, data, value, channel, compu
 // div
 // 	input(type="text", placeholder="yo yo", :value=text)
 // 	| {{ text() }}
-function TextInput() {
+function TextInput(parent: Node) {
 	const component = document.createElement('div')
+	parent.appendChild(component)
 
 	const text = value('')
 	const input = document.createElement('input')
@@ -21,16 +22,15 @@ function TextInput() {
 	effect(() => {
 		input.value = text()
 	})
+	component.appendChild(input)
 
 	const display = document.createTextNode('')
 	effect(() => {
 		display.data = text()
 	})
-
-	component.appendChild(input)
 	component.appendChild(display)
 
-	return component
+	// return component
 }
 
 
@@ -39,8 +39,9 @@ function TextInput() {
 // 	div
 // 		@if (checked()) hello checked world
 // 		@else: b oh no!
-function CheckboxIfElseBlock() {
+function CheckboxIfElseBlock(parent: Node) {
 	const component = document.createElement('div')
+	parent.appendChild(component)
 
 	const checked = value(true)
 	const input = document.createElement('input')
@@ -51,6 +52,7 @@ function CheckboxIfElseBlock() {
 	input.onchange = () => {
 		checked(input.checked)
 	}
+	component.appendChild(input)
 
 	const contentDiv = document.createElement('div')
 	const elseDiv = document.createElement('b')
@@ -66,13 +68,12 @@ function CheckboxIfElseBlock() {
 				// and chain these ternaries for an else-if chain
 		)
 	}, { type: DisplayType.empty, content: undefined } as ContentState)
+	component.appendChild(contentDiv)
 	// effect(() => {
 	// 	contentDiv.textContent = checked() ? 'on' : 'off'
 	// })
 
-	component.appendChild(input)
-	component.appendChild(contentDiv)
-	return component
+	// return component
 }
 
 // div
@@ -83,8 +84,9 @@ function CheckboxIfElseBlock() {
 // 		i the letter: {{ letter() }}
 // 		button(@click={ deleteItem(index) }) delete this letter
 // 	input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
-function ForLoop() {
+function ForLoop(parent: Node) {
 	const component = document.createElement('div')
+	parent.appendChild(component)
 
 	const header = document.createElement('h1')
 	header.textContent = 'Here are some letters:'
@@ -135,9 +137,9 @@ function ForLoop() {
 	}
 	component.appendChild(input)
 
-	return component
+	// return component
 }
 
-document.body.appendChild(TextInput())
-document.body.appendChild(CheckboxIfElseBlock())
-document.body.appendChild(ForLoop())
+TextInput(body)
+CheckboxIfElseBlock(body)
+ForLoop(body)

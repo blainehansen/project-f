@@ -27,7 +27,6 @@ export type Slots<T> = T extends { slots: Dict<any> }
 	}
 	: {}
 
-// export type DomContent
 
 export type Args<T> = Props<T> & Syncs<T> & Events<T>
 export type FullArgs<T> = Args<T> & Slots<T>
@@ -40,18 +39,18 @@ export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnT
 // we have to destructure this fully since otherwise we'd have to prepend every expression with the context
 // this shouldn't be impossible to do, since we can simply find the return statement in their Component function and the Component type and discover their keys
 // it does however mean that they can't have the return statement buried in conditionals or other complex things
-function render({ a, b, c, m }: Context<Component, typeof Component>) {
+function render(parent: Node, { a, b, c, m }: Context<Component, typeof setup>) {
 	//
 }
 // this is generated into every file
-export default { setup: Component, render }
+export default { setup, render }
 
 // this is the actual source
-type Component = {
+export type Component = {
 	props: { a: number, b: string | undefined },
 	syncs: { c: boolean },
 }
-function Component({ a, b, c }: Args<Component>) {
+export function setup({ a, b, c }: Args<Component>) {
 	const d = c()
 	c(a() > 3)
 
@@ -64,21 +63,6 @@ function Component({ a, b, c }: Args<Component>) {
 
 
 
-
-
-
-
-// // reactivity types
-// const _reactive_brand: unique symbol = Symbol()
-// type _reactive_brand = typeof _reactive_brand
-
-// type MutableReactive<T> = ((value: T) => void) & { _reactive_brand: _reactive_brand }
-// type ImmutableReactive<T> = (() => T) & { _reactive_brand: _reactive_brand }
-// type Reactive<T> = MutableReactive<T> & ImmutableReactive<T>
-
-// type FakeMutable<T> = (value: T) => void
-// type FakeImmutable<T> = () => T
-// type FakeReactive<T> = FakeMutable<T> & FakeImmutable<T>
 
 
 // component
@@ -139,18 +123,18 @@ class ComponentBuilder<A extends Args, P extends Props, Y extends Syncs, S exten
 }
 
 
-// // there are two types of events:
-// // - ones that a component *defines and emits*, which are therefore merely hooks for its parent to subscribe to
-// // effectively these are just functions with a "subscriber list"
-// // these are really easy an really clean
+// there are two types of events:
+// - ones that a component *defines and emits*, which are therefore merely hooks for its parent to subscribe to
+// effectively these are just functions with a "subscriber list"
+// these are really easy an really clean
 
-// // - ones that a component *expects to receive*, and which therefore theoretically can come from anywhere. however, from an architectural standpoint it would be nicer if it only came from the descendents (or at least siblings)
-// // these are basically just functions defined on the thing! giving someone else the ability to trigger this event is just giving them a handle to the function
-// // these are more tricky. this is the problem state management systems are trying to solve. these are basically carbon actors
+// - ones that a component *expects to receive*, and which therefore theoretically can come from anywhere. however, from an architectural standpoint it would be nicer if it only came from the descendents (or at least siblings)
+// these are basically just functions defined on the thing! giving someone else the ability to trigger this event is just giving them a handle to the function
+// these are more tricky. this is the problem state management systems are trying to solve. these are basically carbon actors
 
-// // one way to maybe make this more sane is have some kind of "capability" driven system. design the types of these function handles such that you can only use one if you also have a handle to the entity that created it. This means that the creator has to explicitly grant you access
+// one way to maybe make this more sane is have some kind of "capability" driven system. design the types of these function handles such that you can only use one if you also have a handle to the entity that created it. This means that the creator has to explicitly grant you access
 
 
-// // function make_actor() {
-// // 	const actor_symbol: unique symbol = Symbol()
-// // }
+// function make_actor() {
+// 	const actor_symbol: unique symbol = Symbol()
+// }

@@ -121,8 +121,8 @@ export type Component = {
 }
 
 function setup({ todo, celebrateCompletion }: Args<Component>) {
-	const { description, completed } = splitObject(todo)
-	const stateClass = computed((): string => completed() ? 'text-strike' : '')
+	const { description, completed } = destructureSync(todo)
+	const stateClass = computed(() => completed() ? 'text-strike' : '')
 
 	const editing = value(false)
 	function beginEditing() {
