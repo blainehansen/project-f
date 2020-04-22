@@ -175,6 +175,8 @@ class StatefulComputation<T> extends Computation<T> {
 	}
 
 	initialize() {
+		// TODO for computations that didn't capture any actual signals
+		// we should send a flag or something indicating to just throw everything away
 		const { owner, listener, mutationAllowed } = this.STATE
 		this.STATE.owner = this as Computation
 		this.STATE.listener = this as Computation

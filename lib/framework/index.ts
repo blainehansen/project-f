@@ -21,9 +21,9 @@ export type Events<T> = T extends { events: Dict<any> }
 
 export type Slots<T> = T extends { slots: Dict<any> }
 	? {
-		[K in keyof T['slots']]: TupleLike<T['events'][K]> extends true
-			? (...args: T['events'][K]) => HTML
-			: (arg: T['events'][K]) => HTML
+		[K in keyof T['slots']]: TupleLike<T['slots'][K]> extends true
+			? (...args: T['slots'][K]) => HTML
+			: (arg: T['slots'][K]) => HTML
 	}
 	: {}
 

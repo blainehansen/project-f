@@ -44,6 +44,8 @@ import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 export const enum DisplayType { empty, text, node, many }
 
 // numbers and booleans are notably absent, pipe them through a string renderer first
+// we might want to allow the array variant to contain null | undefined | string as well
+// either that or we simply control for emptiness at the level of the @each directive?
 export type Displayable = null | undefined | string | Node | Node[]
 
 export type Value =

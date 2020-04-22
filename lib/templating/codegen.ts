@@ -216,6 +216,12 @@ export function generateTag(
 		const [isDynamic, finalValue] =
 			value === undefined ? [false, ts.createTrue()]
 			: typeof value === 'string' ? [false, ts.createStringLiteral(value)]
+			// TODO this might not be a good idea for basic attributes,
+			// since we shouldn't necessarily assume this thing is itself reactive
+			// what about the situations where this is part of the static render?
+			// or a value they merely produced from something else?
+			// component props are the only place where it makes some kind of sense
+			// to get everything into Immutable form *somehow*
 			: value.isBare ? [true, createRawCodeSegment(`${value.code}()`)]
 			: [true, createRawCodeSegment(value.code)]
 
@@ -224,6 +230,15 @@ export function generateTag(
 		// and then continue out of this loop iteration
 		// if (attribute === 'id') if not dynamic throw new Error("don't use the `id` attribute, use `#id-name` syntax instead")
 		// if (attribute === 'class') if not dynamic throw new Error("don't use the `class` attribute, use `.class-name` syntax instead")
+
+		if (attribute === '&fn')
+			throw new Error('unimplemented')
+
+		// const re = /^(?:\w*\([a-zA-Z_0-9]*\)\w*\=\>)|(?:\w*[a-zA-Z_0-9]*\w*\=\>)/
+		// console.log(re.test('(sd: e) =>'))
+		// console.log(re.test('(*) =>'))
+		if (attribute.startsWith('@'))
+			throw new Error('unimplemented')
 
 		const target = attribute === 'style'
 			? ts.createPropertyAccess(tagName, 'style')
@@ -235,8 +250,10 @@ export function generateTag(
 		statements.push(attributeAssignment)
 	}
 
-	const childStatements = entities.map((entity, index) => generateEntity(entity, `${offset}_${index}`, childLone, containerName))
-	statements.push_all(childStatements)
+	for (const [index, entity] of entities.entries()) {
+		const childStatement = generateEntity(entity, `${offset}_${index}`, childLone, containerName)
+		statements.push(childStatement)
+	}
 
 	return statements
 }
@@ -254,11 +271,11 @@ export function generateText(
 			: ` ${item.content}`
 	}
 
-	// TODO in this case you can simply set the textContent of parent
-	// if (isLone)
-	// 	return [createFieldAssignment(parent, 'textContent', )]
+	if (isLone) return isDynamic
+		? [createEffectBind(parent, 'textContent', createRawCodeSegment('`' + content + '`'))]
+		: [createFieldAssignment(parent, 'textContent', ts.createStringLiteral(content))]
 
-	const textIdent = ts.createIdentifier(`___text${offset}`)
+	// const textIdent = ts.createIdentifier(`___text${offset}`)
 	return isDynamic
 		? [
 			createCall(requireRuntime('createBoundTextNode'), [

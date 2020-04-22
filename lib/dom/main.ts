@@ -16,9 +16,10 @@ function TextInput(parent: Node) {
 	const input = document.createElement('input')
 	input.type = 'text'
 	input.placeholder = 'yo yo'
-	input.oninput = e => {
-		text((e.target as typeof input).value)
+	input.oninput = $event => {
+		text(($event.target as typeof input).value)
 	}
+	// in order to
 	effect(() => {
 		input.value = text()
 	})
@@ -49,7 +50,7 @@ function CheckboxIfElseBlock(parent: Node) {
 	effect(() => {
 		input.checked = checked()
 	})
-	input.onchange = () => {
+	input.onchange = $event => {
 		checked(input.checked)
 	}
 	component.appendChild(input)
@@ -110,7 +111,7 @@ function ForLoop(parent: Node) {
 				// function deleteItem(index) {
 				// 	list.splice(index, 1)
 				// }
-				deleteButton.onclick = () => {
+				deleteButton.onclick = $event => {
 					const currentList = list()
 					currentList.splice(index, 1)
 					list(currentList)
@@ -125,11 +126,11 @@ function ForLoop(parent: Node) {
 	const input = document.createElement('input')
 	input.type = 'text'
 	input.placeholder = 'add a new letter'
-	input.onkeyup = e => {
-		if (e.key !== 'Enter') return
+	input.onkeyup = $event => {
+		if ($event.key !== 'Enter') return
 
-		const newLetter = (e.target as typeof input).value
-		;(e.target as typeof input).value = ''
+		const newLetter = ($event.target as typeof input).value
+		;($event.target as typeof input).value = ''
 
 		const currentList = list()
 		currentList.push(newLetter)
