@@ -31,7 +31,7 @@ function TextInput(parent: Node) {
 	})
 	component.appendChild(display)
 
-	// return component
+	return component
 }
 
 
@@ -74,7 +74,7 @@ function CheckboxIfElseBlock(parent: Node) {
 	// 	contentDiv.textContent = checked() ? 'on' : 'off'
 	// })
 
-	// return component
+	return component
 }
 
 // div
@@ -138,9 +138,70 @@ function ForLoop(parent: Node) {
 	}
 	component.appendChild(input)
 
-	// return component
+	return component
 }
 
-TextInput(body)
-CheckboxIfElseBlock(body)
-ForLoop(body)
+
+// @if (condition())
+//   @each (item of items()) {{ item }}
+function IfThenEach(parent: Node) {
+	const component = document.createElement('div')
+
+	const condition = value(true)
+	const items = channel(['a', 'b', 'c'])
+	statefulEffect(current => {
+		return replaceContent(
+			component, current,
+			condition()
+				? items().map(item => document.createTextNode(item))
+				: undefined
+		)
+	}, { type: DisplayType.empty, content: undefined } as ContentState)
+
+	parent.appendChild(component)
+	return component
+}
+
+
+// @each (item of items())
+//   @if (item.condition()) {{ item.name }}
+function EachThenIf(parent: Node) {
+	const component = document.createElement('div')
+
+	const items = channel([
+		{ name: 'a', condition: value(true) },
+		{ name: 'b', condition: value(false) },
+		{ name: 'c', condition: value(false) },
+		{ name: 'd', condition: value(true) },
+	])
+	statefulEffect(current => {
+		return replaceContent(
+			component, current,
+			items().map(item => {
+				const placeholder = new Comment()
+				component.appendChild(placeholder)
+
+				statefulEffect(current => {
+					return replaceRange(
+						current,
+						item.condition()
+							? document.createTextNode(item.name)
+							: new Comment()
+					)
+				}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
+
+				return placeholder
+			})
+		)
+	}, { type: DisplayType.empty, content: undefined } as ContentState)
+
+	parent.appendChild(component)
+	return component
+}
+
+
+// TextInput(document.body)
+// CheckboxIfElseBlock(document.body)
+// ForLoop(document.body)
+// IfThenEach(document.body)
+EachThenIf(document.body)

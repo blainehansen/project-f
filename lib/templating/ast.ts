@@ -1,5 +1,15 @@
 import { NonEmpty } from '../utils'
 
+export class ComponentDefinition {
+	constructor(
+		// just using name/optional pairs is the simplest thing we need to render all of the code
+		readonly props: { name: string, optional: boolean }[],
+		readonly syncs: { name: string, optional: boolean }[],
+		readonly events: { name: string, optional: boolean }[],
+		readonly slots: { name: string, optional: boolean }[],
+	) {}
+}
+
 export type Entity =
 	| Tag
 	| Directive
@@ -40,74 +50,6 @@ export class AttributeCode {
 	) {}
 }
 
-// export class Directive {
-// 	readonly type = 'Directive' as const
-// 	constructor(
-// 		readonly isPlus: boolean,
-// 		readonly ident: string,
-// 		readonly code: string | undefined,
-// 		readonly entities: Entity[],
-// 	) {}
-// }
-export type Directive =
-	| IfBlock
-	| EachBlock
-	| ComponentInclusion
-	| SlotDefinition
-	| SlotProvidence
-	// | MacroTemplate
-
-export class IfBlock {
-	constructor(
-		readonly expression: string,
-		readonly elseBranch: IfBlock | NonEmpty<Entity> | undefined,
-	) {}
-}
-
-export class EachBlock {
-	constructor(
-		readonly receiverExpression: string,
-		readonly listExpression: string,
-		readonly emptyBranch: NonEmpty<Entity> | undefined,
-	) {}
-}
-
-export class ComponentInclusion {
-	constructor(
-		readonly name: string,
-		readonly params: string | undefined,
-		readonly entities: Entity[],
-	) {}
-}
-
-export class SlotDefinition {
-	constructor(
-		readonly name: string | undefined,
-		readonly paramsExpression: string | undefined,
-		readonly fallback: NonEmpty<Entity> | undefined,
-	) {}
-}
-
-export class SlotProvidence {
-	constructor(
-		readonly name: string | undefined,
-		readonly receiverExpression: string | undefined,
-		readonly entities: NonEmpty<Entity>,
-	) {}
-}
-
-// inside a Component, to define the slots:
-// div
-// 	@slot ()
-
-export class MacroTemplate {
-	constructor(
-		readonly argsExpression: string,
-		readonly entities: NonEmpty<Entity>,
-	) {}
-}
-
-
 
 export class TextSection {
 	readonly type = 'TextSection' as const
@@ -120,5 +62,117 @@ export class TextItem {
 	constructor(
 		readonly isCode: boolean,
 		readonly content: string,
+	) {}
+}
+
+
+export type Directive =
+	| ComponentInclusion
+	| IfBlock
+	| EachBlock
+	// matches and switches are different
+	// - switches allow fallthrough of *empty* cases,
+	// 	but all nonempty ones implicitly have a return (we aren't appending to a list of Displayables)
+	// - matches don't allow fallthrough. empty cases will render nothing
+	| MatchBlock
+	| SwitchBlock
+	| SlotDefinition
+	| SlotInsertion
+	| TemplateDefinition
+	| TemplateInclusion
+
+export class ComponentInclusion {
+	readonly type = 'ComponentInclusion' as const
+	constructor(
+		readonly name: string,
+		readonly params: string | undefined,
+		readonly entities: Entity[],
+	) {}
+}
+
+export class IfBlock {
+	readonly type = 'IfBlock' as const
+	constructor(
+		readonly expression: string,
+		readonly elseBranch: IfBlock | NonEmpty<Entity> | undefined,
+	) {}
+}
+
+export class EachBlock {
+	readonly type = 'EachBlock' as const
+	constructor(
+		readonly receiverExpression: string,
+		readonly listExpression: string,
+		// readonly keyExpression: string | undefined,
+		// readonly emptyBranch: NonEmpty<Entity> | undefined,
+	) {}
+}
+
+export class MatchBlock {
+	readonly type = 'MatchBlock' as const
+	constructor(
+		readonly matchExpression: string,
+		readonly patterns: MatchPattern[],
+		readonly defaultPattern: Entity[] | undefined,
+	) {}
+}
+
+export class MatchPattern {
+	constructor(
+		readonly expression: string,
+		readonly entities: Entity[],
+	) {}
+}
+
+export class SwitchBlock {
+	readonly type = 'SwitchBlock' as const
+	constructor(
+		readonly switchExpression: string,
+		readonly cases: SwitchCase[],
+		readonly defaultCase: NonEmpty<Entity> | undefined,
+	) {}
+}
+
+export class SwitchCase {
+	constructor(
+		readonly expression: string,
+		// allows for empty rendering or fallthrough
+		readonly entities: Entity[],
+	) {}
+}
+
+export class SlotDefinition {
+	readonly type = 'SlotDefinition' as const
+	constructor(
+		readonly name: string | undefined,
+		readonly paramsExpression: string | undefined,
+		readonly fallback: NonEmpty<Entity> | undefined,
+	) {}
+}
+
+export class SlotInsertion {
+	readonly type = 'SlotInsertion' as const
+	constructor(
+		readonly name: string | undefined,
+		readonly receiverExpression: string | undefined,
+		readonly entities: NonEmpty<Entity>,
+	) {}
+}
+
+
+export class TemplateDefinition {
+	readonly type = 'TemplateDefinition' as const
+	constructor(
+		readonly name: string,
+		readonly argsExpression: string | undefined,
+		readonly entities: NonEmpty<Entity>,
+	) {}
+}
+
+export class TemplateInclusion {
+	readonly type = 'TemplateInclusion' as const
+	constructor(
+		readonly name: string,
+		readonly argsExpression: string | undefined,
 	) {}
 }
