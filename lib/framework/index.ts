@@ -1,4 +1,3 @@
-// framework.ts
 import { Dict, TupleLike } from '../utils'
 import { Immutable, Mutable } from '../reactivity'
 
@@ -27,10 +26,8 @@ export type Slots<T> = T extends { slots: Dict<any> }
 	}
 	: {}
 
-
 export type Args<T> = Props<T> & Syncs<T> & Events<T>
 export type FullArgs<T> = Args<T> & Slots<T>
-// this needs some conditional ? : never on the overlap of FullArgs<C> and ReturnType<F> to ensure you aren't overwriting the props stuff
 export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnType<F>
 
 

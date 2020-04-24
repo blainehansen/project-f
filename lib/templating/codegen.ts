@@ -96,7 +96,16 @@ function createFragmentConstructor(targetName: string) {
 	)
 }
 
-// function render(parent: Node, { a, someSlot }: FullArgs<Component>) {
+// as an optimization for the call sites to avoid a bunch of empty object allocations,
+// you can pass a reference to the same global empty object for all the groups that haven't provided anything
+// function render(
+// 	parent: Node,
+// 	{}: ComponentArgs<Component>,
+// 	{ a }: ComponentProps<Component>,
+// 	{}: ComponentEvents<Component>,
+// 	{}: ComponentSyncs<Component>,
+// 	{ someSlot }: ComponentSlots<Component>,
+// ) {
 // 	const { d } = setup({ a } as Args<Component>)
 // 	// go along producing the dom stuff
 // }

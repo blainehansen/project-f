@@ -1,5 +1,3 @@
-It's time to figure out our docs
-
 # Template Syntax
 
 ## Text
@@ -25,37 +23,40 @@ p
 
 ```wolf
 div(id=dynamicId)
-div(id={ reactiveId() })
+div(:id={ reactiveId() })
 
 
 button(disabled=isButtonDisabled)
 
 //- static string attributes work the same as before
-button(disabled="true")
+button(something="yoyo")
 ```
 
-<!-- there are a couple of ways around the problem of whether to "prop-wrap" things or not -->
+Four levels of attribute binding
 
-```wolf
-//- make a shorthand for "don't call"
-div(hidden.direct=something)
-div(*hidden=something)
+- static, with the string syntax: `attr="something"`
+- dynamic, but non-reactive: `attr=something` `attr={ something.complex() }`
+- dynamic, reactive `Immutable`: `:attr=something` `:attr={ something.complex() }`
+- dynamic, reactive `Mutable`: `!attr=something` `!attr={ something.complex() }`
 
-//- make a shorthand for the opposite, "call"
-div(hidden.bind=something)
-div((hidden)=something)
-div(*hidden=something)
+this means there's no behavioral difference between the bare and complex forms for each of these
 
-//- make a shorthand for "wrap", as in take my non Immutable and turn it into one
-div(hidden.wrap=something)
-```
+the argument syntax of the actual component can have multiple separate objects representing the props/syncs/etc. since the users will never actually interact with that form, the prefixes just let the framework know which group to put this symbol in. the generated code can then just destructure each group in the args, and lump them all together in the call to the setup function.
+
+`:attr.fake={ some expression that isn't an Immutable }` shorthand might be nice to allow wrapping non `Immutable` values
+`!attr.fake={ some expression that resolves to an Immutable }` shorthand would also be nice to generate a fake `Mutable` from an `Immutable`, with a noop setting side
+`!attr.setter={ get, set }` shorthand would also be nice to generate a setter from a non `Mutable`
+
+all of these shorthands would merely exist to save people noisy imports for these common cases
+
+in the context of props and syncs to components, the reactive options won't be wrapped or called in any way, but merely passed down to the component. so they aren't reactive *at the site*, but reactive within the component once used
 
 ## Using Expressions
 
 ```wolf
 | {{ number + 1 }}
 
-| {{ ok ? 'YES' : 'NO' }}
+| {{ ok() ? 'YES' : 'NO' }}
 
 | {{ message.split('').reverse().join('') }}
 
@@ -121,6 +122,17 @@ Because if blocks aren't attached to specific nodes, they automatically work to 
   button burn it down
 ```
 
+Switch statements are also supported.
+
+```wolf
+@switch (item.type)
+  @case ('Person'): p {{ item.name }}
+  @case ('Animal')
+    strong Oh you're so fluffy!!!
+    p {{ item.fluffiness }}
+  @default: p hmmmm
+```
+
 ## Using `key` to control conditional reuse
 
 Still thinking about this
@@ -131,7 +143,7 @@ Still thinking about this
 ```wolf
 ul#example-1
   <!-- :key="item.message" -->
-  @each (item in items())
+  @each (item of items())
     li {{ item.message }}
 ```
 
@@ -147,7 +159,7 @@ export function setup() {
 
 ```wolf
 ul#example-2
-  @each ((item, index) in items(), key=item.message)
+  @each ((item, index) of items(), key=item.message)
     span {{ index }}
     li {{ parentMessage() }} - {{ item.message }}
 ```
@@ -177,12 +189,57 @@ Since `@if` and `@each` aren't attached to particular nodes, they can be intuiti
 ```wolf
 //- only render the loop if the condition is true
 @if (condition)
-  @each (item in items()) {{ item.name }}
+  @each (item of items()) {{ item.name }}
 
-//- only render an item of the loop if the condition is true (you can think of this like `continue` in for loops if nothing is rendered)
-@each (item in items())
+//- only render an item of the loop if the condition is true
+@each (item of items())
   @if (item.condition) {{ item.name }}
 ```
+
+
+# Template Macros
+
+Sometimes we find ourself in a situation where some little piece of our template is repeated multiple times, but is too trivial to be worth its own component definition. For those situations, we have the `@template` and `@include` directives.
+
+`@template` creates a little "macro" that can be reused with `@include`.
+
+```wolf
+h1 Hello World!
+
+//- excitedGreeting is the name of this template
+@template (excitedGreeting)
+  strong Wow how are you doing!!!!
+  strong 🥰 🥰 🥰 🥰 🥰
+
+//- templates can be thought of like little functions
+//- so they can even take arguments
+//- defined in the same syntax as typescript functions
+@template (hello, name: string)
+  div How are you doing {{ name }}?
+  div Are you having a nice day?
+
+@include (hello, 'World')
+@include (hello, 'Everybody')
+
+div Here are our wonderful people:
+@each (person of people())
+  @include (hello, person.name)
+  @if (person.favorite)
+    @include (excitedGreeting)
+
+h2 And these are our incredible worlds!!
+@each (world of worlds())
+  div This world has this many inhabitants: {{ world.inhabitants }}
+  @include (hello, world)
+  @include (excitedGreeting)
+
+  @each (inhabitant of inhabitants())
+    div And also to you, respected {{ inhabitant.title }}
+    @include (hello, inhabitant.name)
+```
+
+Strictly speaking this feature isn't *essential*, since you can always achieve the same thing by iterating over complex arrays and using other kinds of conditional statements. But when you want this feature, you'll love it.
+
 
 # Event Handling
 
@@ -250,13 +307,13 @@ Also very reasonable.
 
 # Form Input Bindings
 
-For low level primitive html inputs, the `:sync` attribute is used to bind the value of the input to some signal. In general, the syntax of prefixing a colon `:` on some attribute means that the attributed is "synced", a two-way binding, so whatever you pass will be expected to be of type `Mutable`.
+For low level primitive html inputs, the `!sync` attribute is used to bind the value of the input to some signal. In general, the syntax of prefixing a colon `!` on some attribute means that the attributed is "synced", a two-way binding, so whatever you pass will be expected to be of type `Mutable`.
 
 ## Text
 
 ```wolf
 //- default type is text
-input(:sync=message, placeholder="edit me")
+input(!sync=message, placeholder="edit me")
 p Message is: {{ message() }}
 ```
 
@@ -266,19 +323,20 @@ p Message is: {{ message() }}
 span Multiline message is:
 p(style="white-space: pre-line;") {{ message() }}
 br
-textarea(:sync=message, placeholder="add multiple lines")
+textarea(!sync=message, placeholder="add multiple lines")
 ```
 
 # Checkbox
 
 ```wolf
-input#checkbox(type="checkbox", :sync=checked)
+input#checkbox(type="checkbox", !sync=checked)
 label(for="checkbox") {{ '' + checked() }}
 ```
 
 ```ts
 export function setup() {
   const checked = value(false)
+  return { checked }
 }
 ```
 
@@ -288,22 +346,21 @@ export function setup() {
 ## Radio
 
 ```wolf
-input(type="radio" value="One", :sync=picked) One
-input(type="radio" value="Two", :sync=picked) Two
+input(type="radio" value="One", !sync=picked) One
+input(type="radio" value="Two", !sync=picked) Two
 span Picked: {{ picked }}
 //- of course, `value` can be dynamic
-input(type="radio" value=oneVariable, :sync=picked) One
+input(type="radio" value=oneVariable, !sync=picked) One
 ```
 
 ## Select
 
 ```wolf
-select(:sync=selected)
+select(!sync=selected)
   option(value=null) Please select one
   option A
   option B
-  option C
-  option(value="A") Actually A
+  option(value="C") This is the tricky one
 span Selected: {{ selected() }}
 ```
 
@@ -319,7 +376,7 @@ export function setup() {
 When you give the `multiple` flag, the select will expect to bind to an array.
 
 ```wolf
-select(:sync=selected, multiple)
+select(!sync=selected, multiple)
   option A
   option B
   option C
@@ -344,16 +401,12 @@ export function setup() {
 
 ## Complex Binding
 
-<!-- TODO blaine this might not be how you want to do this, it's less flexible -->
-<!-- instead just provides functions like `setter` and then don't wrap their stuff any particular way -->
-<!-- we might be able to produce a shorthand for just this one case -->
-<!-- or even better! allow dot-style arguments to the sync to signal you want a shorthand -->
-If you pass a complex expression to any `:sync` style binding, it will be passed to the `Reactivity.setter` function, which produces a `Mutable`. You can use this to wire up more complex reactivity.
+The `.setter` modifier can be used on any `Sync` attribute to call the `Reactivity.setter` function to create a `Mutable` wired up from two different functions.
 
 ```wolf
 @if (completed()): p The task is done!
 @else Oh man....
-input(type="checkbox", :sync={ completed, complete })
+input(type="checkbox", !sync.setter={ completed, complete })
 ```
 
 ```ts
@@ -372,7 +425,7 @@ export function setup() {
 
 # Components Basics
 
-Components are defined in a single file, with a `#!` to indicate which section you're in.
+Components are defined in a single file, with a `#!` to indicate the beginning of a new section.
 The default template language is `wolf`, and the script section must be in typescript.
 The type signature of the component is determined by the exported `Component` type (a "bare" component that takes no props, no syncs, emits no events, and has no slots, is inferred if this `Component` type is missing).
 The exported `setup` function lets you expose variables to the template.
@@ -414,7 +467,7 @@ div#components-demo
 h3 {{ title() }}
 .body(&fn={ unsafe(body()) })
 
-#!
+#! script
 export type Component = {
   props: { title: string },
 }
@@ -446,7 +499,7 @@ It's very often necessary for a child component to send some kind of messages to
 #! template
 .Greeter
   p I'm a child component that likes to say hello!
-  input(:sync=name, placeholder="type a name!")
+  input(!sync=name, placeholder="type a name!")
   button(@click=sendMessage) Send this message: {{ message() }}
 
 #! script
@@ -477,7 +530,7 @@ Then the parent can listen for these events:
 #! template
 .Greeted
   p Here are all the messages I've received:
-  @each (message in messages())
+  @each (message of messages())
     p.message {{ message }}
 
   +Greeter(message="Hello", @send=receive)
@@ -501,7 +554,7 @@ export type Component = {
   events: {
     // events can have any typescript type as their payload
     status: 'failed' | 'succeeded' | null,
-    // status: ('failed' | 'succeeded' | null) => void
+    // status: (arg: 'failed' | 'succeeded' | null) => void
     numbers: number[],
     // numbers: (arg: number[]) => void
     todo: { task: string, done: boolean },
@@ -522,7 +575,7 @@ export type Component = {
 
     // sky's the limit! you can even do optional and spread types!
     optionalString: [number, boolean, string?],
-    // optionalString: (arg1: number, arg2: boolean, arg3: string?) => void
+    // optionalString: (arg1: number, arg2: boolean, arg3?: string) => void
     nameAndNumbers: [string, ...number[]],
     // nameAndNumbers: (arg1: string, ...args: number[]) => void
   },
@@ -546,21 +599,45 @@ What if you want to use props and events together to make a parent and child coo
 
 Syncs essentially put a prop and an event together in the same package.
 
-Syncs aren't always "real", meaning it just have to have the type of `() => T & (value: T) => void`. The parent doesn't have to *actually* give a child direct mutable access to a value. It can just listen for the child's events coming back up, and do whatever it wants with them, including ignore them.
+Syncs aren't always "real", meaning it just has to have the type of `() => T & (value: T) => void`. The parent doesn't have to *actually* give a child direct mutable access to a value. It can just listen for the child's events coming back up, and do whatever it wants with them, including ignore them.
 
 ```iron
 #! template
 .Checkbox
-  input(type="checkbox", :sync=checked)
+  input(type="checkbox", !sync=checked)
 
 #! script
 export type Component = {
-  // now we've changed checked to be a sync instead
   syncs: { checked: boolean },
-  // so we don't need that extra event
 }
-// and we don't need a setup function to wire everything up
-// the type of checked is `Mutable` rather than `Immutable` like with a prop
+```
+
+Sometimes a component asks for a `Sync`, but you don't actually want to let it directly mutate your value. For this, you can use the `.setter` and `.fake` shorthands.
+
+```iron
+#! template
++ChildComponent(!syncedNumber.setter={ getterSide, setterSide })
+
+//- this creates a `Mutable` with a noop setter side
+//- so equivalent to: setter(fakeSync, () => {})
++ChildComponent(!syncedNumber.fake=fakeSync)
+
+#! script
+export function setup() {
+  let localSum = 0
+  function getterSide(): number {
+    return 0
+  }
+  function setterSide(n: number): void {
+    localSum += n
+  }
+
+  function fakeSync(): number {
+    return 5
+  }
+
+  return { getterSide, setterSide, fakeSync }
+}
 ```
 
 
@@ -599,9 +676,9 @@ header
 
   //- all arguments passed after the slot identifier
   //- with be passed to the below scope
-  @slot(default: siteMetadata, globalTitle)
+  @slot(default; siteMetadata, globalTitle)
 
-  @slot(footer: { links, contact })
+  @slot(footer, { links, contact })
 
 #! script
 type Component = {
@@ -635,18 +712,21 @@ type Component = {
   //- but we'll ignore the globalTitle passed to us
   @insert(default, metadata)
     p Here's some content for ya!
-    p You're using this browser! {{ metadata.browser }}
+    p You're using this browser: {{ metadata.browser }}
 
   //- we could skip footer, but we won't this time
   @insert(footer, { links, contact }): .footer-box
     p Contact us: {{ contact() }}
     p Have some links:
-    @each(link in links)
+    @each(link of links)
       p {{ link }}
 ```
 
 
-## How do we do dynamic components? The same I'd imagine, all of them just have to have assignable types.
+## Dynamic Components
+
+<!-- How do we do dynamic components? The same I'd imagine, all of them just have to have assignable types. -->
+<!-- perhaps it's natural to have a @component or @dynamic directive -->
 
 
 # Refs
@@ -654,6 +734,6 @@ type Component = {
 should we allow refs?
 we have a few ways to do it:
 
-- just allow them to create nodes themselves and expose them to the template, and then have a special syntax to indicate "hey this node is the place where I want you to put this"
-- simply allow the `&fn` feature
-- put a `refs` property on the `Component` type, so they'll receive it in their setup function
+- just allow them to create nodes themselves and expose them to the template, and then have a special syntax to indicate "hey this node is the place where I want you to put this" (might as well include this, use syntax `div($nodeBinding)`)
+- simply allow the `&fn` feature so they can attach to and manipulate the nodes we've already created
+- put a `refs` property on the `Component` type, so they'll receive it in their setup function (don't like this as much, less flexible and it fairly substantially complicates codegen)
