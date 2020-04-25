@@ -1,3 +1,7 @@
+export function exec<T>(fn: () => T): T {
+	return fn()
+}
+
 export type Dict<T> = { [key: string]: T }
 export type Primitive = string | number | boolean | null | undefined
 export type OnlyAllow<A, E> = A extends E ? A : never

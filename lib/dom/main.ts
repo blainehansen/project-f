@@ -1,9 +1,53 @@
 // https://mattallan.me/posts/modern-javascript-without-a-bundler/
 // file:///home/blaine/lab/project-f/lib/dom/main.html
 
-import { NonLone } from '../utils'
+import { NonLone, exec } from '../utils'
 import { replaceContent, replaceRange, Displayable, DisplayType, Range, ContentState } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
+
+function switcher(parent: Node, checked: Mutable<boolean>) {
+	const input = document.createElement('input')
+	input.type = 'checkbox'
+	effect(() => {
+		input.checked = checked()
+	})
+	input.onchange = $event => {
+		checked(input.checked)
+	}
+	parent.appendChild(input)
+	return input
+}
+
+function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) => T) {
+	const input = document.createElement('input')
+	input.type = 'text'
+	input.placeholder = 'append'
+	input.onkeyup = $event => {
+		if ($event.key !== 'Enter') return
+
+		const newLetter = ($event.target as typeof input).value
+		;($event.target as typeof input).value = ''
+
+		const currentList = list()
+		currentList.push(fn(newLetter))
+		list(currentList)
+	}
+
+	parent.appendChild(input)
+	return input
+}
+
+function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
+	const deleteButton = document.createElement('button')
+	deleteButton.textContent = "delete"
+	deleteButton.onclick = $event => {
+		const currentList = list()
+		currentList.splice(index, 1)
+		list(currentList)
+	}
+	parent.appendChild(deleteButton)
+}
+
 
 // div
 // 	input(type="text", placeholder="yo yo", :value=text)
@@ -45,15 +89,7 @@ function CheckboxIfElseBlock(parent: Node) {
 	parent.appendChild(component)
 
 	const checked = value(true)
-	const input = document.createElement('input')
-	input.type = 'checkbox'
-	effect(() => {
-		input.checked = checked()
-	})
-	input.onchange = $event => {
-		checked(input.checked)
-	}
-	component.appendChild(input)
+	switcher(component, checked)
 
 	const contentDiv = document.createElement('div')
 	const elseDiv = document.createElement('b')
@@ -79,9 +115,9 @@ function CheckboxIfElseBlock(parent: Node) {
 
 // div
 // 	h1 Here are some letters:
-// 	@map (letter in list()): div
-// 	@map ((letter: string) in list()): div
-// 	@map ((letter, index) in list()): div
+// 	@each (letter of list()): div
+// 	@each ((letter: string) of list()): div
+// 	@each ((letter, index) of list()): div
 // 		i the letter: {{ letter() }}
 // 		button(@click={ deleteItem(index) }) delete this letter
 // 	input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
@@ -105,66 +141,62 @@ function ForLoop(parent: Node) {
 				const item = document.createElement('i')
 				item.textContent = `the letter: "${letter}"`
 				d.appendChild(item)
-
-				const deleteButton = document.createElement('button')
-				deleteButton.textContent = "delete this letter"
-				// function deleteItem(index) {
-				// 	list.splice(index, 1)
-				// }
-				deleteButton.onclick = $event => {
-					const currentList = list()
-					currentList.splice(index, 1)
-					list(currentList)
-				}
-				d.appendChild(deleteButton)
-
+				deleter(d, list, index)
 				return d
 			}),
 		)
 	}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
 
-	const input = document.createElement('input')
-	input.type = 'text'
-	input.placeholder = 'add a new letter'
-	input.onkeyup = $event => {
-		if ($event.key !== 'Enter') return
-
-		const newLetter = ($event.target as typeof input).value
-		;($event.target as typeof input).value = ''
-
-		const currentList = list()
-		currentList.push(newLetter)
-		list(currentList)
-	}
-	component.appendChild(input)
+	appender(component, list, s => s)
 
 	return component
 }
 
-
+// input(type="checkbox", !sync=condition)
 // @if (condition())
-//   @each (item of items()) {{ item }}
+//   @each ((item, index) of items()): div
+// 		| {{ item }}
+// 		button(@click={ delete(index) }) delete
+// input(type="text", @click.enter=append)
 function IfThenEach(parent: Node) {
 	const component = document.createElement('div')
 
 	const condition = value(true)
+	switcher(component, condition)
+
 	const items = channel(['a', 'b', 'c'])
+	const placeholder = new Comment()
+	component.appendChild(placeholder)
 	statefulEffect(current => {
-		return replaceContent(
-			component, current,
+		return replaceRange(
+			current,
 			condition()
-				? items().map(item => document.createTextNode(item))
-				: undefined
+				? items().map((item, index) => {
+					const div = document.createElement('div')
+					const text = document.createTextNode(item)
+					div.appendChild(text)
+					deleter(div, items, index)
+					return div
+				})
+				: undefined,
 		)
-	}, { type: DisplayType.empty, content: undefined } as ContentState)
+	}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
+
+	appender(component, items, s => s)
 
 	parent.appendChild(component)
 	return component
 }
 
 
+
 // @each (item of items())
-//   @if (item.condition()) {{ item.name }}
+// 	@if (item.condition()): div
+// 		| {{ item.name }}
+// 		button(@click=delete)
+// @each (item of items())
+// 	input(type="checkbox", !sync={ item.condition })
+// appender
 function EachThenIf(parent: Node) {
 	const component = document.createElement('div')
 
@@ -174,26 +206,48 @@ function EachThenIf(parent: Node) {
 		{ name: 'c', condition: value(false) },
 		{ name: 'd', condition: value(true) },
 	])
+	const placeholder = new Comment()
+	component.appendChild(placeholder)
 	statefulEffect(current => {
-		return replaceContent(
-			component, current,
-			items().map(item => {
-				const placeholder = new Comment()
-				component.appendChild(placeholder)
+		return replaceRange(
+			current,
+			items().map((item, index) => {
+				const itemPlaceholder = new Comment()
+				fragment.appendChild(itemPlaceholder)
 
 				statefulEffect(current => {
 					return replaceRange(
 						current,
 						item.condition()
-							? document.createTextNode(item.name)
-							: new Comment()
+							? exec(() => {
+								const div = document.createElement('div')
+								const text = document.createTextNode(item.name)
+								div.appendChild(text)
+								deleter(div, items, index)
+								return div
+							})
+							: undefined
 					)
-				}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
+				}, { parent: fragment, type: DisplayType.empty, item: itemPlaceholder } as Range)
 
-				return placeholder
+				return itemPlaceholder
 			})
 		)
-	}, { type: DisplayType.empty, content: undefined } as ContentState)
+	}, { parent: component, type: DisplayType.empty, item: placeholder } as Range)
+
+	appender(component, items, name => ({ name, condition: value(Math.random() > 0.5) }))
+
+	const conditionsPlaceholder = new Comment()
+	component.appendChild(conditionsPlaceholder)
+	statefulEffect(current => {
+		const fragment = document.createDocumentFragment()
+		return replaceRange(
+			current,
+			items().map(item => {
+				return switcher(fragment, item.condition)
+			})
+		)
+	}, { parent: component, type: DisplayType.empty, item: conditionsPlaceholder } as Range)
 
 	parent.appendChild(component)
 	return component
