@@ -23,7 +23,7 @@ p
 
 ```wolf
 div(id=dynamicId)
-div(:id={ reactiveId() })
+div(:id=reactiveId)
 
 
 button(disabled=isButtonDisabled)

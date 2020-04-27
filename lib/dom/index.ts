@@ -1,45 +1,35 @@
 import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 
-// export function createElement<K extends keyof HTMLElementTagNameMap>(
-// 	parent: Node,
-// 	tagName: K,
-// ): HTMLElementTagNameMap[K] {
-//   const el = document.createElement(tagName)
-//   parent.appendChild(el)
-//   return el
-// }
+import { statefulEffect } from '../reactivity'
 
-// export function createTextNode(
-// 	parent: Node,
-// 	content: string,
-// ): Text {
-// 	const el = document.createTextNode(content)
-// 	parent.appendChild(el)
-// 	return el
-// }
+export function createElement<K extends keyof HTMLElementTagNameMap>(
+	parent: Node,
+	tagName: K,
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tagName)
+  parent.appendChild(el)
+  return el
+}
 
-// const svgNS = 'http://www.w3.org/2000/svg' as const
-// export function createSvg<K extends keyof SVGElementTagNameMap>(
-// 	parent: Node,
-// 	svgName: K,
-// ): SVGElementTagNameMap[K] {
-// 	const el = document.createElementNS(svgNS, svgName)
-// 	parent.appendChild(el)
-//   return el
-// }
+export function createTextNode(
+	parent: Node,
+	content: string,
+): Text {
+	const el = document.createTextNode(content)
+	parent.appendChild(el)
+	return el
+}
 
-// cases for begin/end (therefore implied "from many"):
-// # distinct
-// - set to empty: parent.replaceChild(Comment, begin); range.deleteContents(Comment, end)
-// - set to single: parent.replaceChild(node, begin); range.deleteContents(node, end)
-// - set to many: complex array reconciliation
+const svgNS = 'http://www.w3.org/2000/svg' as const
+export function createSvg<K extends keyof SVGElementTagNameMap>(
+	parent: Node,
+	svgName: K,
+): SVGElementTagNameMap[K] {
+	const el = document.createElementNS(svgNS, svgName)
+	parent.appendChild(el)
+  return el
+}
 
-// # null begin or end, simply default their usage above with parent.firstChild and parent.lastChild
-
-// # both null (dealing with entire parent contents)
-// - set to empty: textContent = ''
-// - set to single: parent.appendChild(node)
-// - set to many: complex array reconciliation
 
 export const enum DisplayType { empty, text, node, many }
 
@@ -74,31 +64,43 @@ export type ContentState =
 	| { type: DisplayType.node, content: Node }
 	| { type: DisplayType.many, content: NonLone<Node> }
 
+export class Content {
+	constructor(
+		public parent: Node,
+		public current: ContentState,
+	) {}
+
+	swap(replacement: ContentState): this {
+		this.current = replacement
+		return this
+	}
+}
+
 export function replaceContent(
-	parent: Node,
-	current: ContentState,
+	content: Content,
 	input: Displayable,
-): ContentState {
+): Content {
+	const { parent, current } = content
 	const value = normalizeDisplayable(input)
 	switch (value.type) {
 	case DisplayType.empty: {
 		// do nothing
-		if (current.type === DisplayType.empty) return current
+		if (current.type === DisplayType.empty) return content
 		clearContent(parent)
-		return { type: DisplayType.empty, content: undefined }
+		return content.swap({ type: DisplayType.empty, content: undefined })
 	}
 
 	case DisplayType.text: {
 		const text = value.value
 		if (current.type === DisplayType.text) {
 			current.content.data = text
-			return current
+			return content
 		}
 
 		parent.textContent = text
 		// UNSAFE: we assume here that after setting textContent to a string,
 		// that immediately afterwards the firstChild will be a Text
-		return { type: DisplayType.text, content: parent.firstChild as Text }
+		return content.swap({ type: DisplayType.text, content: parent.firstChild as Text })
 	}
 
 	case DisplayType.node: {
@@ -106,16 +108,16 @@ export function replaceContent(
 		switch (current.type) {
 		case DisplayType.empty:
 			parent.appendChild(node)
-			return { type: DisplayType.node, content: node }
+			return content.swap({ type: DisplayType.node, content: node })
 		case DisplayType.many:
 			clearContent(parent)
 			parent.appendChild(node)
-			return { type: DisplayType.node, content: node }
+			return content.swap({ type: DisplayType.node, content: node })
 		default:
 			if (node === current.content)
-				return current
+				return content
 			parent.replaceChild(node, current.content)
-			return { type: DisplayType.node, content: node }
+			return content.swap({ type: DisplayType.node, content: node })
 		}
 	}
 
@@ -123,70 +125,71 @@ export function replaceContent(
 		const nodes = value.value
 		switch (current.type) {
 		case DisplayType.empty:
-			return { type: DisplayType.many, content: appendAll(parent, nodes) }
+			return content.swap({ type: DisplayType.many, content: appendAll(parent, nodes) })
 		case DisplayType.many:
-			return { type: DisplayType.many, content: reconcileArrays(parent, current.content, nodes) }
+			return content.swap({ type: DisplayType.many, content: reconcileArrays(parent, current.content, nodes) })
 		default:
 			const fragment = makeDocumentFragment(nodes)
 			parent.replaceChild(fragment, current.content)
-			return { type: DisplayType.many, content: nodes }
+			return content.swap({ type: DisplayType.many, content: nodes })
 		}
 	}
 }
 
+export function contentEffect(fn: () => Displayable, parent: Node) {
+	const content = new Content(parent, { type: DisplayType.empty, content: undefined })
+	const destructor = statefulEffect(current => {
+		return replaceContent(current, fn())
+	}, content)
 
-export type Range =
-	| { parent: Node | undefined, type: DisplayType.empty, item: Comment }
-	| { parent: Node | undefined, type: DisplayType.text, item: Text }
-	| { parent: Node | undefined, type: DisplayType.node, item: Node }
-	| { parent: Node | undefined, type: DisplayType.many, item: NonLone<Node> }
-
-export type ParentedRange =
-	| { parent: Node, type: DisplayType.empty, item: Comment }
-	| { parent: Node, type: DisplayType.text, item: Text }
-	| { parent: Node, type: DisplayType.node, item: Node }
-	| { parent: Node, type: DisplayType.many, item: NonLone<Node> }
-
-// export type ParentedRange = Range extends Range ? Overwrite<Range, { parent: Node }> : never
-
-class UnattachedNodePanic extends Panic {
- 	constructor() { super("unattached node") }
+	return destructor
 }
 
-function normalizeRange(range: Range): ParentedRange {
-	const maybeParent = range.parent
-	const parent = range.parent || (
-		range.type === DisplayType.many
-			? range.item[0].parentNode
-			: range.item.parentNode
-	)
 
-	if (!parent) throw new UnattachedNodePanic()
-	return { ...range, parent }
+
+export type RangeState =
+	| { type: DisplayType.empty, item: Comment }
+	| { type: DisplayType.text, item: Text }
+	| { type: DisplayType.node, item: Node }
+	| { type: DisplayType.many, item: RangeMarker }
+
+type RangeMarker = { begin: Comment, end: Comment }
+
+export class Range {
+	constructor(
+		public realParent: Node,
+		public parent: Node,
+		public current: RangeState,
+	) {}
+
+	swap(replacement: RangeState): this {
+		this.current = replacement
+		return this
+	}
 }
 
 export function replaceRange(
 	range: Range,
 	input: Displayable,
-): ParentedRange {
+): Range {
 	const value = normalizeDisplayable(input)
-	const current = normalizeRange(range)
-	const parent = current.parent
+	const { parent, current } = range
 	switch (value.type) {
 	case DisplayType.empty:
 		switch (current.type) {
 		case DisplayType.empty:
-			return current
+			return range
+
 		case DisplayType.many: {
 			const placeholder = new Comment()
 			replaceManyWithSingle(parent, current.item, placeholder)
-			return { parent, type: DisplayType.empty, item: placeholder }
+			return range.swap({ type: DisplayType.empty, item: placeholder })
 		}
 
 		default:
 			const placeholder = new Comment()
 			parent.replaceChild(placeholder, current.item)
-			return { parent, type: DisplayType.empty, item: placeholder }
+			return range.swap({ type: DisplayType.empty, item: placeholder })
 		}
 
 	case DisplayType.text:
@@ -194,51 +197,94 @@ export function replaceRange(
 		switch (current.type) {
 		case DisplayType.text:
 			current.item.data = str
-			return current
+			return range
+
 		case DisplayType.many: {
 			const text = document.createTextNode(str)
 			replaceManyWithSingle(parent, current.item, text)
-			return { parent, type: DisplayType.text, item: text }
+			return range.swap({ type: DisplayType.text, item: text })
 		}
 
 		default:
 			const text = document.createTextNode(str)
 			parent.replaceChild(text, current.item)
-			return { parent, type: DisplayType.text, item: text }
+			return range.swap({ type: DisplayType.text, item: text })
 		}
 
 	case DisplayType.node: {
 		const node = value.value
-		const content = { parent, type: DisplayType.node, item: node } as ParentedRange
+		range.swap({ type: DisplayType.node, item: node })
 		if (current.type === DisplayType.many) {
 			replaceManyWithSingle(parent, current.item, node)
-			return content
+			return range
 		}
 
 		parent.replaceChild(node, current.item)
-		return content
+		return range
 	}
 
 	case DisplayType.many:
-		const nodes = value.value
-		const content = { parent, type: DisplayType.many, item: nodes } as ParentedRange
+		const begin = new Comment('begin')
+		const end = new Comment('end')
+		const nodes = [begin, ...value.value, end] as NonLone<Node>
+		range.swap({ type: DisplayType.many, item: { begin, end } })
 		if (current.type === DisplayType.many) {
-			reconcileArrays(parent, current.item, nodes)
-			return content
+			// reconcileArrays(parent, current.item, nodes)
+			// TODO this needs to properly reconcile the arrays to reuse nodes
+			const { begin, end } = current.item
+			removeAllAfter(begin, end)
+			parent.replaceChild(makeDocumentFragment(nodes), begin)
+			return range
 		}
 
 		const fragment = makeDocumentFragment(nodes)
 		parent.replaceChild(fragment, current.item)
-		return content
+		return range
 	}
 }
 
 
-function replaceManyWithSingle(parent: Node, current: NonLone<Node>, node: Node) {
-	const first = current[0]
-	const last = current[current.length - 1]
-	removeAllAfter(first, last)
-	parent.replaceChild(node, first)
+export function rangeEffect(fn: (realParent: Node, container: DocumentFragment) => void, realParent: Node, container: DocumentFragment) {
+	const placeholder = new Comment()
+	const range = new Range(realParent, container, { type: DisplayType.empty, item: placeholder })
+	container.appendChild(placeholder)
+
+	// TODO it might be worth inlining the creation of the actual StatefulComputation here
+	const destructor = statefulEffect((range, destroy) => {
+		const fragment = document.createDocumentFragment()
+		fn(range.realParent, fragment)
+
+		// normalizing contents of the fragment that the sub function appended, and performing the actual replaceRange
+		// in the future, we'll instead simply reconcile the fragment against current directly?
+		// or rather, replaceRange will take a fragment and normalize based on its length rather than a union
+		switch (fragment.childNodes.length) {
+		case 0:
+			return replaceRange(range, undefined)
+		case 1:
+			return replaceRange(range, fragment.childNodes[0])
+		default:
+			const nodes = []
+			for (const node of fragment.childNodes)
+				nodes.push(node)
+			return replaceRange(range, nodes as unknown as NonLone<Node>)
+		}
+	}, range)
+
+	// after initializing the effect, from this point on it will be safe to give it real access to the parent
+	// since this whole render cycle is synchronous, the reactive updates can't happen until we've finished the tree
+	// and performed the final append to put the tree into the real parent
+	// this nicely prevents wasteful operations, since we only have to perform this "flattening" once
+	// and don't have to maintain some allocated collection to do so
+	range.parent = realParent
+
+	return destructor
+}
+
+
+
+function replaceManyWithSingle(parent: Node, { begin, end }: RangeMarker, node: Node) {
+	removeAllAfter(begin, end)
+	parent.replaceChild(node, begin)
 }
 
 

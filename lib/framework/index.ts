@@ -2,136 +2,58 @@ import { Dict, TupleLike } from '../utils'
 import { Immutable, Mutable } from '../reactivity'
 
 
-export type Props<T> = T extends { props: Dict<any> }
-	? { [K in keyof T['props']]: Immutable<T['props'][K]> }
+export type Props<C> = C extends { props: Dict<any> }
+	? { [K in keyof C['props']]: Immutable<C['props'][K]> }
 	: {}
 
-export type Syncs<T> = T extends { syncs: Dict<any> }
-	? { [K in keyof T['syncs']]: Mutable<T['syncs'][K]> }
+export type Syncs<C> = C extends { syncs: Dict<any> }
+	? { [K in keyof C['syncs']]: Mutable<C['syncs'][K]> }
 	: {}
 
-export type Events<T> = T extends { events: Dict<any> }
+export type Events<C> = C extends { events: Dict<any> }
 	? {
-		[K in keyof T['events']]: TupleLike<T['events'][K]> extends true
-			? (...args: T['events'][K]) => void
-			: (arg: T['events'][K]) => void
+		[K in keyof C['events']]: TupleLike<C['events'][K]> extends true
+			? (...args: C['events'][K]) => void
+			: (arg: C['events'][K]) => void
 	}
 	: {}
 
-export type Slots<T> = T extends { slots: Dict<any> }
+export type Slots<C> = C extends { slots: Dict<any> }
 	? {
-		[K in keyof T['slots']]: TupleLike<T['slots'][K]> extends true
-			? (...args: T['slots'][K]) => HTML
-			: (arg: T['slots'][K]) => HTML
+		[K in keyof C['slots']]: TupleLike<C['slots'][K]> extends true
+			? (...args: C['slots'][K]) => HTML
+			: (arg: C['slots'][K]) => HTML
 	}
 	: {}
 
-export type Args<T> = Props<T> & Syncs<T> & Events<T>
-export type FullArgs<T> = Args<T> & Slots<T>
+export type Args<C> = Props<C> & Syncs<C> & Events<C>
+export type FullArgs<C> = Args<C> & Slots<C>
 export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnType<F>
 
+export type ComponentDefinition<C> =
+	(parent: Node, initialPlace: Comment, props: Props<C>, syncs: Syncs<C>, events: Events<C>, slots: Slots<C>) => void
 
-// component.rigor / component.iron
-// this render is built from the parsed template
-// we have to destructure this fully since otherwise we'd have to prepend every expression with the context
-// this shouldn't be impossible to do, since we can simply find the return statement in their Component function and the Component type and discover their keys
-// it does however mean that they can't have the return statement buried in conditionals or other complex things
-function render(parent: Node, { a, b, c, m }: Context<Component, typeof setup>) {
-	//
-}
-// this is generated into every file
-export default { setup, render }
+// // the final codegen will produce something like this
+// const ___Component: ComponentDefinition<Component> = (
+// 	___parent, ___initialPlace,
+// 	{ p }, { y }, { e }, { s },
+// ) => {
+// 	const { d } = create({ p, y, e } as Args<Component>)
 
-// this is the actual source
-export type Component = {
-	props: { a: number, b: string | undefined },
-	syncs: { c: boolean },
-}
-export function setup({ a, b, c }: Args<Component>) {
-	const d = c()
-	c(a() > 3)
+// 	// all the generated render stuff here
+// }
+// export default ___Component
 
-	return { m: 5 }
-}
+// // this is the actual source
+// export type Component = {
+// 	props: { p: number },
+// 	syncs: { y: boolean },
+// 	events: { e: string },
+// 	slots: { s: string },
+// }
+// export function create({ p, y, e }: Args<Component>) {
+// 	const d = value()
+// 	d(a() > 3)
 
-
-
-
-
-
-
-
-
-// component
-type HTML = unknown
-
-type Args = Dict<any>
-
-// design the input types of components such that the caller can always lie to the callee. it can pass handles that aren't actually reactive or reactively mutable
-
-// this can or can not be reactive
-type Prop<T> = () => T
-type Props = Dict<Prop<any>>
-type MakeProps<D extends Dict<any>> = { [K in keyof D]: Prop<D[K]> }
-
-// same here, the caller can lie
-type Sync<T> = ((value: T) => void) & (() => T)
-type Syncs = Dict<Sync<any>>
-type MakeSyncs<D extends Dict<any>> = { [K in keyof D]: Sync<D[K]> }
-
-type Slot<I extends Dict<any>> = (input: I) => HTML
-type Slots = Dict<Slot<Dict<any>>>
-type MakeSlots<D extends Dict<Dict<any>>> = { [K in keyof D]: Slot<D[K]> }
-
-type Ev<I extends any[]> = (...args: I) => void
-type Evs = Dict<Ev<any[]>>
-type MakeEvs<D extends Dict<any[]>> = { [K in keyof D]: Ev<D[K]> }
-
-// it would make a lot of sense to have some sort of EventProxy type that lets you list component types and a list of events that you'll just pass along
-
-type Component<A extends Args = {}, P extends Props = {}, Y extends Syncs = {}, S extends Slots = {}, E extends Evs = {}> =
-	(i: A & P, Y: Y, S: S, E: E) => HTML
-
-class ComponentBuilder<A extends Args, P extends Props, Y extends Syncs, S extends Slots, E extends Evs> {
-	protected constructor() {}
-
-	static build() {
-		return new ComponentBuilder<{}, {}, {}, {}, {}>()
-	}
-	args<NA extends Dict<any> = {}>() {
-		return this as unknown as ComponentBuilder<NA, P, Y, S, E>
-	}
-	props<NP extends Dict<any> = {}>() {
-		return this as unknown as ComponentBuilder<A, MakeProps<NP>, Y, S, E>
-	}
-	syncs<NY extends Dict<any> = {}>() {
-		return this as unknown as ComponentBuilder<A, P, MakeSyncs<NY>, S, E>
-	}
-	slots<NS extends Dict<Dict<any>> = {}>() {
-		return this as unknown as ComponentBuilder<A, P, Y, MakeSlots<NS>, E>
-	}
-	events<NE extends Dict<any[]> = {}>() {
-		return this as unknown as ComponentBuilder<A, P, Y, S, MakeEvs<NE>>
-	}
-
-	finish<T>(setup: (i: A & P & Y & S & E) => T): Component<A, P, Y, S, E> {
-		throw new Error()
-	}
-}
-
-
-// there are two types of events:
-// - ones that a component *defines and emits*, which are therefore merely hooks for its parent to subscribe to
-// effectively these are just functions with a "subscriber list"
-// these are really easy an really clean
-
-// - ones that a component *expects to receive*, and which therefore theoretically can come from anywhere. however, from an architectural standpoint it would be nicer if it only came from the descendents (or at least siblings)
-// these are basically just functions defined on the thing! giving someone else the ability to trigger this event is just giving them a handle to the function
-// these are more tricky. this is the problem state management systems are trying to solve. these are basically carbon actors
-
-// one way to maybe make this more sane is have some kind of "capability" driven system. design the types of these function handles such that you can only use one if you also have a handle to the entity that created it. This means that the creator has to explicitly grant you access
-
-
-// function make_actor() {
-// 	const actor_symbol: unique symbol = Symbol()
+// 	return { d }
 // }
