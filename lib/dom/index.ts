@@ -281,6 +281,31 @@ export function rangeEffect(fn: (realParent: Node, container: DocumentFragment) 
 }
 
 
+// export function contentEffect(fn: (realParent: Node, container: DocumentFragment) => void, realParent: Node) {
+// 	const content = new Content(realParent, { type: DisplayType.empty, content: undefined })
+
+// 	const destructor = statefulEffect((content, destroy) => {
+// 		const container = document.createDocumentFragment()
+// 		fn(content.parent, fragment)
+
+// 		// don't normalize here, eventually this will be moved
+// 		switch (fragment.childNodes.length) {
+// 		case 0:
+// 			return replaceContent(content, undefined)
+// 		case 1:
+// 			return replaceContent(content, fragment.childNodes[0])
+// 		default:
+// 			const nodes = []
+// 			for (const node of fragment.childNodes)
+// 				nodes.push(node)
+// 			return replaceContent(content, nodes as unknown as NonLone<Node>)
+// 		}
+// 		// return replaceContent(content, fragment)
+// 	}, content)
+
+// 	return destructor
+// }
+
 
 function replaceManyWithSingle(parent: Node, { begin, end }: RangeMarker, node: Node) {
 	removeAllAfter(begin, end)

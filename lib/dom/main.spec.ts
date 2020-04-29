@@ -24,6 +24,81 @@ function eachText<T>(collection: T[], fn: (t: T) => string) {
 		: begin + collection.map(fn).join('') + end
 }
 
+
+export function switcher(parent: Node, checked: Mutable<boolean>) {
+	const input = document.createElement('input')
+	input.type = 'checkbox'
+	effect(() => {
+		input.checked = checked()
+	})
+	input.onchange = $event => {
+		checked(input.checked)
+	}
+	parent.appendChild(input)
+	return input
+}
+describe('switcher', () => it('works', () => {
+	const checked = value(false)
+	const checkbox = switcher(body, checked)
+
+	expect(checkbox.checked).false
+	expect(checked()).false
+
+	checkbox.click()
+	expect(checkbox.checked).true
+	expect(checked()).true
+
+	checked(false)
+	expect(checked()).false
+	expect(checkbox.checked).false
+}))
+
+export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) => T) {
+	const input = document.createElement('input')
+	input.type = 'text'
+	input.placeholder = 'append'
+	input.onkeyup = $event => {
+		if ($event.key !== 'Enter') return
+
+		const newLetter = ($event.target as typeof input).value
+		;($event.target as typeof input).value = ''
+
+		const currentList = list()
+		currentList.push(fn(newLetter))
+		list(currentList)
+	}
+
+	parent.appendChild(input)
+	return input
+}
+// describe('appender', () => it('works', () => {
+// 	const list = channel([])
+// 	const input = appender(body, list, s => s)
+
+// 	expect(list()).eql([])
+// }))
+
+export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
+	const button = document.createElement('button')
+	button.textContent = "delete"
+	button.onclick = $event => {
+		const currentList = list()
+		currentList.splice(index, 1)
+		list(currentList)
+	}
+	parent.appendChild(button)
+	return button
+}
+// describe('deleter', () => it('works', () => {
+// 	const list = channel(['a', 'b', 'c'])
+// 	const button = deleter(body, list, 1)
+
+// 	expect(body.innerHTML).equal()
+// }))
+
+
+
+
 // div
 // 	input(type="checkbox", !sync=checked)
 // 	div
@@ -63,9 +138,55 @@ describe('CheckboxIfElseBlock', () => it('works', () => {
 }))
 
 
-// export function ChainedIfElse(realParent: Node, parent: DocumentFragment) {
-// 	//
-// }
+// @if (letter() === 'a') raw text
+// @else-if (letter() === 'b')
+// 	span multiple
+// 	div things
+// @else-if (letter() === 'c'): div the letter: {{ letter() }}
+export function ChainedIfElse(realParent: Node, parent: DocumentFragment) {
+	const letter = value('')
+
+	rangeEffect((realParent, parent) => {
+		if ((letter() === 'a')) {
+			createTextNode(parent, 'raw text')
+		}
+		else if (letter() === 'b') {
+			const span = createElement(parent, 'span')
+			span.textContent = 'multiple'
+			const div = createElement(parent, 'div')
+			div.textContent = 'things'
+		}
+		else if (letter() === 'c') {
+			const div = createElement(parent, 'div')
+			effect(() => {
+				div.textContent = `the letter: ${ letter() }`
+			})
+		}
+	}, realParent, parent)
+
+	return letter
+}
+describe('ChainedIfElse', () => it('works', () => {
+	const letter = ChainedIfElse(body, body as unknown as DocumentFragment)
+
+	expect(body.innerHTML).equal(comment)
+
+	letter('a')
+	expect(body.innerHTML).equal('raw text')
+
+	letter('c')
+	expect(body.innerHTML).equal(divText('the letter: c'))
+
+	letter('b')
+	expect(body.innerHTML).equal(begin + tagText('span', 'multiple') + divText('things') + end)
+
+	letter('c')
+	expect(body.innerHTML).equal(divText('the letter: c'))
+
+	letter('d')
+	expect(body.innerHTML).equal(comment)
+}))
+
 
 // div
 // 	input(type="text", placeholder="yo yo", !sync=text)
@@ -525,74 +646,96 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 
 
 
-
-export function switcher(parent: Node, checked: Mutable<boolean>) {
-	const input = document.createElement('input')
-	input.type = 'checkbox'
-	effect(() => {
-		input.checked = checked()
-	})
-	input.onchange = $event => {
-		checked(input.checked)
+// @template (excitedGreeting)
+//   strong Wow how are you doing!!!!
+// @template (hello, name: Immutable<string>)
+//   div How are you doing {{ name() }}?
+//   div Are you having a nice day?
+// @include (excitedGreeting)
+// @include (hello, 'Everybody')
+// @if (condition())
+// 	@include (hello, 'Dudes')
+export function Templates(realParent: Node, parent: DocumentFragment) {
+	function excitedGreeting(realParent: Node, parent: DocumentFragment) {
+		const strong = createElement(parent, 'strong')
+		strong.textContent = 'Wow how are you doing!!!!'
 	}
-	parent.appendChild(input)
-	return input
+
+	function hello(realParent: Node, parent: DocumentFragment, name: Immutable<string>) {
+		const div1 = createElement(parent, 'div')
+		effect(() => {
+			div1.textContent = `How are you doing ${ name() }?`
+		})
+		const div2 = createElement(parent, 'div')
+		div2.textContent = 'Are you having a nice day?'
+	}
+
+	const everybody = value('Everybody')
+	excitedGreeting(realParent, parent)
+	hello(realParent, parent, everybody)
+
+	const condition = value(false)
+
+	const dudes = value('Dudes')
+	rangeEffect((realParent, parent) => {
+		if (condition()) {
+			hello(realParent, parent, dudes)
+		}
+	}, realParent, parent)
+
+	return { condition, everybody, dudes }
 }
-describe('switcher', () => it('works', () => {
-	const checked = value(false)
-	const checkbox = switcher(body, checked)
+describe('Templates', () => it('works', () => {
+	const { condition, everybody, dudes } = Templates(body, body as unknown as DocumentFragment)
 
-	expect(checkbox.checked).false
-	expect(checked()).false
+	const strong = tagText('strong', 'Wow how are you doing!!!!')
+	const niceDay = divText('Are you having a nice day?')
+	const hello = (s: string) => divText(`How are you doing ${s}?`) + niceDay
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('Everybody')
+		+ comment
+	)
 
-	checkbox.click()
-	expect(checkbox.checked).true
-	expect(checked()).true
+	condition(true)
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('Everybody')
+		+ begin + hello('Dudes') + end
+	)
 
-	checked(false)
-	expect(checked()).false
-	expect(checkbox.checked).false
+	everybody('not everybody')
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('not everybody')
+		+ begin + hello('Dudes') + end
+	)
+
+	dudes('not dudes')
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('not everybody')
+		+ begin + hello('not dudes') + end
+	)
+
+	condition(false)
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('not everybody')
+		+ comment
+	)
+
+	dudes('invisible')
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('not everybody')
+		+ comment
+	)
+
+	condition(true)
+	expect(body.innerHTML).equal(
+		strong
+		+ hello('not everybody')
+		+ begin + hello('invisible') + end
+	)
 }))
-
-export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) => T) {
-	const input = document.createElement('input')
-	input.type = 'text'
-	input.placeholder = 'append'
-	input.onkeyup = $event => {
-		if ($event.key !== 'Enter') return
-
-		const newLetter = ($event.target as typeof input).value
-		;($event.target as typeof input).value = ''
-
-		const currentList = list()
-		currentList.push(fn(newLetter))
-		list(currentList)
-	}
-
-	parent.appendChild(input)
-	return input
-}
-// describe('appender', () => it('works', () => {
-// 	const list = channel([])
-// 	const input = appender(body, list, s => s)
-
-// 	expect(list()).eql([])
-// }))
-
-export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
-	const button = document.createElement('button')
-	button.textContent = "delete"
-	button.onclick = $event => {
-		const currentList = list()
-		currentList.splice(index, 1)
-		list(currentList)
-	}
-	parent.appendChild(button)
-	return button
-}
-// describe('deleter', () => it('works', () => {
-// 	const list = channel(['a', 'b', 'c'])
-// 	const button = deleter(body, list, 1)
-
-// 	expect(body.innerHTML).equal()
-// }))
