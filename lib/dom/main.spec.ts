@@ -4,7 +4,7 @@ import { boilString } from '../utils.spec'
 import { divText, tagText } from './index.spec'
 
 import { NonLone, exec } from '../utils'
-import { contentEffect, rangeEffect, Displayable, DisplayType, Range, ContentState } from './index'
+import { createElement, createTextNode, contentEffect, rangeEffect, Displayable, DisplayType, Range, ContentState } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
 const body = document.body
@@ -12,9 +12,17 @@ beforeEach(() => {
 	body.textContent = ''
 })
 
+
 const inputCheck = `<input type="checkbox">`
 const comment = '<!---->'
+const begin = '<!--begin-->'
+const end = '<!--end-->'
 const someInput = (placeholder: string) => `<input type="text" placeholder="${placeholder}">`
+function eachText<T>(collection: T[], fn: (t: T) => string) {
+	return collection.length === 0 ? comment
+		: collection.length === 1 ? fn(collection[0])
+		: begin + collection.map(fn).join('') + end
+}
 
 // div
 // 	input(type="checkbox", !sync=checked)
@@ -54,6 +62,10 @@ describe('CheckboxIfElseBlock', () => it('works', () => {
 	expect(body.innerHTML).equal(divText(`${inputCheck}${divText(tagText('b', 'oh no!'))}`))
 }))
 
+
+// export function ChainedIfElse(realParent: Node, parent: DocumentFragment) {
+// 	//
+// }
 
 // div
 // 	input(type="text", placeholder="yo yo", !sync=text)
@@ -126,9 +138,9 @@ describe('BasicEach', () => it('works', () => {
 
 	const loop = (...s: string[]) => {
 		return tagText('h1', 'Letters:')
-			+ '<!--begin-->'
+			+ begin
 			+ s.map(s => divText(`${tagText('i', `letter: "${s}"`)}${tagText('button', 'delete')}`)).join('')
-			+ '<!--end-->'
+			+ end
 			+ someInput('append')
 	}
 	expect(body.innerHTML).equal(loop('a', 'b', 'c'))
@@ -175,9 +187,9 @@ describe('IfThenEach', () => it('works', () => {
 	const i = items()
 	const loop = (...s: string[]) => {
 		return inputCheck
-			+ '<!--begin-->'
+			+ begin
 			+ s.map(s => divText(`${s}${tagText('button', 'delete')}`)).join('')
-			+ '<!--end-->'
+			+ end
 			+ someInput('append')
 	}
 	expect(body.innerHTML).equal(loop('a', 'b', 'c'))
@@ -238,12 +250,12 @@ describe('EachThenIf', () => it('works', () => {
 	const i = items()
 	const loop = (...s: { name: string, condition: boolean }[]) => {
 		return someInput('append')
-			+ '<!--begin-->'
+			+ begin
 			+ s.map(() => inputCheck).join('')
-			+ '<!--end-->'
-			+ '<!--begin-->'
+			+ end
+			+ begin
 			+ s.map(item => item.condition ? divText(`${item.name}${tagText('button', 'delete')}`) : comment).join('')
-			+ '<!--end-->'
+			+ end
 	}
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
@@ -291,6 +303,225 @@ describe('EachThenIf', () => it('works', () => {
 }))
 
 
+
+
+
+// @each (post of posts())
+// 	@if (post.important): h1 {{ post.title }}
+// 	@else
+// 		p not important: {{ post.title }}
+// 	small {{ post.subscript }}
+// 	@each (tag of post.tags()): .tag
+// 		@if (tag.project()): .project-star
+// 		| {{ tag.name }}
+// 		@each (n of [1, 2, 3, 4, 5])
+// 			.star: @if (tag.stars() >= n) filled
+export function ComplexIfEachNesting(realParent: Node, parent: DocumentFragment) {
+	const posts = channel([
+		{ important: false, title: 'A', subscript: 'a', tags: channel([
+			{ project: value(true), name: 't1', stars: value(3) },
+		]) },
+		{ important: true, title: 'B', subscript: 'b', tags: channel([
+			{ project: value(false), name: 't2', stars: value(5) },
+			{ project: value(true), name: 't3', stars: value(0) },
+		]) },
+		{ important: false, title: 'C', subscript: 'c', tags: channel([]) },
+	])
+
+	rangeEffect((realParent, parent) => {
+		for (const post of posts()) {
+			// first if/else
+			rangeEffect((realParent, parent) => {
+				if (post.important) {
+					const h1 = createElement(parent, 'h1')
+					effect(() => {
+						h1.textContent = post.title
+					})
+				}
+				else {
+					const p = createElement(parent, 'p')
+					effect(() => {
+						p.textContent = `not important: ${ post.title }`
+					})
+				}
+			}, realParent, parent)
+
+			// small
+			const small = createElement(parent, 'small')
+			effect(() => {
+				small.textContent = post.subscript
+			})
+
+			// nested each
+			rangeEffect((realParent, parent) => {
+				for (const tag of post.tags()) {
+					const tagDiv = createElement(parent, 'div')
+					tagDiv.className = 'tag'
+					const tagDivFragment = document.createDocumentFragment()
+
+					// project-star if block
+					rangeEffect((tagDiv, tagDivFragment) => {
+						if (tag.project()) {
+							const projectStarDiv = createElement(tagDivFragment, 'div')
+							projectStarDiv.className = 'project-star'
+						}
+					}, tagDiv, tagDivFragment)
+
+					const text = createTextNode(tagDivFragment, '')
+					effect(() => {
+						text.data = tag.name
+					})
+
+					// stars divs
+					rangeEffect((tagDiv, tagDivFragment) => {
+						for (const n of [1, 2, 3, 4, 5]) {
+							const starDiv = createElement(tagDivFragment, 'div')
+							starDiv.className = 'star'
+
+							effect(() => {
+								starDiv.textContent = tag.stars() >= n ? 'filled' : ''
+							})
+						}
+					}, tagDiv, tagDivFragment)
+
+					// append the fragment
+					tagDiv.appendChild(tagDivFragment)
+				}
+			}, realParent, parent)
+		}
+
+	}, realParent, parent)
+
+	return posts
+}
+describe('ComplexIfEachNesting', () => it('works', () => {
+	const postsChannel = ComplexIfEachNesting(body, body as unknown as DocumentFragment)
+	const posts = postsChannel()
+
+	type Post = { important: boolean, title: string, subscript: string, tags: { project: boolean, name: string, stars: number }[] }
+	const loop = (...posts: Post[]) => {
+		return eachText(posts, post => {
+			return (post.important ? tagText('h1', post.title) : tagText('p', `not important: ${post.title}`))
+				+ tagText('small', post.subscript)
+				+ eachText(post.tags, tag => {
+					return divText(
+						(tag.project ? divText('', 'project-star') : comment)
+							+ tag.name
+							+ eachText([1, 2, 3, 4, 5], n => {
+								return divText(tag.stars >= n ? 'filled' : '', 'star')
+							}),
+						'tag',
+					)
+				})
+		})
+	}
+
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: false, name: 't2', stars: 5 },
+			{ project: true, name: 't3', stars: 0 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	let tags = posts[1]!.tags()
+	tags.splice(1, 1)
+	posts[1]!.tags(tags)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: false, name: 't2', stars: 5 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	tags[0]!.name = 'yoyo'
+	posts[1]!.tags(tags)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: false, name: 'yoyo', stars: 5 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	tags[0]!.project(true)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: true, name: 'yoyo', stars: 5 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	tags[0]!.stars(0)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: true, name: 'yoyo', stars: 0 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	tags[0]!.stars(1)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: true, name: 'yoyo', stars: 1 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	tags.unshift({ project: value(false), name: 'yello', stars: value(-1) })
+	posts[1]!.tags(tags)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: false, name: 'yello', stars: -1 },
+			{ project: true, name: 'yoyo', stars: 1 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+	))
+
+	posts.push({ important: false, title: 'C', subscript: 'c', tags: channel([
+		{ project: value(true), name: 'blah blah', stars: value(9) },
+		{ project: value(false), name: 'blah once', stars: value(0) },
+	]) })
+	postsChannel(posts)
+	expect(body.innerHTML).equal(loop(
+		{ important: false, title: 'A', subscript: 'a', tags: [
+			{ project: true, name: 't1', stars: 3 },
+		] },
+		{ important: true, title: 'B', subscript: 'b', tags: [
+			{ project: false, name: 'yello', stars: -1 },
+			{ project: true, name: 'yoyo', stars: 1 },
+		] },
+		{ important: false, title: 'C', subscript: 'c', tags: [] },
+		{ important: false, title: 'C', subscript: 'c', tags: [
+			{ project: true, name: 'blah blah', stars: 9 },
+			{ project: false, name: 'blah once', stars: 0 },
+		] },
+	))
+
+	posts.splice(0, posts.length)
+	postsChannel(posts)
+	expect(body.innerHTML).equal(comment)
+}))
 
 
 

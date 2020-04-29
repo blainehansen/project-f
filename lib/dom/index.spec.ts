@@ -20,11 +20,13 @@ export function makeDiv(text?: string) {
 export function makeText(text: string) {
 	return document.createTextNode(text)
 }
-export function divText(text = '') {
-	return `<div>${text}</div>`
+export function divText(text = '', className?: string) {
+	const classSection = className === undefined ? '' : ` class="${className}"`
+	return `<div${classSection}>${text}</div>`
 }
-export function tagText(tag: string, text = '') {
-	return `<${tag}>${text}</${tag}>`
+export function tagText(tag: string, text = '', className?: string) {
+	const classSection = className === undefined ? '' : ` class="${className}"`
+	return `<${tag}${classSection}>${text}</${tag}>`
 }
 // function toArray<T>(thing: null | undefined | T | T[]): T[] {
 // 	if (thing === null || thing === undefined) return []
