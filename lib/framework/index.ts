@@ -31,7 +31,7 @@ export type FullArgs<C> = Args<C> & Slots<C>
 export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnType<F>
 
 export type ComponentDefinition<C> =
-	(parent: Node, initialPlace: Comment, props: Props<C>, syncs: Syncs<C>, events: Events<C>, slots: Slots<C>) => void
+	(realParent: Node, parent: DocumentFragment, props: Props<C>, syncs: Syncs<C>, events: Events<C>, slots: Slots<C>) => void
 
 // // the final codegen will produce something like this
 // const ___Component: ComponentDefinition<Component> = (

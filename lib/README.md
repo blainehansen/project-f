@@ -122,15 +122,43 @@ Because if blocks aren't attached to specific nodes, they automatically work to 
   button burn it down
 ```
 
-Switch statements are also supported.
+### Match Statements
+
+`@match` allows you to quickly choose between many cases.
 
 ```wolf
-@switch (item.type)
-  @case ('Person'): p {{ item.name }}
-  @case ('Animal')
-    strong Oh you're so fluffy!!!
-    p {{ item.fluffiness }}
-  @default: p hmmmm
+@match (weapon.type)
+  @when ('blade')
+    h1 Watch out! It's sharp!
+  @when ('projectile')
+    p This is a projectile weapon.
+    p It shoots {{ weapon.projectile }}.
+  @when ('blunt')
+    //- render nothing for these
+  @default: span unknown weapon type
+```
+
+These allow you to get all the benefits of typescript type narrowing and discriminated unions.
+
+If you also want to play around with the complexity of [fallthrough cases](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/switch), you can also use the `@switch` directive, with its `fallcase` and `case` variants.
+
+```wolf
+@switch (fruit)
+  @case ('oranges')
+    | Oranges are $0.59 a pound.
+  @fallcase ('mangoes')
+    //- since this is a fallcase
+    //- this output will be rendered *in addition*
+    //- to the below guavas and papayas cases
+    | Oh I like mangoes too!
+  @fallcase ('guavas')
+    //- and of course you can also render *nothing* in a case or fallcase
+  @case ('papayas')
+    | Mangoes, guavas, and papayas are $2.79 a pound.
+  //- in the event you ever want it,
+  //- you can also use a @falldefault, which is just what it sounds like
+  @default
+    | Sorry, we're out of {{ fruit }}.
 ```
 
 ## Using `key` to control conditional reuse

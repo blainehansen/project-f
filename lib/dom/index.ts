@@ -2,6 +2,10 @@ import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 
 import { statefulEffect } from '../reactivity'
 
+export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
+	fn(node)
+}
+
 export function createElement<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
 	tagName: K,

@@ -4,7 +4,10 @@ import { boilString } from '../utils.spec'
 import { divText, tagText } from './index.spec'
 
 import { NonLone, exec } from '../utils'
-import { createElement, createTextNode, contentEffect, rangeEffect, Displayable, DisplayType, Range, ContentState } from './index'
+import {
+	Displayable, DisplayType, Range, ContentState,
+	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
+ } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
 const body = document.body
@@ -739,3 +742,195 @@ describe('Templates', () => it('works', () => {
 		+ begin + hello('invisible') + end
 	)
 }))
+
+
+// @:bind (weapon = weaponChannel())
+// @match (weapon.type)
+// 	@when ('blade')
+// 		h1 Watch out! It's sharp!
+// 	@when ('projectile')
+// 		p This is a projectile weapon.
+// 		p It shoots {{ weapon.projectile() }}.
+// 	@when ('blunt')
+// 	@default: span unknown weapon type
+export function MatchStatement(realParent: Node, parent: DocumentFragment) {
+	type Weapon =
+		| { type: 'blade' }
+		| { type: 'projectile', projectile: Immutable<string> }
+		| { type: 'blunt' }
+		| { type: 'energy', voltage: number }
+
+	const weaponChannel = channel({ type: 'blade' } as Weapon)
+	rangeEffect((realParent, parent) => {
+		const weapon = weaponChannel()
+		switch (weapon.type) {
+			case 'blade':
+				const h1 = createElement(parent, 'h1')
+				h1.textContent = "Watch out! It's sharp!"
+				break
+			case 'projectile':
+				const p1 = createElement(parent, 'p')
+				p1.textContent = 'This is a projectile weapon.'
+				const p2 = createElement(parent, 'p')
+				effect(() => {
+					p2.textContent = `It shoots ${ weapon.projectile() }.`
+				})
+				break
+			case 'blunt':
+				break
+			default:
+				const span = createElement(parent, 'span')
+				span.textContent = 'unknown weapon type'
+		}
+	}, realParent, parent)
+
+	return weaponChannel
+}
+describe('MatchStatement', () => it('works', () => {
+	const weaponChannel = MatchStatement(body, body as unknown as DocumentFragment)
+
+	expect(body.innerHTML).equal(tagText('h1', "Watch out! It's sharp!"))
+
+	weaponChannel({ type: 'energy', voltage: 1 })
+	expect(body.innerHTML).equal(tagText('span', 'unknown weapon type'))
+
+	weaponChannel({ type: 'blunt' })
+	expect(body.innerHTML).equal(comment)
+
+	weaponChannel({ type: 'blade' })
+	expect(body.innerHTML).equal(tagText('h1', "Watch out! It's sharp!"))
+
+	const projectile = value('bullets')
+	weaponChannel({ type: 'projectile', projectile })
+	expect(body.innerHTML).equal(
+		begin
+		+ tagText('p', 'This is a projectile weapon.')
+		+ tagText('p', `It shoots bullets.`)
+		+ end
+	)
+
+	projectile('arrows')
+	expect(body.innerHTML).equal(
+		begin
+		+ tagText('p', 'This is a projectile weapon.')
+		+ tagText('p', `It shoots arrows.`)
+		+ end
+	)
+}))
+
+// @:bind (fruit = fruitChannel())
+// @switch (fruit)
+// 	@case ('oranges')
+// 		| Oranges are $0.59 a pound.
+// 	@fallcase ('mangoes')
+// 		h1 Oh I like mangoes too!
+// 	@fallcase ('guavas')
+// 	@case ('papayas')
+// 		| Mangoes, guavas, and papayas are $2.79 a pound.
+// 	@default
+// 		| Sorry, we're out of {{ fruit }}.
+export function SwitchStatement(realParent: Node, parent: DocumentFragment) {
+	const fruitChannel = value('tomatoes')
+	rangeEffect((realParent, parent) => {
+		const fruit = fruitChannel()
+		// in generated code, we will *always* put each case in an enclosed block to prevent scope clashing
+		switch (fruit) {
+			case 'oranges':
+				createTextNode(parent, 'Oranges are $0.59 a pound.')
+				break
+			/*fall*/case 'mangoes':
+				const h1 = createElement(parent, 'h1')
+				h1.textContent = 'Oh I like mangoes too!'
+			/*fall*/case 'guavas':
+				// do nothing
+			case 'papayas':
+				createTextNode(parent, 'Mangoes, guavas, and papayas are $2.79 a pound.')
+				break
+			default:
+				effect(() => {
+					createTextNode(parent, `Sorry, we're out of ${ fruit }.`)
+				})
+		}
+	}, realParent, parent)
+
+	return fruitChannel
+}
+describe('SwitchStatement', () => it('works', () => {
+	const fruitChannel = SwitchStatement(body, body as unknown as DocumentFragment)
+
+	expect(body.innerHTML).equal(`Sorry, we're out of tomatoes.`)
+
+	fruitChannel('papayas')
+	expect(body.innerHTML).equal('Mangoes, guavas, and papayas are $2.79 a pound.')
+
+	fruitChannel('oranges')
+	expect(body.innerHTML).equal('Oranges are $0.59 a pound.')
+
+	fruitChannel('guavas')
+	expect(body.innerHTML).equal('Mangoes, guavas, and papayas are $2.79 a pound.')
+
+	fruitChannel('mangoes')
+	expect(body.innerHTML).equal(
+		begin
+		+ tagText('h1', 'Oh I like mangoes too!')
+		+ 'Mangoes, guavas, and papayas are $2.79 a pound.'
+		+ end
+	)
+}))
+
+
+// p(&fn=makeRed)
+// p(&fn={ p => { p.style.color = 'red' } })
+export function NodeReceiver(realParent: Node, parent: DocumentFragment) {
+	const p1Color = value('red')
+	function makeRed(node: HTMLParagraphElement) {
+		effect(() => {
+			node.style.color = p1Color()
+		})
+	}
+
+	const p1 = createElement(parent, 'p')
+	nodeReceiver(p1, makeRed)
+
+	const p2 = createElement(parent, 'p')
+	nodeReceiver(p2, p => { p.style.color = p1Color() })
+
+	return p1Color
+}
+describe('NodeReceiver', () => it('works', () => {
+	const p1Color = NodeReceiver(body, body as unknown as DocumentFragment)
+
+	expect(body.innerHTML).equal('<p style="color: red;"></p><p style="color: red;"></p>')
+
+	p1Color('blue')
+	expect(body.innerHTML).equal('<p style="color: blue;"></p><p style="color: red;"></p>')
+}))
+
+
+// type TodoComponent = {
+// 	props: { id: number },
+// 	syncs: { name: string, done: boolean },
+// 	events: { completed: [], },
+// 	slots: {  },
+// }
+// // h1 Task {{ id() }}, named: {{ name() }}
+// // @if (editing()):
+// // 	input(type="text", :value=description, @keyup.enter={ editing(false) })
+// // @else
+// // 	.{ stateClass() }.{ descriptionColor() }(@click=beginEditing)
+// // 		| {{ description() }}
+
+// // input(type="checkbox", !value.fake={ completed, complete })
+// // button(@click=archive) Archive
+// const TodoComponentDefinition: ComponentDefinition<TodoComponent> = (
+// 	realParent, parent,
+// 	{ id }, { name, done }, { completed }
+// ) => {
+// 	const h1 = createElement(parent, 'h1')
+// 	effect(() => {
+// 		h1.textContent = `Task ${id()}, named: ${name()}`
+// 	})
+// 	switcher(parent, done)
+
+// 	return { id, name, done, completed }
+// }
