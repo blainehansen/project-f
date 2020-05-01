@@ -21,17 +21,15 @@ export type Events<C> = C extends { events: Dict<any> }
 export type Slots<C> = C extends { slots: Dict<any> }
 	? {
 		[K in keyof C['slots']]: TupleLike<C['slots'][K]> extends true
-			? (...args: C['slots'][K]) => HTML
-			: (arg: C['slots'][K]) => HTML
+			? Insertable<C['slots'][K]>
+			: Insertable<[C['slots'][K]]>
 	}
 	: {}
 
 export type Args<C> = Props<C> & Syncs<C> & Events<C>
-export type FullArgs<C> = Args<C> & Slots<C>
-export type Context<C, F extends (args: Args<C>) => any> = FullArgs<C> & ReturnType<F>
 
-export type ComponentDefinition<C> =
-	(realParent: Node, parent: DocumentFragment, props: Props<C>, syncs: Syncs<C>, events: Events<C>, slots: Slots<C>) => void
+export type Insertable<A extends any[]> = (realParent: Node, parent: DocumentFragment, ...args: A) => void
+export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C>]>
 
 // // the final codegen will produce something like this
 // const ___Component: ComponentDefinition<Component> = (

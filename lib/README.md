@@ -92,9 +92,11 @@ Just be sure to clean up any side effects you produce!
 
 ## The builtin `show`
 
+TODO
+
 # Class and Style Bindings
 
-Still figuring this out. Dynamic metas can do some of this lifting, but ultimately there's a lot of options here.
+TODO Still figuring this out. Dynamic metas can do some of this lifting, but ultimately there's a lot of options here.
 
 
 # Conditional Rendering
@@ -122,7 +124,7 @@ Because if blocks aren't attached to specific nodes, they automatically work to 
   button burn it down
 ```
 
-### Match Statements
+## Match Statements
 
 `@match` allows you to quickly choose between many cases.
 
@@ -134,13 +136,13 @@ Because if blocks aren't attached to specific nodes, they automatically work to 
     p This is a projectile weapon.
     p It shoots {{ weapon.projectile }}.
   @when ('blunt')
-    //- render nothing for these
+    //- render nothing
   @default: span unknown weapon type
 ```
 
 These allow you to get all the benefits of typescript type narrowing and discriminated unions.
 
-If you also want to play around with the complexity of [fallthrough cases](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/switch), you can also use the `@switch` directive, with its `fallcase` and `case` variants.
+If you also want to play around with the complexity of [fallthrough cases](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/switch), you can also use the `@switch` directive, with its `@case`/`@fallcase` and `@default`/`@falldefault` variants.
 
 ```wolf
 @switch (fruit)
@@ -149,14 +151,17 @@ If you also want to play around with the complexity of [fallthrough cases](https
   @fallcase ('mangoes')
     //- since this is a fallcase
     //- this output will be rendered *in addition*
-    //- to the below guavas and papayas cases
-    | Oh I like mangoes too!
+    //- to the below 'guavas' and 'papayas' cases
+    strong Oh I like mangoes too!
   @fallcase ('guavas')
     //- and of course you can also render *nothing* in a case or fallcase
   @case ('papayas')
     | Mangoes, guavas, and papayas are $2.79 a pound.
+    //- since this is a normal case,
+    //- the fallthrough stops here
+
   //- in the event you ever want it,
-  //- you can also use a @falldefault, which is just what it sounds like
+  //- you can also use @falldefault, which is just what it sounds like
   @default
     | Sorry, we're out of {{ fruit }}.
 ```
@@ -164,6 +169,10 @@ If you also want to play around with the complexity of [fallthrough cases](https
 ## Using `key` to control conditional reuse
 
 Still thinking about this
+
+# Binding Variables with `@bind`
+
+TODO think about the syntax and consequences
 
 
 # List Rendering with `@each`
@@ -176,7 +185,7 @@ ul#example-1
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const items = channel([
     { message: 'A' },
     { message: 'B' },
@@ -194,7 +203,7 @@ ul#example-2
 
 
 ```ts
-export function setup() {
+export function create() {
   const parentMessage = value('Parent')
   const items = channel([
     { message: 'A' },
@@ -276,7 +285,7 @@ button(@click=greet) Greet
 ```
 
 ```ts
-export function setup() {
+export function create() {
   function greet(event: Event) {
     alert('Hello!')
     if (event.target)
@@ -294,7 +303,7 @@ button(@click={ counter(counter() + 1) }) Add 1
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const counter = value(0)
   return { counter }
 }
@@ -307,7 +316,7 @@ button(@click={ say('what') }) Say what
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const say = (message: string) => alert(message)
   return { say }
 }
@@ -362,7 +371,7 @@ label(for="checkbox") {{ '' + checked() }}
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const checked = value(false)
   return { checked }
 }
@@ -393,7 +402,7 @@ span Selected: {{ selected() }}
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const selected = value(null as null | 'A' | 'B' | 'C')
   return { selected }
 }
@@ -412,7 +421,7 @@ span Selected: {{ selected().toString() }}
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const selected = value([] as ('A' | 'B' | 'C')[])
   return { selected }
 }
@@ -438,7 +447,7 @@ input(type="checkbox", !sync.setter={ completed, complete })
 ```
 
 ```ts
-export function setup() {
+export function create() {
   const completed = value(false)
   function complete(value: boolean) {
     completed(value)
@@ -466,7 +475,7 @@ The exported `setup` function lets you expose variables to the template.
 button(@click={ count(count() + 1) }) You've clicked me {{ count() }} times.
 
 #! script
-export function setup() {
+export function create() {
   const count = value(0)
   return { count }
 }
@@ -564,7 +573,7 @@ Then the parent can listen for these events:
   +Greeter(message="Hello", @send=receive)
 
 #! script
-export function setup() {
+export function create() {
   const messages = new ReactiveArray<string>()
   function receive(message: string) {
     messages.reactivePush(message)
@@ -651,7 +660,7 @@ Sometimes a component asks for a `Sync`, but you don't actually want to let it d
 +ChildComponent(!syncedNumber.fake=fakeSync)
 
 #! script
-export function setup() {
+export function create() {
   let localSum = 0
   function getterSide(): number {
     return 0
