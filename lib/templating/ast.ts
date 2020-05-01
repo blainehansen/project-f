@@ -12,8 +12,8 @@ export class ComponentDefinition {
 
 export type Entity =
 	| Tag
-	| Directive
 	| TextSection
+	| Directive
 
 export class Tag {
 	readonly type = 'Tag' as const
@@ -26,7 +26,6 @@ export class Tag {
 }
 // enum MetaType { class, id }
 export class Meta {
-	readonly type = 'Meta' as const
 	constructor(
 		readonly isClass: boolean,
 		readonly isDynamic: boolean,
@@ -35,7 +34,6 @@ export class Meta {
 }
 
 export class Attribute {
-	readonly type = 'Attribute' as const
 	constructor(
 		readonly name: string,
 		readonly value: AttributeValue | undefined,
@@ -43,7 +41,6 @@ export class Attribute {
 }
 export type AttributeValue = string | AttributeCode
 export class AttributeCode {
-	readonly type = 'AttributeCode' as const
 	constructor(
 		readonly isBare: boolean,
 		readonly code: string,
@@ -70,16 +67,13 @@ export type Directive =
 	| ComponentInclusion
 	| IfBlock
 	| EachBlock
-	// matches and switches are different
-	// - switches allow fallthrough of *empty* cases,
-	// 	but all nonempty ones implicitly have a return (we aren't appending to a list of Displayables)
-	// - matches don't allow fallthrough. empty cases will render nothing
 	| MatchBlock
 	| SwitchBlock
 	| SlotDefinition
 	| SlotInsertion
 	| TemplateDefinition
 	| TemplateInclusion
+	// | VariableBinding
 
 export class ComponentInclusion {
 	readonly type = 'ComponentInclusion' as const
@@ -94,7 +88,8 @@ export class IfBlock {
 	readonly type = 'IfBlock' as const
 	constructor(
 		readonly expression: string,
-		readonly elseBranch: IfBlock | NonEmpty<Entity> | undefined,
+		readonly entities: Entity[],
+		readonly elseBranch: IfBlock | Entity[] | undefined,
 	) {}
 }
 
@@ -113,10 +108,10 @@ export class MatchBlock {
 	constructor(
 		readonly matchExpression: string,
 		readonly patterns: MatchPattern[],
+		// if no default is provided, we can inject an exhaustiveness check
 		readonly defaultPattern: Entity[] | undefined,
 	) {}
 }
-
 export class MatchPattern {
 	constructor(
 		readonly expression: string,
@@ -124,19 +119,25 @@ export class MatchPattern {
 	) {}
 }
 
+// in switch blocks, I'll have to track whether a default has occurred myself
+// and then inject an exhaustiveness check if none appears
 export class SwitchBlock {
 	readonly type = 'SwitchBlock' as const
 	constructor(
 		readonly switchExpression: string,
 		readonly cases: SwitchCase[],
-		readonly defaultCase: NonEmpty<Entity> | undefined,
 	) {}
 }
-
 export class SwitchCase {
 	constructor(
+		readonly isFallthrough: boolean,
 		readonly expression: string,
-		// allows for empty rendering or fallthrough
+		readonly entities: Entity[],
+	) {}
+}
+export class SwitchDefault {
+	constructor(
+		readonly isFallthrough: boolean,
 		readonly entities: Entity[],
 	) {}
 }

@@ -1,3 +1,7 @@
+export function tuple<L extends any[]>(...args: L) {
+	return args
+}
+
 export function exec<T>(fn: () => T): T {
 	return fn()
 }
