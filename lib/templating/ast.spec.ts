@@ -21,10 +21,10 @@ export type Attribute = ast.Attribute
 export function Attribute(...params: ConstructorParameters<typeof ast.Attribute>): ast.Attribute {
 	return new ast.Attribute(...params)
 }
-export type AttributeCode = ast.AttributeCode
-export function AttributeCode(...params: ConstructorParameters<typeof ast.AttributeCode>): ast.AttributeCode {
-	return new ast.AttributeCode(...params)
-}
+// export type AttributeCode = ast.AttributeCode
+// export function AttributeCode(...params: ConstructorParameters<typeof ast.AttributeCode>): ast.AttributeCode {
+// 	return new ast.AttributeCode(...params)
+// }
 export type TextSection = ast.TextSection
 export function TextSection(...params: ConstructorParameters<typeof ast.TextSection>[0]): ast.TextSection {
 	return new ast.TextSection(params)

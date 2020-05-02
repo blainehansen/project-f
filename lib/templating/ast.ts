@@ -36,16 +36,18 @@ export class Meta {
 export class Attribute {
 	constructor(
 		readonly name: string,
-		readonly value: AttributeValue | undefined,
+		readonly value: AttributeValue,
 	) {}
 }
-export type AttributeValue = string | AttributeCode
-export class AttributeCode {
-	constructor(
-		readonly isBare: boolean,
-		readonly code: string,
-	) {}
-}
+export type AttributeValue = string | { code: string } | undefined
+// export type AttributeCode
+// export type AttributeValue = string | AttributeCode
+// export class AttributeCode {
+// 	constructor(
+// 		readonly isBare: boolean,
+// 		readonly code: string,
+// 	) {}
+// }
 
 
 export class TextSection {

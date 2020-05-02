@@ -43,9 +43,9 @@ this means there's no behavioral difference between the bare and complex forms f
 
 the argument syntax of the actual component can have multiple separate objects representing the props/syncs/etc. since the users will never actually interact with that form, the prefixes just let the framework know which group to put this symbol in. the generated code can then just destructure each group in the args, and lump them all together in the call to the setup function.
 
-`:attr.fake={ some expression that isn't an Immutable }` shorthand might be nice to allow wrapping non `Immutable` values
-`!attr.fake={ some expression that resolves to an Immutable }` shorthand would also be nice to generate a fake `Mutable` from an `Immutable`, with a noop setting side
-`!attr.setter={ get, set }` shorthand would also be nice to generate a setter from a non `Mutable`
+`:attr|fake={ some expression that will be wrapped in an Immutable }` shorthand might be nice to allow wrapping non `Immutable` values
+`!attr|fake={ some expression that resolves to an Immutable }` shorthand would also be nice to generate a fake `Mutable` from an `Immutable`, with a noop setting side
+`!attr|setter={ get, set }` shorthand would also be nice to generate a setter from a non `Mutable`
 
 all of these shorthands would merely exist to save people noisy imports for these common cases
 

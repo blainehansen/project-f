@@ -4,14 +4,13 @@ import { expect } from 'chai'
 import { boilString } from '../utils.spec'
 import {
 	Entity, AttributeValue, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
+	ComponentDefinition, Tag, Meta, Attribute, /*AttributeCode,*/ TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast.spec'
 import {
-	printNode,
-	// generate, generateEntity,
-	generateComponentRenderFunction,
+	printNodes, printNodesArray, CodegenContext, parentIdents,
+	generateComponentRenderFunction, generateTag,
 } from './codegen'
 
 // function b(node: Parameters<typeof printNode>[0]) {
@@ -20,6 +19,11 @@ import {
 function boilEqual(actual: string, expected: string) {
 	expect(boilString(actual)).equal(boilString(expected))
 }
+type ctx = CodegenContext
+function ctx() {
+	return new CodegenContext()
+}
+const [realParent, parent] = parentIdents()
 
 describe('generateComponentRenderFunction', () => {
 	// div hello
@@ -93,6 +97,38 @@ describe('generateComponentRenderFunction', () => {
 		`
 		boilEqual(generatedCode, expected)
 	})
+})
+
+describe('generateTag', () => {
+	it('#i.one.two(disabled=true, thing="whatever", :visible={ env.immutable })', () => {
+		const context = ctx()
+		const nodes = generateTag(Tag(
+			'div',
+			[Meta(false, false, 'i'), Meta(true, false, 'one'), Meta(true, false, 'two')],
+			[
+				Attribute('disabled', { code: 'true' }),
+				Attribute('thing.children().stuff[0]', "whatever"),
+				Attribute(':visible', { code: 'env.immutable' }),
+			], [],
+		), '0', context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		const expected = `
+			import { createElement as ___createElement, effect as ___effect } from "project-f/runtime"
+
+			const ___div0 = ___createElement(___parent, "div")
+			___div0.id = "i"
+			___div0.className = "one two"
+			___div0.disabled = true
+			___div0.thing.children().stuff[0] = "whatever"
+			___effect(() => {
+			    ___div0.visible = env.immutable()
+			})
+		`
+		boilEqual(generatedCode, expected)
+	})
+
+	// @click.handler={ e => p(e) }, @keyup.
 })
 
 // describe('generate', () => {

@@ -1,9 +1,10 @@
 import ts = require('typescript')
+import '@ts-std/extensions/dist/array'
 
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
 	Entity, AttributeValue, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
+	ComponentDefinition, Tag, Meta, Attribute, /*AttributeCode,*/ TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
@@ -15,7 +16,11 @@ function safePrefixIdent(...segments: NonLone<string>) {
 	return ts.createIdentifier(safePrefix(segments.join('')))
 }
 
-class CodegenContext {
+function createRawCodeSegment(code: string) {
+	return ts.createIdentifier(code)
+}
+
+export class CodegenContext {
 	protected rawCodeSegments = [] as { marker: string, code: string }[]
 	protected requiredFunctions = new Set<string>()
 
@@ -24,15 +29,17 @@ class CodegenContext {
 		return ts.createIdentifier(safePrefix(functionName))
 	}
 
-	createRawCodeSegment(code: string): ts.Identifier {
-		const count = '' + this.rawCodeSegments.length
-		const marker = `&%&%` + count.repeat(11) + `&%&%`
-		this.rawCodeSegments.push({ marker, code })
-		return ts.createIdentifier(marker)
-	}
+	// // TODO it might be unnecessary to do this!
+	// // ts.createIdentifier seems like it will gladly just pass along the string directly into the source!
+	// createRawCodeSegment(code: string): ts.Identifier {
+	// 	const count = '' + this.rawCodeSegments.length
+	// 	const marker = `&%&%` + count.repeat(11) + `&%&%`
+	// 	this.rawCodeSegments.push({ marker, code })
+	// 	return ts.createIdentifier(marker)
+	// }
 
 	finalize(nodes: ts.Node[]) {
-		let generatedCode = nodes.map(node => printNode(node)).join('\n')
+		let generatedCode = printNodesArray(nodes)
 		// let scanningCode =
 		for (const { marker, code } of this.rawCodeSegments) {
 			// a future optimization could be to trim through the generatedCode
@@ -56,13 +63,13 @@ class CodegenContext {
 		this.rawCodeSegments.splice(0, this.rawCodeSegments.length)
 		this.requiredFunctions.clear()
 
-		return printNode(runtimeImportDeclaration) + '\n\n' + generatedCode
+		return printNodes(runtimeImportDeclaration) + '\n\n' + generatedCode
 	}
 }
 
 const realParentText = safePrefix('real')
 const parentText = safePrefix('parent')
-const parentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
+export const parentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
 const parentParams = () => t(createParameter(realParentText), createParameter(parentText))
 
 // as an optimization for the call sites to avoid a bunch of empty object allocations,
@@ -157,6 +164,70 @@ export function generateEntity(
 	}
 }
 
+const enum AttributeType { empty, static, dynamic, reactive, sync, event, fn }
+const reactiveModifiers = ['fake'] as const
+const syncModifiers = ['fake', 'setter'] as const
+const eventModifiers = ['handler', 'exact', 'stop', 'prevent', 'capture', 'self', 'once', 'passive'] as const
+// const metaModifiers = ['ctrl', 'alt', 'shift', 'meta']
+// https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
+// const keyModifiers = [] as const
+// const mouseModifiers = ['left', 'right', 'middle'] as const
+export function processAttribute(
+	ctx: CodegenContext,
+	rawAttribute: string,
+	value: AttributeValue | undefined,
+) {
+	if (rawAttribute === '&fn')
+		throw new Error('unimplemented')
+
+	// TODO remember that if an attribute contains dashes it's a dom attribute instead of property, and should be set differently
+
+	const firstLetter = rawAttribute[0] || ''
+	if (firstLetter === '') throw new Error("empty attribute name shouldn't be possible!")
+
+	const [attribute, ...modifiersList] = rawAttribute.split('|')
+	const sliced = attribute.slice(1)
+	const modifiers = modifiersList.unique_index_map(m => [m, true as const])
+		.change_err(e => `duplicate modifier ${e[0]}`)
+		.unwrap()
+
+	function check(
+		value: AttributeValue, variety: string,
+		varietyModifiers: readonly string[],
+	): asserts value is { code: string } {
+		if (value === undefined || typeof value === 'string')
+			throw new Error(`static attribute values are invalid for ${variety}s`)
+		for (const modifier of modifiersList)
+			if (!varietyModifiers.includes(modifier))
+				throw new Error(`invalid modifier for ${variety}: ${modifier}`)
+	}
+
+	switch (firstLetter) {
+		case ':':
+			check(value, 'reactive binding', reactiveModifiers)
+			return t(AttributeType.reactive, sliced, modifiers, value.code)
+
+		case '!':
+			check(value, 'sync', syncModifiers)
+			return t(AttributeType.sync, sliced, modifiers, value.code)
+
+		case '@':
+			check(value, 'event', eventModifiers)
+			const code = modifiers.handler ? value.code : `$event => ${value.code}`
+			delete modifiers.handler
+			return t(AttributeType.event, sliced, modifiers, code)
+	}
+
+	if (modifiersList.length !== 0)
+		throw new Error("modifiers don't make any sense on normal bindings")
+
+	if (value === undefined)
+		return t(AttributeType.empty, attribute, {}, '')
+	if (typeof value === 'string')
+		return t(AttributeType.static, attribute, {}, value)
+	return t(AttributeType.dynamic, attribute, {}, value.code)
+}
+
 export function generateTag(
 	{ ident, metas, attributes, entities }: Tag, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
@@ -193,7 +264,7 @@ export function generateTag(
 	if (idMeta !== '') {
 		needTagIdent = true
 		const idAssignment = idDynamic
-			? createEffectBind(ctx, tagIdent, 'id', ctx.createRawCodeSegment(idMeta))
+			? createEffectBind(ctx, tagIdent, 'id', createRawCodeSegment(idMeta))
 			: createFieldAssignment(tagIdent, 'id', ts.createStringLiteral(idMeta))
 		statements.push(idAssignment)
 	}
@@ -202,24 +273,15 @@ export function generateTag(
 	if (className !== '') {
 		needTagIdent = true
 		const classNameAssignment = classDynamic
-			? createEffectBind(ctx, tagIdent, 'className', ctx.createRawCodeSegment('`' + className + '`'))
+			? createEffectBind(ctx, tagIdent, 'className', createRawCodeSegment('`' + className + '`'))
 			: createFieldAssignment(tagIdent, 'className', ts.createStringLiteral(className))
 		statements.push(classNameAssignment)
 	}
 
-	for (const { name: attribute, value } of attributes) {
+	for (const { name, value } of attributes) {
 		needTagIdent = true
-		const [isDynamic, finalValue] =
-			value === undefined ? [false, ts.createTrue()]
-			: typeof value === 'string' ? [false, ts.createStringLiteral(value)]
-			// TODO this might not be a good idea for basic attributes,
-			// since we shouldn't necessarily assume this thing is itself reactive
-			// what about the situations where this is part of the static render?
-			// or a value they merely produced from something else?
-			// component props are the only place where it makes some kind of sense
-			// to get everything into Immutable form *somehow*
-			: value.isBare ? [true, ctx.createRawCodeSegment(`${value.code}()`)]
-			: [true, ctx.createRawCodeSegment(value.code)]
+
+		const [attributeType, attribute, modifiers, valueString] = processAttribute(ctx, name, value)
 
 		// TODO in the future I might get rid of the dynamic metas
 		// in this situation we'd just do the same thing the metas loop is doing above
@@ -227,26 +289,31 @@ export function generateTag(
 		// if (attribute === 'id') if not dynamic throw new Error("don't use the `id` attribute, use `#id-name` syntax instead")
 		// if (attribute === 'class') if not dynamic throw new Error("don't use the `class` attribute, use `.class-name` syntax instead")
 
-		if (attribute === '&fn')
-			throw new Error('unimplemented')
-
-		// const re = /^(?:\w*\([a-zA-Z_0-9]*\)\w*\=\>)|(?:\w*[a-zA-Z_0-9]*\w*\=\>)/
-		// console.log(re.test('(sd: e) =>'))
-		// console.log(re.test('(*) =>'))
-		if (attribute.startsWith('@'))
-			throw new Error('unimplemented')
-
-		if (attribute.startsWith('!'))
-			throw new Error("can't sync to this attribute")
-
-		const target = attribute === 'style'
-			? ts.createPropertyAccess(tagIdent, 'style')
-			: tagIdent
-
-		const attributeAssignment = isDynamic
-			? createEffectBind(ctx, target, attribute, finalValue)
-			: createFieldAssignment(target, attribute, finalValue)
-		statements.push(attributeAssignment)
+		switch (attributeType) {
+			case AttributeType.empty:
+				statements.push(createFieldAssignment(tagIdent, attribute, ts.createTrue()))
+				break
+			case AttributeType.static:
+				statements.push(createFieldAssignment(tagIdent, attribute, ts.createStringLiteral(valueString)))
+				break
+			case AttributeType.dynamic:
+				statements.push(createFieldAssignment(tagIdent, attribute, createRawCodeSegment(valueString)))
+				break
+			case AttributeType.reactive:
+				if (modifiers.fake) throw new Error("the fake modifier doesn't make any sense on a tag")
+				statements.push(createEffectBind(ctx, tagIdent, attribute, createRawCodeSegment(`${valueString}()`)))
+				break
+			case AttributeType.sync:
+				throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+			case AttributeType.event:
+				// TODO lots to think about here, since we aren't properly handling basically any modifiers
+				statements.push(createFieldAssignment(tagIdent, `on${attribute}`, createRawCodeSegment(valueString)))
+				break
+			case AttributeType.fn:
+				const statement = createCall(ctx.requireRuntime('nodeReceiver'), [tagIdent, createRawCodeSegment(valueString)])
+				statements.push(ts.createExpressionStatement(statement))
+				break
+		}
 	}
 
 	// here our calculation of real loneness is true, since this current entity is a concrete tag
@@ -291,7 +358,7 @@ export function generateText(
 	}
 
 	if (isRealLone) return isDynamic
-		? [createEffectBind(ctx, realParent, 'textContent', ctx.createRawCodeSegment('`' + content + '`'))]
+		? [createEffectBind(ctx, realParent, 'textContent', createRawCodeSegment('`' + content + '`'))]
 		: [createFieldAssignment(realParent, 'textContent', ts.createStringLiteral(content))]
 
 	const textIdent = safePrefixIdent('text', offset)
@@ -301,7 +368,7 @@ export function generateText(
 				textIdent,
 				createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral('')])
 			),
-			createEffectBind(ctx, textIdent, 'data', ctx.createRawCodeSegment('`' + content + '`'))
+			createEffectBind(ctx, textIdent, 'data', createRawCodeSegment('`' + content + '`'))
 		]
 		: [ts.createExpressionStatement(
 			createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral(content)]),
@@ -318,7 +385,7 @@ export function generateText(
 
 // function createIf({ expression, entities, elseBranch }: IfBlock) {
 // 	return ts.createIf(
-// 		ctx.createRawCodeSegment(expression),
+// 		createRawCodeSegment(expression),
 // 		ts.createBlock(generateEntities(entities), true),
 // 		elseBranch === undefined ? undefined
 // 			: Array.isArray(elseBranch) ? ts.createBlock(generateEntities(elseBranch), true)
@@ -463,7 +530,7 @@ function createEffectBind(
 // 				undefined,
 // 				ts.createTemplateExpression(ts.createTemplateHead('begin '), [
 // 					ts.createTemplateSpan(
-// 						ctx.createRawCodeSegment(`f().something
+// 						createRawCodeSegment(`f().something
 // 								+ 2`),
 // 						ts.createTemplateTail(' end'),
 // 					),
@@ -475,8 +542,18 @@ function createEffectBind(
 // )
 
 
+export function printNodes(...nodes: NonEmpty<ts.Node>) {
+	return _printNodes(nodes, '')
+}
+export function printNodesArray(nodes: ts.Node[], filename = '') {
+	return _printNodes(nodes, '')
+}
 const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed, omitTrailingSemicolon: true })
-export function printNode(node: ts.Node, filename = '') {
+function _printNodes(nodes: ts.Node[], filename: string) {
 	const resultFile = ts.createSourceFile(filename, '', ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
-	return printer.printNode(ts.EmitHint.Unspecified, node, resultFile)
+	let printed = ''
+	for (const node of nodes)
+		printed += '\n' + printer.printNode(ts.EmitHint.Unspecified, node, resultFile)
+
+	return printed
 }
