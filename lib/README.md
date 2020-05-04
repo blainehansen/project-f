@@ -295,9 +295,6 @@ export function create() {
 }
 ```
 
-<!-- blaine, this seems like a nice place to automatically handle function wrapping -->
-<!-- it isn't that bad to see if the trimmed beginning is some arrow function thing right? -->
-
 ```wolf
 button(@click={ counter(counter() + 1) }) Add 1
 ```
@@ -326,6 +323,12 @@ You can also use the `$event` variable.
 
 ```wolf
 button(@click={ warn('Form cannot be submitted yet.', $event) }) Submit
+```
+
+If you want to provide a full handler, use the `handler` modifier.
+
+```wolf
+button(@click|handler={ e => warn('Form cannot be submitted yet.', e) }) Submit
 ```
 
 

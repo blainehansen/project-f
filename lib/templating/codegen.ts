@@ -13,6 +13,9 @@ import {
 function safePrefix(s: string) {
 	return `___${s}`
 }
+function nextOffset(offset: string, index: number) {
+	return `${offset}_${index}`
+}
 function safePrefixIdent(...segments: NonLone<string>) {
 	return ts.createIdentifier(safePrefix(segments.join('')))
 }
@@ -53,8 +56,12 @@ export class CodegenContext {
 
 const realParentText = safePrefix('real')
 const parentText = safePrefix('parent')
-export const parentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
-const parentParams = () => t(createParameter(realParentText), createParameter(parentText))
+export const resetParentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
+const untypedParentParams = () => t(createParameter(realParentText), createParameter(parentText))
+const typedParentParams = () => t(
+	createParameter(realParentText, ts.createTypeReferenceNode(ts.createIdentifier('Node'), undefined)),
+	createParameter(parentText, ts.createTypeReferenceNode(ts.createIdentifier('Node'), undefined)),
+)
 
 // as an optimization for the call sites to avoid a bunch of empty object allocations,
 // you can pass a reference to the same global empty object for all the groups that haven't provided anything
@@ -65,11 +72,10 @@ export function generateComponentRenderFunction(
 ) {
 	const ctx = new CodegenContext()
 
-	const [realParentIdent, parentIdent] = parentIdents()
-	const entityStatements = entities
-		// at the component level, we can't know whether we're truly the lone child of a real node
-		// so we pass false, and only concrete nodes below us can reset that based on their status
-		.flatMap((entity, index) => generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent))
+	const [realParentIdent, parentIdent] = resetParentIdents()
+	// at the component level, we can't know whether we're truly the lone child of a real node
+	// so we pass false, and only concrete nodes below us can reset that based on their status
+	const entitiesStatements = generateEntities(entities, '', false, ctx, realParentIdent, parentIdent)
 
 	const argsNames = propsNames.concat(eventsNames).concat(eventsNames)
 	const createFnInvocation = createFnNames.length === 0 ? [] : [createConst(
@@ -87,7 +93,7 @@ export function generateComponentRenderFunction(
 		)]),
 	) as ts.Statement]
 
-	const statements = createFnInvocation.concat(entityStatements)
+	const statements = createFnInvocation.concat(entitiesStatements)
 	const params = [realParentText, parentText, propsNames, syncsNames, eventsNames, slotNames].map(n => createParameter(n))
 	const componentArrow = createArrowFunction(params, ts.createBlock(statements, true))
 
@@ -105,13 +111,21 @@ export function generateComponentRenderFunction(
 }
 
 
-// export function generateEntities(entities: Entity[], offset: string, isRealLone: boolean) {
-// 	const statements = []
-// 	for (const entity of entities)
-// 		statements.push(generateEntity(entity))
+export function generateEntities(
+	entities: Entity[], offset: string, isRealLone: boolean,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const statements = [] as ts.Statement[]
+	const entitiesRealLone = isRealLone && entities.length <= 1
+	for (let index = 0; index < entities.length; index++) {
+		const entity = entities[index]
+		const entityStatements = generateEntity(entity, nextOffset(offset, index), entitiesRealLone, ctx, realParent, parent)
+		Array.prototype.push.apply(statements, entityStatements)
+	}
 
-// 	return statements
-// }
+	return statements
+}
+
 export function generateEntity(
 	entity: Entity, offset: string, isRealLone: boolean,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
@@ -354,14 +368,12 @@ export function generateTag(
 			ts.createPropertyAccess(tagIdent, 'appendChild'), [tagFragment],
 		))],
 	]
-	Array.prototype.push.apply(statements, preChildrenStatements)
-	for (let index = 0; index < entities.length; index++) {
-		needTagIdent = true
-		const entity = entities[index]
 
-		const childStatements = generateEntity(entity, `${offset}_${index}`, childRealLone, ctx, tagIdent, childParent)
-		Array.prototype.push.apply(statements, childStatements)
-	}
+	needTagIdent = needTagIdent || entities.length > 0
+
+	Array.prototype.push.apply(statements, preChildrenStatements)
+	const childStatements = generateEntities(entities, offset, childRealLone, ctx, tagIdent, childParent)
+	Array.prototype.push.apply(statements, childStatements)
 	Array.prototype.push.apply(statements, postChildrenStatements)
 
 	if (!needTagIdent)
@@ -443,7 +455,10 @@ export function generateText(
 
 // }
 
-// function createIf({ expression, entities, elseBranch }: IfBlock, reactiveSoFar: boolean) {
+// function createIf(
+// 	{ expression, entities, elseBranch }: IfBlock,
+// 	reactiveSoFar: boolean, isRealLone: boolean,
+// ) {
 // 	const reactive = reactiveSoFar || expression.startsWith(':')
 
 // 	return ts.createIf(
@@ -456,9 +471,9 @@ export function generateText(
 // }
 // export function generateIfBlock(
 // 	ifBlock: IfBlock, offset: string, isRealLone: boolean,
-// 	realParent: ts.Identifier, parent: ts.Identifier,
+// 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 // ): ts.Statement[] {
-// 	const [reactive, ifStatement] = createIf(ifBlock)
+// 	const [reactive, ifStatement] = createIf(ifBlock, false, isRealLone)
 
 // 	const params = [createParameter(realParent), createParameter(parent)]
 // 	const closure = createArrowFunction(params, ts.createBlock([ifStatement], true))
@@ -472,28 +487,54 @@ export function generateText(
 // 			: ifStatement
 // }
 
-// function generateEachBlock(e: EachBlock, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+// function generateEachBlock(e: EachBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateMatchBlock(e: MatchBlock, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+// function generateMatchBlock(e: MatchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateSwitchBlock(e: SwitchBlock, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+// function generateSwitchBlock(e: SwitchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateSlotDefinition(e: SlotDefinition, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+// function generateSlotDefinition(e: SlotDefinition, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+// function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateTemplateDefinition(e: TemplateDefinition, offset: string, isRealLone: boolean, parent: ts.Identifier) {
 
-// }
-// function generateTemplateInclusion(e: TemplateInclusion, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+export function generateTemplateDefinition(
+	{ name, argsExpression, entities }: TemplateDefinition,
+	ctx: CodegenContext,
+): ts.Statement[] {
+	const remainingParams = argsExpression !== undefined
+		? [createParameter(createRawCodeSegment(argsExpression))]
+		: []
 
-// }
-// function generateVariableBinding(e: VariableBinding, offset: string, isRealLone: boolean, parent: ts.Identifier) {
+	const params = typedParentParams().concat(remainingParams)
+	const [realParent, parent] = resetParentIdents()
+
+
+	return [ts.createFunctionDeclaration(
+		undefined, undefined, undefined, ts.createIdentifier(name),
+		undefined, params, undefined,
+		// this is similar to a component definition, since we can't know how this template will be used
+		// we have to begin with the assumption that this can be used in non-lone contexts
+		ts.createBlock(generateEntities(entities, '', false, ctx, realParent, parent), true)
+	)]
+}
+
+export function generateTemplateInclusion(
+	{ name, argsExpression }: TemplateInclusion,
+	realParent: ts.Identifier, parent: ts.Identifier,
+): ts.Statement[] {
+	const givenArgs = argsExpression !== undefined
+		? [createRawCodeSegment(argsExpression)]
+		: []
+	return [ts.createExpressionStatement(createCall(name, [realParent, parent].concat(givenArgs)))]
+}
+
+// function generateVariableBinding(e: VariableBinding, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
 
@@ -524,7 +565,7 @@ function createConst(
 
 function createCall(target: string | ts.Expression, args: ts.Expression[]) {
 	return ts.createCall(
-		typeof target === 'string' ? ts.createIdentifier(name) : target,
+		typeof target === 'string' ? ts.createIdentifier(target) : target,
 		undefined, args,
 	)
 }
@@ -536,12 +577,12 @@ function createArrowFunction(parameters: ts.ParameterDeclaration[], body: ts.Con
 	)
 }
 
-function createParameter(param: string | string[], type?: ts.TypeReferenceNode) {
+function createParameter(param: string | string[] | ts.Identifier, type?: ts.TypeReferenceNode) {
 	return ts.createParameter(
 		undefined, undefined, undefined,
-		typeof param === 'string'
-			? ts.createIdentifier(param)
-			: createObjectBindingPattern(param),
+		typeof param === 'string' ? ts.createIdentifier(param)
+			: Array.isArray(param) ? createObjectBindingPattern(param)
+			: param,
 		undefined, type, undefined,
 	)
 }

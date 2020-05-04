@@ -11,8 +11,8 @@ import {
 } from './ast.spec'
 import {
 	BindingType, LivenessType,
-	printNodes, printNodesArray, CodegenContext, parentIdents,
-	generateComponentRenderFunction, generateTag, generateText,
+	printNodes, printNodesArray, CodegenContext, resetParentIdents, generateComponentRenderFunction,
+	generateTag, generateText, /*generateIfBlock,*/ generateTemplateDefinition, generateTemplateInclusion,
 } from './codegen'
 
 // function b(node: Parameters<typeof printNode>[0]) {
@@ -25,7 +25,7 @@ type ctx = CodegenContext
 function ctx() {
 	return new CodegenContext()
 }
-const [realParent, parent] = parentIdents()
+const [realParent, parent] = resetParentIdents()
 
 describe('generateComponentRenderFunction', () => {
 	// div hello
@@ -40,8 +40,8 @@ describe('generateComponentRenderFunction', () => {
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
-				const ___div0 = ___createElement(___parent, "div")
-				___div0.textContent = "hello"
+				const ___div_0 = ___createElement(___parent, "div")
+				___div_0.textContent = "hello"
 			}
 			export default ___Component
 		`)
@@ -59,10 +59,10 @@ describe('generateComponentRenderFunction', () => {
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
-				const ___div0 = ___createElement(___parent, "div")
+				const ___div_0 = ___createElement(___parent, "div")
 
-				const ___span0_0 = ___createElement(___div0, "span")
-				___span0_0.textContent = "hello"
+				const ___span_0_0 = ___createElement(___div_0, "span")
+				___span_0_0.textContent = "hello"
 			}
 			export default ___Component
 		`)
@@ -83,15 +83,15 @@ describe('generateComponentRenderFunction', () => {
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
-				const ___div0 = ___createElement(___parent, "div")
-				const ___div0fragment = document.createDocumentFragment()
+				const ___div_0 = ___createElement(___parent, "div")
+				const ___div_0fragment = document.createDocumentFragment()
 
-				const ___span0_0 = ___createElement(___div0fragment, "span")
-				___span0_0.textContent = "hello"
+				const ___span_0_0 = ___createElement(___div_0fragment, "span")
+				___span_0_0.textContent = "hello"
 
-				___createElement(___div0fragment, "div")
+				___createElement(___div_0fragment, "div")
 
-				___div0.appendChild(___div0fragment)
+				___div_0.appendChild(___div_0fragment)
 			}
 			export default ___Component
 		`)
@@ -356,12 +356,83 @@ describe('generateText', () => {
 		`],
 	]
 
-	for (const [isRealLone, items, generated] of cases) {
+	for (const [lone, items, generated] of cases) {
 		const context = ctx()
-		const nodes = generateText(TextSection(...items), '0', isRealLone, context, realParent, parent)
+		const nodes = generateText(TextSection(...items), '0', lone, context, realParent, parent)
 		const generatedCode = context.finalize(nodes)
 
 		const itemsString = items.map(({ isCode, content }) => `(isCode: ${isCode}, ${content.replace(/\n/g, ' ')})`).join(', ')
-		it(`lone: ${isRealLone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
+		it(`lone: ${lone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
 	}
+})
+
+
+// describe('generateIfBlock', () => {
+// 	const cases: [boolean, IfBlock, string][] = [
+// 		// dynamic, one layer
+// 		// @if (checked)
+// 		[true, IfBlock('checked', [], undefined), `
+// 			if (checked) {}
+// 		`],
+// 		[false, IfBlock(), `
+// 			if (checked) {}
+// 		`],
+// 	]
+
+// 	for (const [lone, block, generated] of cases) {
+// 		const context = ctx()
+// 		const nodes = generateIfBlock(block, '0', lone, context, realParent, parent)
+// 		const generatedCode = context.finalize(nodes)
+
+// 		const itemsString = items.map(({ isCode, content }) => `(isCode: ${isCode}, ${content.replace(/\n/g, ' ')})`).join(', ')
+// 		it(`lone: ${lone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
+// 	}
+
+// })
+
+
+
+describe('generateTemplateDefinition', () => {
+	const cases: [string | undefined, string][] = [
+		[undefined, 'no arguments'],
+		['a: string', 'one argument'],
+		['a: string, b: number', 'two arguments'],
+		['a?: string, b: number | stuff, ...args: NonEmpty<stuff<T>>', 'complex arguments'],
+	]
+
+	for (const [expression, description] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateTemplateDefinition(
+				TemplateDefinition('greeting', expression, [TextSection(TextItem(false, 'hello'))]),
+				context,
+			)
+			const generatedCode = context.finalize(nodes)
+
+			boilEqual(generatedCode, `
+				import { createTextNode as ___createTextNode } from "project-f/runtime"
+
+				function greeting(___real: Node, ___parent: Node${expression !== undefined ? ', ' + expression : ''}) {
+					___createTextNode(___parent, "hello")
+				}
+			`)
+		})
+})
+
+describe('generateTemplateInclusion', () => {
+	const cases: [string | undefined, string][] = [
+		[undefined, 'no args'],
+		['a', 'one arg'],
+		['a, b', 'two args'],
+		[`a | '', b.concat(things), ...rest`, 'complex args'],
+	]
+
+	for (const [expression, description] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateTemplateInclusion(TemplateInclusion('greeting', expression), realParent, parent)
+			const generatedCode = context.finalize(nodes)
+
+			boilEqual(generatedCode, `greeting(___real, ___parent${expression !== undefined ? ', ' + expression : ''})`)
+		})
 })
