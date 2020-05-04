@@ -26,13 +26,6 @@ export function createTextNode(
 	return el
 }
 
-// export function createBoundTextNode(parent: Node, effectClosure: () => string) {
-// 	const el = document.createTextNode('')
-// 	effect(() => {
-// 		el.data = effectClosure()
-// 	})
-// 	return el
-// }
 
 const svgNS = 'http://www.w3.org/2000/svg' as const
 export function createSvg<K extends keyof SVGElementTagNameMap>(

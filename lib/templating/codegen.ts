@@ -1,10 +1,11 @@
 import ts = require('typescript')
 import '@ts-std/extensions/dist/array'
+import { DefaultDict, UniqueDict } from '@ts-std/collections'
 
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
-	Entity, AttributeValue, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, /*AttributeCode,*/ TextSection, TextItem,
+	Entity, Directive,
+	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
@@ -21,7 +22,6 @@ function createRawCodeSegment(code: string) {
 }
 
 export class CodegenContext {
-	protected rawCodeSegments = [] as { marker: string, code: string }[]
 	protected requiredFunctions = new Set<string>()
 
 	requireRuntime(functionName: string) {
@@ -29,24 +29,8 @@ export class CodegenContext {
 		return ts.createIdentifier(safePrefix(functionName))
 	}
 
-	// // TODO it might be unnecessary to do this!
-	// // ts.createIdentifier seems like it will gladly just pass along the string directly into the source!
-	// createRawCodeSegment(code: string): ts.Identifier {
-	// 	const count = '' + this.rawCodeSegments.length
-	// 	const marker = `&%&%` + count.repeat(11) + `&%&%`
-	// 	this.rawCodeSegments.push({ marker, code })
-	// 	return ts.createIdentifier(marker)
-	// }
-
 	finalize(nodes: ts.Node[]) {
-		let generatedCode = printNodesArray(nodes)
-		// let scanningCode =
-		for (const { marker, code } of this.rawCodeSegments) {
-			// a future optimization could be to trim through the generatedCode
-			// and therefore not require the regex library to scan through all the parts that we know won't have our marker
-			// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/indexOf
-			generatedCode = generatedCode.replace(marker, code)
-		}
+		const generatedCode = printNodesArray(nodes)
 
 		const runtimeImports = [...this.requiredFunctions].map(fnName => {
 			return ts.createImportSpecifier(
@@ -60,10 +44,10 @@ export class CodegenContext {
 			ts.createStringLiteral('project-f/runtime'),
 		)
 
-		this.rawCodeSegments.splice(0, this.rawCodeSegments.length)
 		this.requiredFunctions.clear()
 
-		return printNodes(runtimeImportDeclaration) + '\n\n' + generatedCode
+		const importCode = runtimeImports.length > 0 ? printNodes(runtimeImportDeclaration) : ''
+		return importCode + '\n\n' + generatedCode
 	}
 }
 
@@ -164,69 +148,99 @@ export function generateEntity(
 	}
 }
 
-const enum AttributeType { empty, static, dynamic, reactive, sync, event, fn }
+export const enum BindingType { empty, static, dynamic, reactive, sync }
+export type LivenessType = Exclude<BindingType, BindingType.empty | BindingType.sync>
+
+const fnModifiers = [] as const
 const reactiveModifiers = ['fake'] as const
 const syncModifiers = ['fake', 'setter'] as const
-const eventModifiers = ['handler', 'exact', 'stop', 'prevent', 'capture', 'self', 'once', 'passive'] as const
+// since we aren't yet actually supporting these, I'm not turning them on yet
+// const eventModifiers = ['handler', 'exact', 'stop', 'prevent', 'capture', 'self', 'once', 'passive'] as const
+const eventModifiers = ['handler'] as const
 // const metaModifiers = ['ctrl', 'alt', 'shift', 'meta']
 // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
 // const keyModifiers = [] as const
 // const mouseModifiers = ['left', 'right', 'middle'] as const
-export function processAttribute(
-	ctx: CodegenContext,
-	rawAttribute: string,
-	value: AttributeValue | undefined,
-) {
-	if (rawAttribute === '&fn')
-		throw new Error('unimplemented')
 
-	// TODO remember that if an attribute contains dashes it's a dom attribute instead of property, and should be set differently
+function checkAttribute(
+	value: string | AttributeCode | undefined,
+	modifiersList: string[],
+	variety: string,
+	varietyModifiers: readonly string[],
+): asserts value is AttributeCode {
+	if (value === undefined || typeof value === 'string')
+		throw new Error(`static attribute values are invalid for ${variety}s`)
+	for (const modifier of modifiersList)
+		if (!varietyModifiers.includes(modifier))
+			throw new Error(`invalid modifier for ${variety}: ${modifier}`)
+}
 
-	const firstLetter = rawAttribute[0] || ''
-	if (firstLetter === '') throw new Error("empty attribute name shouldn't be possible!")
+function processAttributes(attributes: Attribute[]) {
+	const bindings = new UniqueDict<[BindingType, Dict<true>, string]>()
+	const events = new DefaultDict(() => [] as [Dict<true>, string][])
+	const fns = [] as string[]
 
-	const [attribute, ...modifiersList] = rawAttribute.split('|')
-	const sliced = attribute.slice(1)
-	const modifiers = modifiersList.unique_index_map(m => [m, true as const])
-		.change_err(e => `duplicate modifier ${e[0]}`)
-		.unwrap()
+	for (const { name: rawAttribute, value } of attributes) {
+		// TODO remember that if an attribute contains dashes it's a dom attribute instead of property, and should be set differently
 
-	function check(
-		value: AttributeValue, variety: string,
-		varietyModifiers: readonly string[],
-	): asserts value is { code: string } {
-		if (value === undefined || typeof value === 'string')
-			throw new Error(`static attribute values are invalid for ${variety}s`)
-		for (const modifier of modifiersList)
-			if (!varietyModifiers.includes(modifier))
-				throw new Error(`invalid modifier for ${variety}: ${modifier}`)
-	}
+		const firstLetter = rawAttribute[0] || ''
+		if (firstLetter === '') throw new Error("empty attribute name shouldn't be possible!")
 
-	switch (firstLetter) {
-		case ':':
-			check(value, 'reactive binding', reactiveModifiers)
-			return t(AttributeType.reactive, sliced, modifiers, value.code)
+		const [attribute, ...modifiersList] = rawAttribute.split('|')
+		const sliced = attribute.slice(1)
+		const modifiers = modifiersList.unique_index_map(m => [m, true as const])
+			.change_err(e => `duplicate modifier ${e[0]}`)
+			.unwrap()
 
-		case '!':
-			check(value, 'sync', syncModifiers)
-			return t(AttributeType.sync, sliced, modifiers, value.code)
+		switch (firstLetter) {
+		case '&':
+			if (sliced !== 'fn')
+				throw new Error("the & prefix for node receivers is only valid when used as &fn")
+
+			checkAttribute(value, modifiersList, 'node receiver', fnModifiers)
+			fns.push(value.code)
+			break
 
 		case '@':
-			check(value, 'event', eventModifiers)
-			const code = modifiers.handler ? value.code : `$event => ${value.code}`
+			checkAttribute(value, modifiersList, 'event', eventModifiers)
+			if (modifiers.handler && value.isBare)
+				throw new Error("the handler modifier doesn't make any sense on a bare event attribute")
+			const code = modifiers.handler || value.isBare ? value.code : `$event => ${value.code}`
 			delete modifiers.handler
-			return t(AttributeType.event, sliced, modifiers, code)
+			events.get(sliced).push([modifiers, code])
+			break
+
+		case ':': {
+			checkAttribute(value, modifiersList, 'reactive binding', reactiveModifiers)
+			const result = bindings.set(sliced, [BindingType.reactive, modifiers, value.code])
+			if (result.is_err()) throw new Error(`duplicate binding ${sliced}`)
+			break
+		}
+
+		case '!': {
+			checkAttribute(value, modifiersList, 'sync', syncModifiers)
+			const result = bindings.set(sliced, [BindingType.sync, modifiers, value.code])
+			if (result.is_err()) throw new Error(`duplicate sync ${sliced}`)
+			break
+		}
+
+		default:
+			if (modifiersList.length !== 0)
+				throw new Error("modifiers don't make any sense on attributes that aren't reactive, syncs, or events")
+
+			const result = bindings.set(
+				attribute,
+				value === undefined ? [BindingType.empty, {}, '']
+				: typeof value === 'string' ? [BindingType.static, {}, value]
+				: [BindingType.dynamic, {}, value.code]
+			)
+			if (result.is_err()) throw new Error(`duplicate binding ${attribute}`)
+		}
 	}
 
-	if (modifiersList.length !== 0)
-		throw new Error("modifiers don't make any sense on normal bindings")
-
-	if (value === undefined)
-		return t(AttributeType.empty, attribute, {}, '')
-	if (typeof value === 'string')
-		return t(AttributeType.static, attribute, {}, value)
-	return t(AttributeType.dynamic, attribute, {}, value.code)
+	return t(bindings.entries(), events.entries(), fns)
 }
+
 
 export function generateTag(
 	{ ident, metas, attributes, entities }: Tag, offset: string,
@@ -277,44 +291,57 @@ export function generateTag(
 			: createFieldAssignment(tagIdent, 'className', ts.createStringLiteral(className))
 		statements.push(classNameAssignment)
 	}
+	// TODO in the future I might get rid of the dynamic metas
+	// in this situation we'd just do the same thing the metas loop is doing above
+	// and then continue out of this loop iteration
+	// if (attribute === 'id') if not dynamic throw new Error("don't use the `id` attribute, use `#id-name` syntax instead")
+	// if (attribute === 'class') if not dynamic throw new Error("don't use the `class` attribute, use `.class-name` syntax instead")
 
-	for (const { name, value } of attributes) {
-		needTagIdent = true
+	needTagIdent = needTagIdent || attributes.length > 0
+	const [bindings, events, fns] = processAttributes(attributes)
 
-		const [attributeType, attribute, modifiers, valueString] = processAttribute(ctx, name, value)
-
-		// TODO in the future I might get rid of the dynamic metas
-		// in this situation we'd just do the same thing the metas loop is doing above
-		// and then continue out of this loop iteration
-		// if (attribute === 'id') if not dynamic throw new Error("don't use the `id` attribute, use `#id-name` syntax instead")
-		// if (attribute === 'class') if not dynamic throw new Error("don't use the `class` attribute, use `.class-name` syntax instead")
-
-		switch (attributeType) {
-			case AttributeType.empty:
-				statements.push(createFieldAssignment(tagIdent, attribute, ts.createTrue()))
-				break
-			case AttributeType.static:
-				statements.push(createFieldAssignment(tagIdent, attribute, ts.createStringLiteral(valueString)))
-				break
-			case AttributeType.dynamic:
-				statements.push(createFieldAssignment(tagIdent, attribute, createRawCodeSegment(valueString)))
-				break
-			case AttributeType.reactive:
-				if (modifiers.fake) throw new Error("the fake modifier doesn't make any sense on a tag")
-				statements.push(createEffectBind(ctx, tagIdent, attribute, createRawCodeSegment(`${valueString}()`)))
-				break
-			case AttributeType.sync:
-				throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-			case AttributeType.event:
-				// TODO lots to think about here, since we aren't properly handling basically any modifiers
-				statements.push(createFieldAssignment(tagIdent, `on${attribute}`, createRawCodeSegment(valueString)))
-				break
-			case AttributeType.fn:
-				const statement = createCall(ctx.requireRuntime('nodeReceiver'), [tagIdent, createRawCodeSegment(valueString)])
-				statements.push(ts.createExpressionStatement(statement))
-				break
-		}
+	for (const [binding, [type, modifiers, code]] of bindings) switch (type) {
+		case BindingType.empty:
+			// intentionally ignore modifiers
+			statements.push(createFieldAssignment(tagIdent, binding, ts.createTrue()))
+			break
+		case BindingType.static:
+			// intentionally ignore modifiers
+			statements.push(createFieldAssignment(tagIdent, binding, ts.createStringLiteral(code)))
+			break
+		case BindingType.dynamic:
+			// intentionally ignore modifiers
+			statements.push(createFieldAssignment(tagIdent, binding, createRawCodeSegment(code)))
+			break
+		case BindingType.reactive:
+			if (modifiers.fake) throw new Error("the fake modifier doesn't make any sense on a tag, just use a non-reactive binding instead")
+			statements.push(createEffectBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
+			break
+		case BindingType.sync:
+			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
 	}
+
+	for (const [event, handlers] of events) {
+		if (handlers.length === 0) continue
+
+		// TODO lots to think about here, since we aren't properly handling basically any modifiers
+		const finalHandler = handlers.length === 1
+			? createRawCodeSegment(handlers[0][1])
+			: createArrowFunction([createParameter('$event')], ts.createBlock(
+				handlers.map(([, code]) => {
+					return ts.createExpressionStatement(createCall(createRawCodeSegment(`(${code})`), [ts.createIdentifier('$event')]))
+				}),
+				true,
+			))
+
+		statements.push(createFieldAssignment(tagIdent, `on${event}`, finalHandler))
+	}
+
+	for (const code of fns) {
+		const statement = createCall(ctx.requireRuntime('nodeReceiver'), [tagIdent, createRawCodeSegment(code)])
+		statements.push(ts.createExpressionStatement(statement))
+	}
+
 
 	// here our calculation of real loneness is true, since this current entity is a concrete tag
 	const tagFragment = safePrefixIdent(ident, offset, 'fragment')
@@ -343,36 +370,69 @@ export function generateTag(
 	return statements
 }
 
+function strongerLiveness(a: LivenessType, b: LivenessType) {
+	switch (a) {
+	case BindingType.static:
+		return b
+	case BindingType.dynamic:
+		return b === BindingType.reactive ? b : a
+	case BindingType.reactive:
+		return a
+	}
+}
+
 export function generateText(
 	{ items }: TextSection, offset: string, isRealLone: boolean,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ): ts.Statement[] {
-	let isDynamic = false
-	let content = ''
-	for (const item of items) {
-		if (item.isCode) isDynamic = true
-		// TODO have to figure out how linebreaks work in all of this
-		content += item.isCode
-			? '${' + item.content + '}'
-			: item.content
+	let totalContent = ''
+	let liveness: LivenessType = BindingType.static
+
+	const [wrapCode, wrapItem]: [(s: string) => string, (s: string) => string] = items.length > 1
+		? [s => '`' + s + '`', s => '${' + s + '}']
+		: [s => s, s => s]
+
+	for (const { isCode, content } of items) {
+		const [itemLiveness, itemContent]: [LivenessType, string] = isCode
+			? content.startsWith(':')
+				? [BindingType.reactive, wrapItem(content.slice(1).trim() + '()')]
+				: [BindingType.dynamic, wrapItem(content.trim())]
+			: [BindingType.static, content]
+
+		// in the wolf grammar, we have information about line breaks in text sections
+		// this means that we can add empty whitespace text sections at the parser level rather than here
+		liveness = strongerLiveness(liveness, itemLiveness)
+		totalContent += itemContent
 	}
 
-	if (isRealLone) return isDynamic
-		? [createEffectBind(ctx, realParent, 'textContent', createRawCodeSegment('`' + content + '`'))]
-		: [createFieldAssignment(realParent, 'textContent', ts.createStringLiteral(content))]
+	if (isRealLone) switch (liveness) {
+		case BindingType.reactive:
+			return [createEffectBind(ctx, realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
+		case BindingType.dynamic:
+			return [createFieldAssignment(realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
+		case BindingType.static:
+			return [createFieldAssignment(realParent, 'textContent', ts.createStringLiteral(totalContent))]
+	}
 
-	const textIdent = safePrefixIdent('text', offset)
-	return isDynamic
-		? [
+	switch (liveness) {
+	case BindingType.reactive:
+		const textIdent = safePrefixIdent('text', offset)
+		return [
 			createConst(
 				textIdent,
 				createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral('')])
 			),
-			createEffectBind(ctx, textIdent, 'data', createRawCodeSegment('`' + content + '`'))
+			createEffectBind(ctx, textIdent, 'data', createRawCodeSegment(wrapCode(totalContent))),
 		]
-		: [ts.createExpressionStatement(
-			createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral(content)]),
+	case BindingType.dynamic:
+		return [ts.createExpressionStatement(
+			createCall(ctx.requireRuntime('createTextNode'), [parent, createRawCodeSegment(wrapCode(totalContent))])
 		)]
+	case BindingType.static:
+		return [ts.createExpressionStatement(
+			createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral(totalContent)]),
+		)]
+	}
 }
 
 
@@ -383,7 +443,9 @@ export function generateText(
 
 // }
 
-// function createIf({ expression, entities, elseBranch }: IfBlock) {
+// function createIf({ expression, entities, elseBranch }: IfBlock, reactiveSoFar: boolean) {
+// 	const reactive = reactiveSoFar || expression.startsWith(':')
+
 // 	return ts.createIf(
 // 		createRawCodeSegment(expression),
 // 		ts.createBlock(generateEntities(entities), true),
@@ -392,18 +454,22 @@ export function generateText(
 // 			: createIf(elseBranch),
 // 	)
 // }
-// function generateIfBlock(
-// 	ifBlock: IfBlock,
-// 	offset: string, isRealLone: boolean, realParent: ts.Identifier, parent: ts.Identifier,
-// ) {
-// 	const ifStatement = createIf(ifBlock)
+// export function generateIfBlock(
+// 	ifBlock: IfBlock, offset: string, isRealLone: boolean,
+// 	realParent: ts.Identifier, parent: ts.Identifier,
+// ): ts.Statement[] {
+// 	const [reactive, ifStatement] = createIf(ifBlock)
 
-// 	// TODO don't hardcode these as strings
-// 	const params = [createParameter('realParent'), createParameter('parent')]
+// 	const params = [createParameter(realParent), createParameter(parent)]
 // 	const closure = createArrowFunction(params, ts.createBlock([ifStatement], true))
+
 // 	return isRealLone
-// 		? createCall(requireRuntime('contentEffect'), [closure, realParent])
-// 		: createCall(requireRuntime('rangeEffect'), [closure, realParent, parent])
+// 		? reactive
+// 			? [ts.createExpressionStatement(createCall(requireRuntime('contentEffect'), [closure, realParent]))]
+// 			: ifStatement
+// 		: reactive
+// 			? createCall(requireRuntime('rangeEffect'), [closure, realParent, parent])
+// 			: ifStatement
 // }
 
 // function generateEachBlock(e: EachBlock, offset: string, isRealLone: boolean, parent: ts.Identifier) {
@@ -518,28 +584,6 @@ function createEffectBind(
 		]),
 	)
 }
-
-
-
-// const n = ts.createVariableStatement(
-// 	undefined,
-// 	ts.createVariableDeclarationList(
-// 		[
-// 			ts.createVariableDeclaration(
-// 				ts.createIdentifier('s'),
-// 				undefined,
-// 				ts.createTemplateExpression(ts.createTemplateHead('begin '), [
-// 					ts.createTemplateSpan(
-// 						createRawCodeSegment(`f().something
-// 								+ 2`),
-// 						ts.createTemplateTail(' end'),
-// 					),
-// 				]),
-// 			),
-// 		],
-// 		ts.NodeFlags.Const,
-// 	),
-// )
 
 
 export function printNodes(...nodes: NonEmpty<ts.Node>) {

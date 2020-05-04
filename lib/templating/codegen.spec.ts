@@ -1,16 +1,18 @@
 import 'mocha'
 import { expect } from 'chai'
 
+import { NonEmpty } from '../utils'
 import { boilString } from '../utils.spec'
 import {
-	Entity, AttributeValue, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, /*AttributeCode,*/ TextSection, TextItem,
+	Entity, Directive,
+	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast.spec'
 import {
+	BindingType, LivenessType,
 	printNodes, printNodesArray, CodegenContext, parentIdents,
-	generateComponentRenderFunction, generateTag,
+	generateComponentRenderFunction, generateTag, generateText,
 } from './codegen'
 
 // function b(node: Parameters<typeof printNode>[0]) {
@@ -34,7 +36,7 @@ describe('generateComponentRenderFunction', () => {
 			]),
 		])
 
-		const expected = `
+		boilEqual(generatedCode, `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -42,8 +44,7 @@ describe('generateComponentRenderFunction', () => {
 				___div0.textContent = "hello"
 			}
 			export default ___Component
-		`
-		boilEqual(generatedCode, expected)
+		`)
 	})
 
 	// div: span hello
@@ -54,7 +55,7 @@ describe('generateComponentRenderFunction', () => {
 			]),
 		])
 
-		const expected = `
+		boilEqual(generatedCode, `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -64,8 +65,7 @@ describe('generateComponentRenderFunction', () => {
 				___span0_0.textContent = "hello"
 			}
 			export default ___Component
-		`
-		boilEqual(generatedCode, expected)
+		`)
 	})
 
 	// div
@@ -79,7 +79,7 @@ describe('generateComponentRenderFunction', () => {
 			]),
 		])
 
-		const expected = `
+		boilEqual(generatedCode, `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -94,8 +94,7 @@ describe('generateComponentRenderFunction', () => {
 				___div0.appendChild(___div0fragment)
 			}
 			export default ___Component
-		`
-		boilEqual(generatedCode, expected)
+		`)
 	})
 })
 
@@ -106,14 +105,14 @@ describe('generateTag', () => {
 			'div',
 			[Meta(false, false, 'i'), Meta(true, false, 'one'), Meta(true, false, 'two')],
 			[
-				Attribute('disabled', { code: 'true' }),
+				Attribute('disabled', AttributeCode(true, 'true')),
 				Attribute('thing.children().stuff[0]', "whatever"),
-				Attribute(':visible', { code: 'env.immutable' }),
+				Attribute(':visible', AttributeCode(false, 'env.immutable')),
 			], [],
 		), '0', context, realParent, parent)
 		const generatedCode = context.finalize(nodes)
 
-		const expected = `
+		boilEqual(generatedCode, `
 			import { createElement as ___createElement, effect as ___effect } from "project-f/runtime"
 
 			const ___div0 = ___createElement(___parent, "div")
@@ -124,66 +123,245 @@ describe('generateTag', () => {
 			___effect(() => {
 			    ___div0.visible = env.immutable()
 			})
-		`
-		boilEqual(generatedCode, expected)
+		`)
 	})
 
-	// @click.handler={ e => p(e) }, @keyup.
+	it('div(@click=doit, @keyup={ mutable(1) }, @keydown|handler={ e => handle(e) })', () => {
+		const context = ctx()
+		const nodes = generateTag(Tag(
+			'div', [],
+			[
+				Attribute('@click', AttributeCode(true, 'doit')),
+				Attribute('@keyup', AttributeCode(false, ' mutable(1) ')),
+				Attribute('@keydown|handler', AttributeCode(false, ' e => handle(e) ')),
+			], [],
+		), '0', context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		boilEqual(generatedCode, `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			const ___div0 = ___createElement(___parent, "div")
+			___div0.onclick = doit
+			___div0.onkeyup = $event => mutable(1)
+			___div0.onkeydown = e => handle(e)
+		`)
+	})
+
+	it('two handlers for the same event', () => {
+		const context = ctx()
+		const nodes = generateTag(Tag(
+			'div', [],
+			[
+				Attribute('@click', AttributeCode(true, 'doit')),
+				Attribute('@click', AttributeCode(false, ' mutable(1) ')),
+			], [],
+		), '0', context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		boilEqual(generatedCode, `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			const ___div0 = ___createElement(___parent, "div")
+			___div0.onclick = $event => {
+				(doit)($event)
+				($event => mutable(1))($event)
+			}
+		`)
+	})
+
+	it('three handlers for the same event', () => {
+		const context = ctx()
+		const nodes = generateTag(Tag(
+			'div', [],
+			[
+				Attribute('@click', AttributeCode(true, 'doit')),
+				Attribute('@click', AttributeCode(false, ' mutable(1) ')),
+				Attribute('@click|handler', AttributeCode(false, ' e => handle(e) ')),
+			], [],
+		), '0', context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		boilEqual(generatedCode, `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			const ___div0 = ___createElement(___parent, "div")
+			___div0.onclick = $event => {
+				(doit)($event)
+				($event => mutable(1))($event)
+				(e => handle(e))($event)
+			}
+		`)
+	})
+
+	it('node receivers', () => {
+		const context = ctx()
+		const nodes = generateTag(Tag(
+			'div', [],
+			[
+				Attribute('&fn', AttributeCode(true, 'doit')),
+				Attribute('&fn', AttributeCode(false, ' d => handle(d) ')),
+			], [],
+		), '0', context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		boilEqual(generatedCode, `
+			import { createElement as ___createElement, nodeReceiver as ___nodeReceiver } from "project-f/runtime"
+
+			const ___div0 = ___createElement(___parent, "div")
+			___nodeReceiver(___div0, doit)
+			___nodeReceiver(___div0,  d => handle(d) )
+		`)
+	})
+
+	it('sync on non-input tag', () => {
+		for (const attribute of ['!anything', '!sync', '!sync|fake'])
+			expect(() => generateTag(Tag(
+				'div', [],
+				[Attribute(attribute, AttributeCode(true, 'doit'))], [],
+			), '0', ctx(), realParent, parent)).throw()
+	})
+
+	it('handler event modifier with bare code', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('@click|handler', AttributeCode(true, 'doit'))], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	it('any modifiers on normal attribute', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('anything|whatever', "doesn't matter")], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	it('& used as anything other than &fn', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('&notfn', AttributeCode(true, 'doit'))], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	for (const [type, attribute] of [['reactive', ':a'], ['sync', '!a'], ['event', '@a'], ['receiver', '&fn']]) {
+		it(`empty for ${type}`, () => {
+			expect(() => generateTag(Tag(
+				'div', [],
+				[Attribute(attribute, undefined)], [],
+			), '0', ctx(), realParent, parent)).throw()
+		})
+
+		it(`static for ${type}`, () => {
+			expect(() => generateTag(Tag(
+				'div', [],
+				[Attribute(attribute, "something static")], [],
+			), '0', ctx(), realParent, parent)).throw()
+		})
+
+		it(`invalid modifier for ${type}`, () => {
+			expect(() => generateTag(Tag(
+				'div', [],
+				[Attribute(attribute + '|invalidmodifier', AttributeCode(true, 'code'))], [],
+			), '0', ctx(), realParent, parent)).throw()
+		})
+	}
 })
 
-// describe('generate', () => {
-// 	// div
-// 	// 	input(type="text", placeholder="yo yo", :value=text)
-// 	// 	| {{ text() }}
-// 	it('TextInput example', () => {
-// 		const entity = Tag('div', [], [], [
-// 			Tag('input', [], [
-// 				Attribute('type', "text"),
-// 				Attribute('placeholder', "yo yo"),
-// 				Attribute(':value', AttributeCode(true, 'text')),
-// 			], []),
-// 			TextSection(TextItem(true, ' text() ')),
-// 		])
-// 		const expected = `
-// 			const ___parentFragment = document.createDocumentFragment()
 
-// 			const ___component1 = document.createElement("div")
-// 			const ___component1Fragment = document.createDocumentFragment()
-// 			___parentFragment.appendChild(___component1)
+describe('generateText', () => {
+	const cases: [boolean, NonEmpty<TextItem>, string][] = [
+		// static
+		[true, [TextItem(false, 'hello')], `
+			___real.textContent = "hello"
+		`],
+		[false, [TextItem(false, 'hello')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, "hello")
+		`],
 
-// 			createSyncedTextInput(___component1Fragment, text, { placeholder: "yo yo" })
-// 			// for the setter case
-// 			createSyncedCheckboxInput(___component1Fragment, '', '', setter(completed, complete))
+		[true, [TextItem(false, 'hello "every ')], `
+			___real.textContent = "hello \\"every "
+		`],
+		[false, [TextItem(false, 'hello "every ')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, "hello \\"every ")
+		`],
 
-// 			const ___input1 = document.createElement("input")
-// 			___input1.type = "text"
-// 			___input1.placeholder = "yo yo"
-// 			___input1.oninput = e => {
-// 				text((e.target as typeof ___input1).value)
-// 			}
-// 			effect(() => {
-// 				___input1.value = text()
-// 			})
-// 			___component1Fragment.appendChild(___input1)
+		[true, [TextItem(false, 'hello'), TextItem(false, '\n'), TextItem(false, 'world')], `
+			___real.textContent = "hello\\nworld"
+		`],
+		[false, [TextItem(false, 'hello'), TextItem(false, '\n'), TextItem(false, 'world')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, "hello\\nworld")
+		`],
 
+		// dynamic simple
+		[true, [TextItem(true, ' hello ')], `
+			___real.textContent = hello
+		`],
+		[false, [TextItem(true, ' hello ')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, hello)
+		`],
 
-// 			createdBoundText(___component1Fragment, text)
-// 			const ___text2 = document.createTextNode('')
-// 			effect(() => {
-// 				___text2.data = text()
-// 			})
-// 			___component1Fragment.appendChild(___text2)
+		// dynamic complex
+		[true, [TextItem(true, ' hello.world().display ')], `
+			___real.textContent = hello.world().display
+		`],
+		[false, [TextItem(true, ' hello.world().display ')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, hello.world().display)
+		`],
 
+		// reactive simple
+		[true, [TextItem(true, ': hello ')], `
+			import { effect as ___effect } from "project-f/runtime"
+			___effect(() => {
+				___real.textContent = hello()
+			})
+		`],
+		[false, [TextItem(true, ': hello ')], `
+			import { createTextNode as ___createTextNode, effect as ___effect } from "project-f/runtime"
 
-// 			___component1.appendChild(___component1Fragment)
-// 			___parent.appendChild(___parentFragment)
-// 		`
-// 		boilEqual(generateEntity(entity, true, '___parent'), expected)
-// 	})
-// })
+			const ___text0 = ___createTextNode(___parent, "")
+			___effect(() => {
+				___text0.data = hello()
+			})
+		`],
 
-// describe('generateEntity', () => {
-// 	it('', () => {
-// 		//
-// 	})
-// })
+		// mixed, strongest dynamic
+		[true, [TextItem(false, 'hello '), TextItem(true, 'world'), TextItem(false, '!')], `
+			___real.textContent = \`hello \${ world }!\`
+		`],
+		[false, [TextItem(false, 'hello '), TextItem(true, ' world '), TextItem(false, '!')], `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+			___createTextNode(___parent, \`hello \${world}!\`)
+		`],
+
+		// mixed, strongest reactive
+		[true, [TextItem(false, 'hello '), TextItem(true, ' count '), TextItem(true, ': world '), TextItem(false, '!')], `
+			import { effect as ___effect } from "project-f/runtime"
+
+			___effect(() => {
+				___real.textContent = \`hello \${count}\${ world() }!\`
+			})
+		`],
+		[false, [TextItem(false, 'hello '), TextItem(true, 'count'), TextItem(true, ': world '), TextItem(false, '!')], `
+			import { createTextNode as ___createTextNode, effect as ___effect } from "project-f/runtime"
+
+			const ___text0 = ___createTextNode(___parent, "")
+			___effect(() => {
+				___text0.data = \`hello \${count}\${ world() }!\`
+			})
+		`],
+	]
+
+	for (const [isRealLone, items, generated] of cases) {
+		const context = ctx()
+		const nodes = generateText(TextSection(...items), '0', isRealLone, context, realParent, parent)
+		const generatedCode = context.finalize(nodes)
+
+		const itemsString = items.map(({ isCode, content }) => `(isCode: ${isCode}, ${content.replace(/\n/g, ' ')})`).join(', ')
+		it(`lone: ${isRealLone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
+	}
+})

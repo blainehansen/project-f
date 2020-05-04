@@ -36,18 +36,15 @@ export class Meta {
 export class Attribute {
 	constructor(
 		readonly name: string,
-		readonly value: AttributeValue,
+		readonly value: string | AttributeCode | undefined,
 	) {}
 }
-export type AttributeValue = string | { code: string } | undefined
-// export type AttributeCode
-// export type AttributeValue = string | AttributeCode
-// export class AttributeCode {
-// 	constructor(
-// 		readonly isBare: boolean,
-// 		readonly code: string,
-// 	) {}
-// }
+export class AttributeCode {
+	constructor(
+		readonly isBare: boolean,
+		readonly code: string,
+	) {}
+}
 
 
 export class TextSection {
@@ -81,7 +78,8 @@ export class ComponentInclusion {
 	readonly type = 'ComponentInclusion' as const
 	constructor(
 		readonly name: string,
-		readonly params: string | undefined,
+		readonly params: NonEmpty<Attribute> | undefined,
+		// readonly entities: SlotInsertion[],
 		readonly entities: Entity[],
 	) {}
 }

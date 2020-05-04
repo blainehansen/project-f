@@ -765,6 +765,7 @@ type Component = {
 <!-- How do we do dynamic components? The same I'd imagine, all of them just have to have assignable types. -->
 <!-- perhaps it's natural to have a @component or @dynamic directive -->
 
+## Classes and Ids on component inclusions
 
 # Refs
 
