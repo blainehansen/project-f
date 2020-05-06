@@ -33,3 +33,9 @@ export type NonLone<T> = [T, T, ...T[]]
 export type NonRedundant<T> = null | undefined | T | NonLone<T>
 
 export class Panic extends Error {}
+
+// export function uniqueIndexMap<K extends string>(
+// 	keys: readonly K[],
+// ): { [_ in K]?: true } {
+
+// }

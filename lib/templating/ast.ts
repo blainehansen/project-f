@@ -78,8 +78,7 @@ export class ComponentInclusion {
 	readonly type = 'ComponentInclusion' as const
 	constructor(
 		readonly name: string,
-		readonly params: NonEmpty<Attribute> | undefined,
-		// readonly entities: SlotInsertion[],
+		readonly params: Attribute[],
 		readonly entities: Entity[],
 	) {}
 }
@@ -146,7 +145,7 @@ export class SlotDefinition {
 	readonly type = 'SlotDefinition' as const
 	constructor(
 		readonly name: string | undefined,
-		readonly paramsExpression: string | undefined,
+		readonly argsExpression: string | undefined,
 		readonly fallback: NonEmpty<Entity> | undefined,
 	) {}
 }
@@ -165,7 +164,7 @@ export class TemplateDefinition {
 	readonly type = 'TemplateDefinition' as const
 	constructor(
 		readonly name: string,
-		readonly argsExpression: string | undefined,
+		readonly paramsExpression: string | undefined,
 		readonly entities: NonEmpty<Entity>,
 	) {}
 }

@@ -75,9 +75,21 @@ export function generateComponentRenderFunction(
 	const [realParentIdent, parentIdent] = resetParentIdents()
 	// at the component level, we can't know whether we're truly the lone child of a real node
 	// so we pass false, and only concrete nodes below us can reset that based on their status
-	const entitiesStatements = generateEntities(entities, '', false, ctx, realParentIdent, parentIdent)
+	// TODO this needs to actually manually iterate over these, and pluck out any SlotDefinition and handle them
+	// we can combine this SlotDefinition information with the optionality of slots to know how to default them,
+	// whether to this fallback produced here or to a noop
+	// TODO at some point we need to be aware of the optionality of the slots,
+	const entitiesStatements = []
+	for (let index = 0; index < entities.length; index++) {
+		const entity = entities[index]
+		if (entity.type === 'SlotDefinition')
+			throw new Error('unimplemented')
 
-	const argsNames = propsNames.concat(eventsNames).concat(eventsNames)
+		const entityStatements = generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent)
+		Array.prototype.push.apply(entitiesStatements, )
+	}
+
+	const argsNames = propsNames.concat(syncsNames).concat(eventsNames)
 	const createFnInvocation = createFnNames.length === 0 ? [] : [createConst(
 		createFnNames,
 		createCall('create', [ts.createAsExpression(
@@ -137,28 +149,38 @@ export function generateEntity(
 	case 'TextSection':
 		return generateText(entity, offset, isRealLone, ctx, realParent, parent)
 
-	// case 'ComponentInclusion':
-	// 	return generateComponentInclusion(entity, offset, isRealLone, parent)
-	// case 'IfBlock':
-	// 	return generateIfBlock(entity, offset, isRealLone, parent)
-	// case 'EachBlock':
-	// 	return generateEachBlock(entity, offset, isRealLone, parent)
-	// case 'MatchBlock':
-	// 	return generateMatchBlock(entity, offset, isRealLone, parent)
-	// case 'SwitchBlock':
-	// 	return generateSwitchBlock(entity, offset, isRealLone, parent)
-	// case 'SlotDefinition':
-	// 	return generateSlotDefinition(entity, offset, isRealLone, parent)
-	// case 'SlotInsertion':
-	// 	return generateSlotInsertion(entity, offset, isRealLone, parent)
-	// case 'TemplateDefinition':
-	// 	return generateTemplateDefinition(entity, offset, isRealLone, parent)
-	// case 'TemplateInclusion':
-	// 	return generateTemplateInclusion(entity, offset, isRealLone, parent)
-	// case 'VariableBinding':
-	// 	return generateVariableBinding(entity, offset, isRealLone, parent)
-	default:
+	case 'ComponentInclusion':
+		return generateComponentInclusion(entity, ctx, realParent, parent)
+
+	case 'IfBlock':
+		// return generateIfBlock(entity, offset, isRealLone, parent)
 		throw new Error('unimplemented')
+	case 'EachBlock':
+		// return generateEachBlock(entity, offset, isRealLone, parent)
+		throw new Error('unimplemented')
+	case 'MatchBlock':
+		// return generateMatchBlock(entity, offset, isRealLone, parent)
+		throw new Error('unimplemented')
+	case 'SwitchBlock':
+		// return generateSwitchBlock(entity, offset, isRealLone, parent)
+		throw new Error('unimplemented')
+
+	// the below context will pluck out the valid ones they're interested in and save them from entering this function
+	// - in generateComponentInclusion, plucking out SlotInsertion
+	// - in generateComponentRenderFunction, plucking out SlotDefinition
+	case 'SlotDefinition':
+		throw new Error("@slot isn't valid in this context")
+	case 'SlotInsertion':
+		throw new Error("@insert isn't valid in this context")
+
+	case 'TemplateDefinition':
+		return generateTemplateDefinition(entity, ctx)
+	case 'TemplateInclusion':
+		return generateTemplateInclusion(entity, realParent, parent)
+
+	case 'VariableBinding':
+		throw new Error('unimplemented')
+		// return generateVariableBinding(entity, offset, isRealLone, parent)
 	}
 }
 
@@ -166,6 +188,7 @@ export const enum BindingType { empty, static, dynamic, reactive, sync }
 export type LivenessType = Exclude<BindingType, BindingType.empty | BindingType.sync>
 
 const fnModifiers = [] as const
+const dynamicModifiers = ['initial'] as const
 const reactiveModifiers = ['fake'] as const
 const syncModifiers = ['fake', 'setter'] as const
 // since we aren't yet actually supporting these, I'm not turning them on yet
@@ -189,9 +212,13 @@ function checkAttribute(
 			throw new Error(`invalid modifier for ${variety}: ${modifier}`)
 }
 
+function makeNativeHandler(code: string, isBare: boolean, handlerModifier: boolean) {
+	return isBare || handlerModifier ? `$event => ${code}` : code
+}
+
 function processAttributes(attributes: Attribute[]) {
 	const bindings = new UniqueDict<[BindingType, Dict<true>, string]>()
-	const events = new DefaultDict(() => [] as [Dict<true>, string][])
+	const events = new DefaultDict(() => [] as [Dict<true>, string, boolean][])
 	const fns = [] as string[]
 
 	for (const { name: rawAttribute, value } of attributes) {
@@ -208,6 +235,8 @@ function processAttributes(attributes: Attribute[]) {
 
 		switch (firstLetter) {
 		case '&':
+		// case '(':
+			// if (rawAttribute !== '(fn)')
 			if (sliced !== 'fn')
 				throw new Error("the & prefix for node receivers is only valid when used as &fn")
 
@@ -219,9 +248,8 @@ function processAttributes(attributes: Attribute[]) {
 			checkAttribute(value, modifiersList, 'event', eventModifiers)
 			if (modifiers.handler && value.isBare)
 				throw new Error("the handler modifier doesn't make any sense on a bare event attribute")
-			const code = modifiers.handler || value.isBare ? value.code : `$event => ${value.code}`
-			delete modifiers.handler
-			events.get(sliced).push([modifiers, code])
+
+			events.get(sliced).push([modifiers, value.code, value.isBare])
 			break
 
 		case ':': {
@@ -340,10 +368,11 @@ export function generateTag(
 
 		// TODO lots to think about here, since we aren't properly handling basically any modifiers
 		const finalHandler = handlers.length === 1
-			? createRawCodeSegment(handlers[0][1])
+			? createRawCodeSegment(makeNativeHandler(handlers[0][1], handlers[0][2], handlers[0][0].handler || false))
 			: createArrowFunction([createParameter('$event')], ts.createBlock(
-				handlers.map(([, code]) => {
-					return ts.createExpressionStatement(createCall(createRawCodeSegment(`(${code})`), [ts.createIdentifier('$event')]))
+				handlers.map(([modifiers, code, isBare]) => {
+					const handler = makeNativeHandler(code, isBare, modifiers.handler || false)
+					return ts.createExpressionStatement(createCall(createRawCodeSegment(`(${handler})`), [ts.createIdentifier('$event')]))
 				}),
 				true,
 			))
@@ -448,12 +477,112 @@ export function generateText(
 }
 
 
-// function generateComponentInclusion(
-// 	{ name, params, entities }: ComponentInclusion,
-// 	offset: string, isRealLone: boolean, parent,
-// ) {
+export function generateComponentInclusion(
+	{ name, params, entities }: ComponentInclusion,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const [bindings, eventHandlers, fns] = processAttributes(params)
+	if (fns.length !== 0)
+		throw new Error("node receivers don't make any sense on components")
 
-// }
+	const props = []
+	const syncs = []
+	const events = []
+
+	for (const [binding, [type, modifiers, code]] of bindings) switch (type) {
+		case BindingType.empty:
+			// intentionally ignore modifiers
+			// empty is automatically wrapped up in a fake boolean and put into propsArgs
+			const fakeSwitch = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createTrue()])
+			props.push(ts.createPropertyAssignment(binding, fakeSwitch))
+			break
+		case BindingType.static:
+			// intentionally ignore modifiers
+			const fakeString = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createStringLiteral(code)])
+			props.push(ts.createPropertyAssignment(binding, fakeString))
+			break
+		case BindingType.dynamic:
+			const wrapper = ctx.requireRuntime(modifiers.initial ? 'fakeInitial' : 'fakeImmutable')
+			const fakeImmutable = createCall(wrapper, [createRawCodeSegment(code)])
+			props.push(ts.createPropertyAssignment(binding, fakeImmutable))
+			break
+		case BindingType.reactive:
+			props.push(ts.createPropertyAssignment(binding, createRawCodeSegment(code)))
+			break
+		case BindingType.sync:
+			if (modifiers.setter && modifiers.fake)
+				throw new Error("can't use setter and fake modifiers together")
+
+			const rawCode = createRawCodeSegment(code)
+			const mutable = modifiers.setter ? createCall(ctx.requireRuntime('setter'), [rawCode])
+				: modifiers.fake ? createCall(ctx.requireRuntime('fakeMutable'), [rawCode])
+				: rawCode
+
+			syncs.push(ts.createPropertyAssignment(binding, mutable))
+			break
+	}
+
+	// TODO at some point we should allow proxying native events with a native modifier
+	// we'll generate code to receive the single return node of the component
+	// and fold its existing handler in with a runtime function
+	// however, that code will only be valid on components that have a single root,
+	// and that therefore actually do return a node
+	for (const [event, handlers] of eventHandlers) {
+		// for now, we'll simply not allow native proxying
+		if (handlers.length === 0) continue
+		if (handlers.length !== 1)
+			throw new Error("duplicate event handlers on component")
+
+		const [[modifiers, code, isBare]] = handlers
+
+		// function wrapComponentHandler() {
+		// 	return modifiers.handler || isBare ? code : `() => ${code}`
+		// }
+		const handler = createRawCodeSegment(modifiers.handler || isBare ? code : `() => ${code}`)
+		events.push(ts.createPropertyAssignment(event, handler))
+	}
+
+	const nonInsertEntities = []
+	const slotInsertions = new UniqueDict<SlotInsertion>()
+	for (const entity of entities) {
+		if (entity.type !== 'SlotInsertion') {
+			nonInsertEntities.push(entity)
+			continue
+		}
+
+		const name = entity.name || 'default'
+		const result = slotInsertions.set(name, entity)
+		if (result.is_err()) throw new Error(`duplicate slot insertion ${name}`)
+	}
+
+	if (nonInsertEntities.length > 0) {
+		const default = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
+		const result = slotInsertions.set('default', default)
+		if (result.is_err()) throw new Error("can't use an explicit default slot insert and nodes outside of a slot insert")
+	}
+
+	const slots = slotInsertions.entries().map(([slotName, { receiverExpression, entities }]) => {
+		const [realParentParam, parentParam] = untypedParentParams()
+		const [realParentIdent, parentIdent] = resetParentIdents()
+		return ts.createPropertyAssignment(
+			slotName,
+			createArrowFunction(
+				[realParentParam, parentParam, createParameter(createRawCodeSegment(receiverExpression))],
+				ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
+			),
+		)
+	})
+
+	const propsArgs = props.length !== 0 ? ts.createObjectLiteral(props, false) : ctx.requireRuntime('EMPTYOBJECT')
+	const syncsArgs = syncs.length !== 0 ? ts.createObjectLiteral(syncs, false) : ctx.requireRuntime('EMPTYOBJECT')
+	const eventsArgs = events.length !== 0 ? ts.createObjectLiteral(events, false) : ctx.requireRuntime('EMPTYOBJECT')
+	const slotsArgs = slots.length !== 0 ? ts.createObjectLiteral(slots, false) : ctx.requireRuntime('EMPTYOBJECT')
+
+	return [ts.createExpressionStatement(createCall(
+		name,
+		[realParent, parent, propsArgs, syncsArgs, eventsArgs, slotsArgs],
+	))]
+}
 
 // function createIf(
 // 	{ expression, entities, elseBranch }: IfBlock,
@@ -496,31 +625,30 @@ export function generateText(
 // function generateSwitchBlock(e: SwitchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateSlotDefinition(e: SlotDefinition, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+// export function generateSlotDefinition(e: SlotDefinition, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+// export function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
 
 export function generateTemplateDefinition(
-	{ name, argsExpression, entities }: TemplateDefinition,
+	{ name, paramsExpression, entities }: TemplateDefinition,
 	ctx: CodegenContext,
 ): ts.Statement[] {
-	const remainingParams = argsExpression !== undefined
-		? [createParameter(createRawCodeSegment(argsExpression))]
+	const remainingParams = paramsExpression !== undefined
+		? [createParameter(createRawCodeSegment(paramsExpression))]
 		: []
 
 	const params = typedParentParams().concat(remainingParams)
-	const [realParent, parent] = resetParentIdents()
-
+	const [realParentIdent, parentIdent] = resetParentIdents()
 
 	return [ts.createFunctionDeclaration(
 		undefined, undefined, undefined, ts.createIdentifier(name),
 		undefined, params, undefined,
 		// this is similar to a component definition, since we can't know how this template will be used
 		// we have to begin with the assumption that this can be used in non-lone contexts
-		ts.createBlock(generateEntities(entities, '', false, ctx, realParent, parent), true)
+		ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
 	)]
 }
 
