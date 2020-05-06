@@ -83,6 +83,7 @@ export class ComponentInclusion {
 	) {}
 }
 
+// TODO Also, given this change, it probably makes sense to change the ast structure of if-blocks to instead have a list of intermediary `else-if` sections and a single trailing `else` that can be undefined. Then you can just move the reactivity switch onto that single structure and avoid nesting altogether.
 export class IfBlock {
 	readonly type = 'IfBlock' as const
 	constructor(
