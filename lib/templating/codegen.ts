@@ -79,14 +79,14 @@ export function generateComponentRenderFunction(
 	// we can combine this SlotDefinition information with the optionality of slots to know how to default them,
 	// whether to this fallback produced here or to a noop
 	// TODO at some point we need to be aware of the optionality of the slots,
-	const entitiesStatements = []
+	const entitiesStatements = [] as ts.Statement[]
 	for (let index = 0; index < entities.length; index++) {
 		const entity = entities[index]
 		if (entity.type === 'SlotDefinition')
 			throw new Error('unimplemented')
 
 		const entityStatements = generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent)
-		Array.prototype.push.apply(entitiesStatements, )
+		Array.prototype.push.apply(entitiesStatements, entityStatements)
 	}
 
 	const argsNames = propsNames.concat(syncsNames).concat(eventsNames)
@@ -178,8 +178,8 @@ export function generateEntity(
 	case 'TemplateInclusion':
 		return generateTemplateInclusion(entity, realParent, parent)
 
-	case 'VariableBinding':
-		throw new Error('unimplemented')
+	// case 'VariableBinding':
+	// 	throw new Error('unimplemented')
 		// return generateVariableBinding(entity, offset, isRealLone, parent)
 	}
 }
@@ -188,8 +188,10 @@ export const enum BindingType { empty, static, dynamic, reactive, sync }
 export type LivenessType = Exclude<BindingType, BindingType.empty | BindingType.sync>
 
 const fnModifiers = [] as const
+const emptyModifiers = [] as const
+const staticModifiers = [] as const
 const dynamicModifiers = ['initial'] as const
-const reactiveModifiers = ['fake'] as const
+const reactiveModifiers = [] as const
 const syncModifiers = ['fake', 'setter'] as const
 // since we aren't yet actually supporting these, I'm not turning them on yet
 // const eventModifiers = ['handler', 'exact', 'stop', 'prevent', 'capture', 'self', 'once', 'passive'] as const
@@ -199,21 +201,31 @@ const eventModifiers = ['handler'] as const
 // const keyModifiers = [] as const
 // const mouseModifiers = ['left', 'right', 'middle'] as const
 
-function checkAttribute(
-	value: string | AttributeCode | undefined,
-	modifiersList: string[],
-	variety: string,
-	varietyModifiers: readonly string[],
-): asserts value is AttributeCode {
-	if (value === undefined || typeof value === 'string')
-		throw new Error(`static attribute values are invalid for ${variety}s`)
-	for (const modifier of modifiersList)
-		if (!varietyModifiers.includes(modifier))
-			throw new Error(`invalid modifier for ${variety}: ${modifier}`)
+function makeNativeHandler(code: string, isBare: boolean, handlerModifier: boolean) {
+	if (handlerModifier && isBare)
+		throw new Error("the handler modifier doesn't make any sense on a bare event attribute")
+	return isBare || handlerModifier ? code : `$event => ${code}`
 }
 
-function makeNativeHandler(code: string, isBare: boolean, handlerModifier: boolean) {
-	return isBare || handlerModifier ? `$event => ${code}` : code
+function processDynamicModifiers(
+	ctx: CodegenContext, modifiers: Dict<true>,
+	code: string, isComponent: boolean,
+) {
+	const rawCode = createRawCodeSegment(code)
+	return modifiers.initial
+		? createCall(ctx.requireRuntime('fakeInitial'), [rawCode])
+		: !isComponent ? rawCode : createCall(ctx.requireRuntime('fakeImmutable'), [rawCode])
+}
+function processSyncModifiers(
+	ctx: CodegenContext, modifiers: Dict<true>,
+	code: string,
+) {
+	if (modifiers.setter && modifiers.fake)
+		throw new Error("can't use setter and fake modifiers together")
+	const rawCode = createRawCodeSegment(code)
+	return modifiers.setter ? createCall(ctx.requireRuntime('setterMutable'), [rawCode])
+		: modifiers.fake ? createCall(ctx.requireRuntime('fakeMutable'), [rawCode])
+		: rawCode
 }
 
 function processAttributes(attributes: Attribute[]) {
@@ -233,51 +245,70 @@ function processAttributes(attributes: Attribute[]) {
 			.change_err(e => `duplicate modifier ${e[0]}`)
 			.unwrap()
 
-		switch (firstLetter) {
-		case '&':
-		// case '(':
-			// if (rawAttribute !== '(fn)')
-			if (sliced !== 'fn')
-				throw new Error("the & prefix for node receivers is only valid when used as &fn")
+		function assertCode(
+			value: string | AttributeCode | undefined,
+			variety: string,
+		): asserts value is AttributeCode {
+			if (value === undefined || typeof value === 'string')
+				throw new Error(`static attribute values are invalid for ${variety}`)
+		}
 
-			checkAttribute(value, modifiersList, 'node receiver', fnModifiers)
+		function validateModifiers(varietyModifiers: readonly string[], variety: string) {
+			for (const modifier of modifiersList)
+				if (varietyModifiers.length === 0)
+					throw new Error(`modifiers aren't allowed on ${variety}`)
+				else if (!varietyModifiers.includes(modifier))
+					throw new Error(`modifier ${modifier} isn't valid on ${variety}`)
+		}
+
+		function setBinding(binding: [BindingType, Dict<true>, string], useSliced: boolean) {
+			const result = bindings.set(useSliced ? sliced : attribute, binding)
+			if (result.is_err()) throw new Error(`duplicate binding ${sliced}`)
+		}
+
+		switch (firstLetter) {
+		case '(':
+			if (rawAttribute !== '(fn)')
+				throw new Error(`invalid use of parentheses in ${rawAttribute}, were you trying to do a node receiver (fn)?`)
+			assertCode(value, 'node receivers')
+			validateModifiers(fnModifiers, 'node receivers')
 			fns.push(value.code)
 			break
 
 		case '@':
-			checkAttribute(value, modifiersList, 'event', eventModifiers)
-			if (modifiers.handler && value.isBare)
-				throw new Error("the handler modifier doesn't make any sense on a bare event attribute")
-
+			assertCode(value, 'events')
+			validateModifiers(eventModifiers, 'events')
 			events.get(sliced).push([modifiers, value.code, value.isBare])
 			break
 
 		case ':': {
-			checkAttribute(value, modifiersList, 'reactive binding', reactiveModifiers)
-			const result = bindings.set(sliced, [BindingType.reactive, modifiers, value.code])
-			if (result.is_err()) throw new Error(`duplicate binding ${sliced}`)
+			assertCode(value, 'reactive bindings')
+			validateModifiers(reactiveModifiers, 'reactive bindings')
+			setBinding([BindingType.reactive, modifiers, value.code], true)
 			break
 		}
 
 		case '!': {
-			checkAttribute(value, modifiersList, 'sync', syncModifiers)
-			const result = bindings.set(sliced, [BindingType.sync, modifiers, value.code])
-			if (result.is_err()) throw new Error(`duplicate sync ${sliced}`)
+			assertCode(value, 'syncs')
+			validateModifiers(syncModifiers, 'syncs')
+			setBinding([BindingType.sync, modifiers, value.code], true)
 			break
 		}
 
-		default:
-			if (modifiersList.length !== 0)
-				throw new Error("modifiers don't make any sense on attributes that aren't reactive, syncs, or events")
-
-			const result = bindings.set(
-				attribute,
-				value === undefined ? [BindingType.empty, {}, '']
-				: typeof value === 'string' ? [BindingType.static, {}, value]
-				: [BindingType.dynamic, {}, value.code]
-			)
-			if (result.is_err()) throw new Error(`duplicate binding ${attribute}`)
-		}
+		default: switch (typeof value) {
+			case 'undefined':
+				validateModifiers(emptyModifiers, 'empty bindings')
+				setBinding([BindingType.empty, modifiers, ''], false)
+				break
+			case 'string':
+				validateModifiers(staticModifiers, 'static bindings')
+				setBinding([BindingType.static, modifiers, value], false)
+				break
+			default:
+				validateModifiers(dynamicModifiers, 'dynamic bindings')
+				setBinding([BindingType.dynamic, modifiers, value.code], false)
+				break
+		}}
 	}
 
 	return t(bindings.entries(), events.entries(), fns)
@@ -352,11 +383,11 @@ export function generateTag(
 			statements.push(createFieldAssignment(tagIdent, binding, ts.createStringLiteral(code)))
 			break
 		case BindingType.dynamic:
-			// intentionally ignore modifiers
-			statements.push(createFieldAssignment(tagIdent, binding, createRawCodeSegment(code)))
+			const bindingCode = processDynamicModifiers(ctx, modifiers, code, false)
+			statements.push(createFieldAssignment(tagIdent, binding, bindingCode))
 			break
 		case BindingType.reactive:
-			if (modifiers.fake) throw new Error("the fake modifier doesn't make any sense on a tag, just use a non-reactive binding instead")
+			// intentionally ignore modifiers
 			statements.push(createEffectBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
 			break
 		case BindingType.sync:
@@ -502,22 +533,15 @@ export function generateComponentInclusion(
 			props.push(ts.createPropertyAssignment(binding, fakeString))
 			break
 		case BindingType.dynamic:
-			const wrapper = ctx.requireRuntime(modifiers.initial ? 'fakeInitial' : 'fakeImmutable')
-			const fakeImmutable = createCall(wrapper, [createRawCodeSegment(code)])
+			const fakeImmutable = processDynamicModifiers(ctx, modifiers, code, true)
 			props.push(ts.createPropertyAssignment(binding, fakeImmutable))
 			break
 		case BindingType.reactive:
+			// intentionally ignore modifiers
 			props.push(ts.createPropertyAssignment(binding, createRawCodeSegment(code)))
 			break
 		case BindingType.sync:
-			if (modifiers.setter && modifiers.fake)
-				throw new Error("can't use setter and fake modifiers together")
-
-			const rawCode = createRawCodeSegment(code)
-			const mutable = modifiers.setter ? createCall(ctx.requireRuntime('setter'), [rawCode])
-				: modifiers.fake ? createCall(ctx.requireRuntime('fakeMutable'), [rawCode])
-				: rawCode
-
+			const mutable = processSyncModifiers(ctx, modifiers, code)
 			syncs.push(ts.createPropertyAssignment(binding, mutable))
 			break
 	}
@@ -556,18 +580,21 @@ export function generateComponentInclusion(
 	}
 
 	if (nonInsertEntities.length > 0) {
-		const default = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
-		const result = slotInsertions.set('default', default)
+		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
+		const result = slotInsertions.set('default', defaultInsertion)
 		if (result.is_err()) throw new Error("can't use an explicit default slot insert and nodes outside of a slot insert")
 	}
 
 	const slots = slotInsertions.entries().map(([slotName, { receiverExpression, entities }]) => {
-		const [realParentParam, parentParam] = untypedParentParams()
 		const [realParentIdent, parentIdent] = resetParentIdents()
+		const receiverParams = receiverExpression !== undefined
+			? [createParameter(createRawCodeSegment(receiverExpression))]
+			: []
+
 		return ts.createPropertyAssignment(
 			slotName,
 			createArrowFunction(
-				[realParentParam, parentParam, createParameter(createRawCodeSegment(receiverExpression))],
+				untypedParentParams().concat(receiverParams),
 				ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
 			),
 		)

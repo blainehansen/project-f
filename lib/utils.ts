@@ -23,6 +23,11 @@ export type Registrar = (fn: Fn) => void
 export type Equivalent<T, U> = T extends U ? U extends T ? true : false : false
 export type Negate<B extends boolean> = B extends true ? false : true
 export type TupleLike<T> = T extends any[] ? Negate<Equivalent<T, any[]>> : false
+
+export type KeysOfType<T, U> = T extends any[]
+	? { [K in keyof T]: T[K] extends U ? K : never }[number]
+	: { [K in keyof T]: T[K] extends U ? K : never }[keyof T]
+
 export type Overwrite<A, B> = {
 	[K in Exclude<keyof A, keyof B>]: A[K]
 } & B

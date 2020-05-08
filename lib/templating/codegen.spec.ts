@@ -88,17 +88,208 @@ describe('generateComponentRenderFunction', () => {
 
 
 describe('generateComponentInclusion', () => {
-	// testing all different types of attributes, including invalid ones, throw
-	// mixing orphaned entities with an explicit default slot insert, throw
-
-	// only orphaned entities
-	// only explicit inserts
-	// mixed explicit inserts with orphaned
-
 	const cases: [string, ComponentInclusion, string][] = [
-		['basic', ComponentInclusion('MyComponent', [], []), `
+		['basic', ComponentInclusion('Comp', [], []), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
-			MyComponent(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		// props
+		['prop empty', ComponentInclusion('Comp', [Attribute('on', undefined)], []), `
+			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { on: ___fakeImmutable(true) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['prop static', ComponentInclusion('Comp', [Attribute('name', "dudes")], []), `
+			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { name: ___fakeImmutable("dudes") }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		['prop dynamic bare', ComponentInclusion('Comp', [Attribute('p', AttributeCode(true, "yo"))], []), `
+			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: ___fakeImmutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['prop dynamic complex', ComponentInclusion('Comp', [Attribute('p', AttributeCode(false, " something.complex().s "))], []), `
+			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: ___fakeImmutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		['prop dynamic initial bare', ComponentInclusion('Comp', [Attribute('p|initial', AttributeCode(true, "yo"))], []), `
+			import { fakeInitial as ___fakeInitial, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: ___fakeInitial(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['prop dynamic initial complex', ComponentInclusion('Comp', [Attribute('p|initial', AttributeCode(false, " something.complex().s "))], []), `
+			import { fakeInitial as ___fakeInitial, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: ___fakeInitial(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		['prop reactive bare', ComponentInclusion('Comp', [Attribute(':p', AttributeCode(true, "yo"))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: yo }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['prop reactive complex', ComponentInclusion('Comp', [Attribute(':p', AttributeCode(false, " something.complex().s "))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: something.complex().s }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		// syncs
+		['sync bare', ComponentInclusion('Comp', [Attribute('!y', AttributeCode(true, "yo"))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: yo }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['sync complex', ComponentInclusion('Comp', [Attribute('!y', AttributeCode(false, " something.complex().s "))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: something.complex().s }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		['sync fake bare', ComponentInclusion('Comp', [Attribute('!y|fake', AttributeCode(true, "yo"))], []), `
+			import { fakeMutable as ___fakeMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeMutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['sync fake complex', ComponentInclusion('Comp', [Attribute('!y|fake', AttributeCode(false, " something.complex().s "))], []), `
+			import { fakeMutable as ___fakeMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeMutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		['sync setter bare', ComponentInclusion('Comp', [Attribute('!y|setter', AttributeCode(true, "yo"))], []), `
+			import { setterMutable as ___setterMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___setterMutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+		['sync setter complex', ComponentInclusion('Comp', [Attribute('!y|setter', AttributeCode(false, " something.complex().s "))], []), `
+			import { setterMutable as ___setterMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___setterMutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		`],
+
+		// events
+		['event bare', ComponentInclusion('Comp', [Attribute('@e', AttributeCode(true, "yo"))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: yo }, ___EMPTYOBJECT)
+		`],
+		['event complex', ComponentInclusion('Comp', [Attribute('@e', AttributeCode(false, " something.complex().s "))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: () => something.complex().s }, ___EMPTYOBJECT)
+		`],
+
+		['event handler', ComponentInclusion('Comp', [Attribute('@e|handler', AttributeCode(false, " (a, b) => something(a).s += b "))], []), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: (a, b) => something(a).s += b }, ___EMPTYOBJECT)
+		`],
+
+		// slots
+		['only orphaned entities (single)', ComponentInclusion('Comp', [], [
+			Tag('div', [], [], []),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				default: (___real, ___parent) => {
+					___createElement(___parent, "div")
+				}
+			})
+		`],
+
+		['only orphaned entities (multiple)', ComponentInclusion('Comp', [], [
+			Tag('h1', [], [], []),
+			Tag('div', [], [], []),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				default: (___real, ___parent) => {
+					___createElement(___parent, "h1")
+					___createElement(___parent, "div")
+				}
+			})
+		`],
+
+		['only explicit default (single)', ComponentInclusion('Comp', [], [
+			SlotInsertion(undefined, 'a: string', [Tag('div', [], [], [])]),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				default: (___real, ___parent, a: string) => {
+					___createElement(___parent, "div")
+				}
+			})
+		`],
+
+		['only explicit default (multiple)', ComponentInclusion('Comp', [], [
+			SlotInsertion(undefined, 'a: string', [
+				Tag('h1', [], [], []),
+				Tag('div', [], [], []),
+			]),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				default: (___real, ___parent, a: string) => {
+					___createElement(___parent, "h1")
+					___createElement(___parent, "div")
+				}
+			})
+		`],
+
+		['only explicit inserts', ComponentInclusion('Comp', [], [
+			SlotInsertion('first', 'name?: string', [
+				Tag('h1', [], [], []),
+				Tag('div', [], [], []),
+			]),
+			SlotInsertion('second', 'a: string, b: boolean', [
+				Tag('span', [], [], []),
+			]),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				first: (___real, ___parent, name?: string) => {
+					___createElement(___parent, "h1")
+					___createElement(___parent, "div")
+				},
+				second: (___real, ___parent, a: string, b: boolean) => {
+					___createElement(___parent, "span")
+				}
+			})
+		`],
+
+		['mixed explicit inserts with orphaned', ComponentInclusion('Comp', [], [
+			Tag('h1', [], [], []),
+			SlotInsertion('second', 'a: string, b: boolean', [
+				Tag('span', [], [], []),
+			]),
+			Tag('div', [], [], []),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				second: (___real, ___parent, a: string, b: boolean) => {
+					___createElement(___parent, "span")
+				},
+				default: (___real, ___parent) => {
+					___createElement(___parent, "h1")
+					___createElement(___parent, "div")
+				}
+			})
+		`],
+
+		['mixed explicit inserts with explicit default', ComponentInclusion('Comp', [], [
+			SlotInsertion('first', 'name?: string', [
+				Tag('h1', [], [], []),
+			]),
+			SlotInsertion(undefined, 'a: string', [
+				Tag('h1', [], [], []),
+				Tag('div', [], [], []),
+			]),
+			SlotInsertion('second', undefined, [
+				Tag('span', [], [], []),
+			]),
+		]), `
+			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
+				first: (___real, ___parent, name?: string) => {
+					___createElement(___parent, "h1")
+				},
+				default: (___real, ___parent, a: string) => {
+					___createElement(___parent, "h1")
+					___createElement(___parent, "div")
+				},
+				second: (___real, ___parent) => {
+					___createElement(___parent, "span")
+				}
+			})
 		`],
 	]
 
@@ -107,6 +298,30 @@ describe('generateComponentInclusion', () => {
 			const context = ctx()
 			const nodes = generateComponentInclusion(inclusion, context, realParent, parent)
 			boilEqual(context.finalize(nodes), generated)
+		})
+
+	const throwCases: [string, ComponentInclusion][] = [
+		['node receivers on components', ComponentInclusion('Comp', [
+			Attribute('(fn)', AttributeCode(true, 'doit')),
+		], [])],
+		['sync, fake and setter together', ComponentInclusion('Comp', [
+			Attribute('!y|fake|setter', AttributeCode(true, 'doit')),
+		], [])],
+
+		['duplicate event handlers on components', ComponentInclusion('Comp', [
+			Attribute('@msg', AttributeCode(true, 'first')),
+			Attribute('@msg', AttributeCode(true, 'second')),
+		], [])],
+
+		['mixing orphaned entities with an explicit default slot insert, throw', ComponentInclusion('Comp', [], [
+			Tag('div', [], [], []),
+			SlotInsertion(undefined, undefined, [Tag('h1', [], [], [])]),
+		])],
+	]
+
+	for (const [description, inclusion] of throwCases)
+		it(description, () => {
+			expect(() => generateComponentInclusion(inclusion, ctx(), realParent, parent)).throw()
 		})
 })
 
@@ -146,7 +361,7 @@ describe('generateTag', () => {
 			___div0.appendChild(___div0fragment)
 		`],
 
-		['#i.one.two(disabled=true, thing="whatever", :visible={ env.immutable })', Tag(
+		['#i.one.two(disabled=true, thing.children().stuff[0]="whatever", :visible={ env.immutable })', Tag(
 			'div',
 			[Meta(false, false, 'i'), Meta(true, false, 'one'), Meta(true, false, 'two')],
 			[
@@ -220,8 +435,8 @@ describe('generateTag', () => {
 		['node receivers', Tag(
 			'div', [],
 			[
-				Attribute('&fn', AttributeCode(true, 'doit')),
-				Attribute('&fn', AttributeCode(false, ' d => handle(d) ')),
+				Attribute('(fn)', AttributeCode(true, 'doit')),
+				Attribute('(fn)', AttributeCode(false, ' d => handle(d) ')),
 			], [],
 		), `
 			import { createElement as ___createElement, nodeReceiver as ___nodeReceiver } from "project-f/runtime"
@@ -254,21 +469,42 @@ describe('generateTag', () => {
 		), '0', ctx(), realParent, parent)).throw()
 	})
 
-	it('any modifiers on normal attribute', () => {
+	it('any modifiers on empty attribute', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('anything|whatever', undefined)], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	it('any modifiers on static attribute', () => {
 		expect(() => generateTag(Tag(
 			'div', [],
 			[Attribute('anything|whatever', "doesn't matter")], [],
 		), '0', ctx(), realParent, parent)).throw()
 	})
 
-	it('& used as anything other than &fn', () => {
+	it('any modifiers on reactive attribute', () => {
 		expect(() => generateTag(Tag(
 			'div', [],
-			[Attribute('&notfn', AttributeCode(true, 'doit'))], [],
+			[Attribute(':anything|whatever', AttributeCode(true, 'doit'))], [],
 		), '0', ctx(), realParent, parent)).throw()
 	})
 
-	for (const [type, attribute] of [['reactive', ':a'], ['sync', '!a'], ['event', '@a'], ['receiver', '&fn']]) {
+	it('any modifiers on node receiver', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('(fn)|whatever', AttributeCode(true, 'doit'))], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	it('parentheses used as anything other than (fn)', () => {
+		expect(() => generateTag(Tag(
+			'div', [],
+			[Attribute('(notfn)', AttributeCode(true, 'doit'))], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
+
+	for (const [type, attribute] of [['reactive', ':a'], ['sync', '!a'], ['event', '@a'], ['receiver', '(fn)']]) {
 		it(`empty for ${type}`, () => {
 			expect(() => generateTag(Tag(
 				'div', [],
@@ -282,14 +518,15 @@ describe('generateTag', () => {
 				[Attribute(attribute, "something static")], [],
 			), '0', ctx(), realParent, parent)).throw()
 		})
+	}
 
+	for (const [type, attribute] of [['dynamic', 'a'], ['sync', '!a'], ['event', '@a']])
 		it(`invalid modifier for ${type}`, () => {
 			expect(() => generateTag(Tag(
 				'div', [],
 				[Attribute(attribute + '|invalidmodifier', AttributeCode(true, 'code'))], [],
 			), '0', ctx(), realParent, parent)).throw()
 		})
-	}
 })
 
 

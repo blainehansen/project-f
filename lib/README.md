@@ -15,7 +15,7 @@ p Using interpolation (will be escaped): {{ rawHtml }}
 p
   | Using directive (won't be escaped):
   //- this is intentionally inconvenient!
-  span(&fn={ () => unsafe(rawHtml) })
+  span((fn)={ () => unsafe(rawHtml) })
 ```
 
 
@@ -80,10 +80,10 @@ function makeRed(node: HTMLParagraphElement) {
 Then we can set `makeRed` to receive our paragraph:
 
 ```wolf
-p(&fn=makeRed)
+p((fn)=makeRed)
 
 //- Since we can pass any expression to fn, it can be anything
-p(&fn={ p => { p.style.color = 'red' } })
+p((fn)={ p => { p.style.color = 'red' } })
 ```
 
 Within this function, you could set custom event handlers, set up reactive computations with something like `Reactivity.effect`, or whatever you like.
@@ -505,7 +505,7 @@ div#components-demo
 ```iron
 #! template
 h3 {{ title() }}
-.body(&fn={ unsafe(body()) })
+.body((fn)={ unsafe(body()) })
 
 #! script
 export type Component = {
@@ -776,5 +776,5 @@ should we allow refs?
 we have a few ways to do it:
 
 - just allow them to create nodes themselves and expose them to the template, and then have a special syntax to indicate "hey this node is the place where I want you to put this" (might as well include this, use syntax `div($nodeBinding)`)
-- simply allow the `&fn` feature so they can attach to and manipulate the nodes we've already created
+- simply allow the `(fn)` feature so they can attach to and manipulate the nodes we've already created
 - put a `refs` property on the `Component` type, so they'll receive it in their setup function (don't like this as much, less flexible and it fairly substantially complicates codegen)
