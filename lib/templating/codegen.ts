@@ -7,7 +7,7 @@ import {
 	Entity, Directive,
 	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
-	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
+	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 
 function safePrefix(s: string) {
@@ -65,36 +65,74 @@ const typedParentParams = () => t(
 
 // as an optimization for the call sites to avoid a bunch of empty object allocations,
 // you can pass a reference to the same global empty object for all the groups that haven't provided anything
-export function generateComponentRenderFunction(
-	propsNames: string[], syncsNames: string[],
-	eventsNames: string[], slotNames: string[],
-	createFnNames: string[], entities: NonEmpty<Entity>,
-) {
+export function generateComponentDefinition({
+	props, syncs, events,
+	slots: slotMap, createFns, entities,
+}: ComponentDefinition) {
 	const ctx = new CodegenContext()
 
 	const [realParentIdent, parentIdent] = resetParentIdents()
-	// at the component level, we can't know whether we're truly the lone child of a real node
-	// so we pass false, and only concrete nodes below us can reset that based on their status
-	// TODO this needs to actually manually iterate over these, and pluck out any SlotDefinition and handle them
-	// we can combine this SlotDefinition information with the optionality of slots to know how to default them,
-	// whether to this fallback produced here or to a noop
-	// TODO at some point we need to be aware of the optionality of the slots,
+
+
 	const entitiesStatements = [] as ts.Statement[]
 	for (let index = 0; index < entities.length; index++) {
 		const entity = entities[index]
-		if (entity.type === 'SlotDefinition')
-			throw new Error('unimplemented')
+		if (entity.type !== 'SlotUsage') {
+			// at the component level, we can't know whether we're truly the lone child of a real node
+			// so we pass false, and only concrete nodes below us can reset that based on their status
+			const entityStatements = generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent)
+			Array.prototype.push.apply(entitiesStatements, entityStatements)
+			continue
+		}
 
-		const entityStatements = generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent)
-		Array.prototype.push.apply(entitiesStatements, entityStatements)
+		const { name: slotName = 'default', argsExpression, fallback } = entity
+		const slotOptional = slotMap[slotName]
+		// TODO if you want to get really fancy, this function can essentially augment the type definition to include slots that are only defined in the template. The `ComponentDefinition` type can look something like this
+		// type ComponentDefinition<C, Backfill = {}> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C> & Slots<Backfill>]>
+		// and then this file can simply insert all extra slots found here
+		// this would make the job of scriptless components easier
+		// HOWEVER, these slots couldn't take any parameters
+		if (slotOptional === undefined) throw new Error(`slot ${slotName} doesn't exist`)
+
+		// TODO there's a cleanup here where we simply assign to some usageTarget and pass it to generateGenericInsertableCall
+		if (!slotOptional) {
+			if (fallback !== undefined)
+				// required, has fallback: pointless, and typescript won't throw an error so we will
+				throw new Error(`fallback provided for slot ${slotName} even though it's required`)
+
+			// required, no fallback: perfectly fine, generate a simple usage
+			const slotUsageStatement = generateGenericInsertableCall(slotName, argsExpression, realParentIdent, parentIdent)
+			entitiesStatements.push(slotUsageStatement)
+			continue
+		}
+
+		const fallbackFunction = fallback === undefined
+			// optional, no fallback: default to noop, thereby outputing nothing
+			? ctx.requireRuntime('noop')
+			// optional, has fallback: default to their fallback, which takes no arguments because it captures its environment
+			: exec(() => {
+				const [params, block] = generateGenericInsertableDefinition(slotName, paramsExpression, entities, false)
+				return ts.createParen(createArrowFunction(params, block))
+			})
+
+		const slotUsageStatement = generateGenericInsertableCall(
+			ts.createParen(ts.createBinary(
+				ts.createIdentifier(slotName),
+				ts.createToken(ts.SyntaxKind.BarBarToken),
+				fallbackFunction,
+			)),
+			argsExpression, realParentIdent, parentIdent
+		)
+		entitiesStatements.push(slotUsageStatement)
 	}
 
-	const argsNames = propsNames.concat(syncsNames).concat(eventsNames)
-	const createFnInvocation = createFnNames.length === 0 ? [] : [createConst(
-		createFnNames,
+
+	const args = props.concat(syncs).concat(events)
+	const createFnInvocation = createFns.length === 0 ? [] : [createConst(
+		createFns,
 		createCall('create', [ts.createAsExpression(
 			ts.createObjectLiteral(
-				argsNames.map(arg => {
+				args.map(arg => {
 					return ts.createShorthandPropertyAssignment(ts.createIdentifier(arg), undefined)
 				}),
 				false,
@@ -106,7 +144,8 @@ export function generateComponentRenderFunction(
 	) as ts.Statement]
 
 	const statements = createFnInvocation.concat(entitiesStatements)
-	const params = [realParentText, parentText, propsNames, syncsNames, eventsNames, slotNames].map(n => createParameter(n))
+	const slotNames = Object.keys(slotMap)
+	const params = [realParentText, parentText, props, syncs, events, slotNames].map(n => createParameter(n))
 	const componentArrow = createArrowFunction(params, ts.createBlock(statements, true))
 
 	const componentDefinitionSymbol = ts.createIdentifier(safePrefix('Component'))
@@ -167,8 +206,8 @@ export function generateEntity(
 
 	// the below context will pluck out the valid ones they're interested in and save them from entering this function
 	// - in generateComponentInclusion, plucking out SlotInsertion
-	// - in generateComponentRenderFunction, plucking out SlotDefinition
-	case 'SlotDefinition':
+	// - in generateComponentDefinition, plucking out SlotUsage
+	case 'SlotUsage':
 		throw new Error("@slot isn't valid in this context")
 	case 'SlotInsertion':
 		throw new Error("@insert isn't valid in this context")
@@ -585,19 +624,9 @@ export function generateComponentInclusion(
 		if (result.is_err()) throw new Error("can't use an explicit default slot insert and nodes outside of a slot insert")
 	}
 
-	const slots = slotInsertions.entries().map(([slotName, { receiverExpression, entities }]) => {
-		const [realParentIdent, parentIdent] = resetParentIdents()
-		const receiverParams = receiverExpression !== undefined
-			? [createParameter(createRawCodeSegment(receiverExpression))]
-			: []
-
-		return ts.createPropertyAssignment(
-			slotName,
-			createArrowFunction(
-				untypedParentParams().concat(receiverParams),
-				ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
-			),
-		)
+	const slots = slotInsertions.entries().map(([slotName, { paramsExpression, entities }]) => {
+		const [params, block] = generateGenericInsertableDefinition(paramsExpression, entities, false)
+		return ts.createPropertyAssignment(slotName, createArrowFunction(params, block))
 	})
 
 	const propsArgs = props.length !== 0 ? ts.createObjectLiteral(props, false) : ctx.requireRuntime('EMPTYOBJECT')
@@ -652,7 +681,7 @@ export function generateComponentInclusion(
 // function generateSwitchBlock(e: SwitchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
-// export function generateSlotDefinition(e: SlotDefinition, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+// export function generateSlotDefinition(e: SlotUsage, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
 // }
 // export function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
@@ -663,30 +692,45 @@ export function generateTemplateDefinition(
 	{ name, paramsExpression, entities }: TemplateDefinition,
 	ctx: CodegenContext,
 ): ts.Statement[] {
+	const [params, block] = generateGenericInsertableDefinition(paramsExpression, entities, true)
+	return [ts.createFunctionDeclaration(
+		undefined, undefined, undefined, ts.createIdentifier(name),
+		undefined, params, undefined, block,
+	)]
+}
+
+function generateGenericInsertableDefinition(
+	paramsExpression: string | undefined,
+	entities: NonEmpty<Entity>,
+	typed: boolean,
+) {
 	const remainingParams = paramsExpression !== undefined
 		? [createParameter(createRawCodeSegment(paramsExpression))]
 		: []
-
-	const params = typedParentParams().concat(remainingParams)
 	const [realParentIdent, parentIdent] = resetParentIdents()
-
-	return [ts.createFunctionDeclaration(
-		undefined, undefined, undefined, ts.createIdentifier(name),
-		undefined, params, undefined,
-		// this is similar to a component definition, since we can't know how this template will be used
-		// we have to begin with the assumption that this can be used in non-lone contexts
-		ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
-	)]
+	const baseParams = typed ? typedParentParams() : untypedParentParams()
+	const params = baseParams.concat(remainingParams)
+	// this is similar to a component definition, since we can't know how this template will be used
+	// we have to begin with the assumption that this can be used in non-lone contexts
+	const block = ts.createBlock(generateEntities(entities, '', false, ctx, realParentIdent, parentIdent), true)
+	return t(params, block)
 }
 
 export function generateTemplateInclusion(
 	{ name, argsExpression }: TemplateInclusion,
 	realParent: ts.Identifier, parent: ts.Identifier,
 ): ts.Statement[] {
+	return [generateGenericInsertableCall(name, argsExpression, realParent, parent)]
+}
+
+function generateGenericInsertableCall(
+	insertableName: string | ts.Expression, argsExpression: string | undefined,
+	realParent: ts.Identifier, parent: ts.Identifier,
+) {
 	const givenArgs = argsExpression !== undefined
 		? [createRawCodeSegment(argsExpression)]
 		: []
-	return [ts.createExpressionStatement(createCall(name, [realParent, parent].concat(givenArgs)))]
+	return ts.createExpressionStatement(createCall(insertableName, [realParent, parent].concat(givenArgs)))
 }
 
 // function generateVariableBinding(e: VariableBinding, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {

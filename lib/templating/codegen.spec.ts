@@ -7,11 +7,11 @@ import {
 	Entity, Directive,
 	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
-	SlotDefinition, SlotInsertion, TemplateDefinition, TemplateInclusion,
+	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast.spec'
 import {
 	BindingType, LivenessType,
-	printNodes, printNodesArray, CodegenContext, resetParentIdents, generateComponentRenderFunction,
+	printNodes, printNodesArray, CodegenContext, resetParentIdents, generateComponentDefinition,
 	generateTag, generateText, generateComponentInclusion, /*generateIfBlock,*/ generateTemplateDefinition, generateTemplateInclusion,
 } from './codegen'
 
@@ -28,22 +28,18 @@ function ctx() {
 const [realParent, parent] = resetParentIdents()
 const emptyDiv = () => Tag('div', [], [], [])
 
-describe('generateComponentRenderFunction', () => {
-	it('no argument component', () => {
-		const generatedCode = generateComponentRenderFunction([], [], [], [], [], [emptyDiv()])
-		boilEqual(generatedCode, `
+describe('generateComponentDefinition', () => {
+	const cases: [string, ComponentDefinition, string][] = [
+		['no argument component', ComponentDefinition([], [], [], [], [], [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
 				___createElement(___parent, "div")
 			}
 			export default ___Component
-		`)
-	})
+		`],
 
-	it('all component args but no createFn', () => {
-		const generatedCode = generateComponentRenderFunction(['p'], ['y'], ['e'], ['s'], [], [emptyDiv()])
-		boilEqual(generatedCode, `
+		['all component args but no createFn', ComponentDefinition(['p'], ['y'], ['e'], [['s', false]], [], [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (
@@ -53,12 +49,9 @@ describe('generateComponentRenderFunction', () => {
 				___createElement(___parent, "div")
 			}
 			export default ___Component
-		`)
-	})
+		`],
 
-	it('only createFn', () => {
-		const generatedCode = generateComponentRenderFunction([], [], [], [], ['a', 'b'], [emptyDiv()])
-		boilEqual(generatedCode, `
+		['only createFn', ComponentDefinition([], [], [], [], ['a', 'b'], [emptyDiv()]), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -66,14 +59,12 @@ describe('generateComponentRenderFunction', () => {
 				___createElement(___parent, "div")
 			}
 			export default ___Component
-		`)
-	})
+		`],
 
-	it('both component args and createFn', () => {
-		const generatedCode = generateComponentRenderFunction(['p1', 'p2'], ['y1', 'y2'], ['e1', 'e2'], ['s1', 's2'], ['a', 'b'], [emptyDiv()])
-		boilEqual(generatedCode, `
+		['both component args and createFn', ComponentDefinition(
+			['p1', 'p2'], ['y1', 'y2'], ['e1', 'e2'], [['s1', false], ['s2', false]], ['a', 'b'], [emptyDiv()],
+		), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
-
 			const ___Component: ___ComponentDefinition<Component> = (
 				___real, ___parent,
 				{ p1, p2 }, { y1, y2 }, { e1, e2 }, { s1, s2 }
@@ -82,8 +73,160 @@ describe('generateComponentRenderFunction', () => {
 				___createElement(___parent, "div")
 			}
 			export default ___Component
-		`)
-	})
+		`],
+
+		['usage of a required slot without args (default)', ComponentDefinition([], [], [], [['defaultSlot', false]], [], [
+			SlotUsage(undefined, undefined, undefined),
+		]), `
+			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { defaultSlot }
+			) => {
+				defaultSlot(___real, ___parent)
+			}
+			export default ___Component
+		`],
+
+		['usage of a required slot without args (non-default)', ComponentDefinition([], [], [], [['s', false]], [], [
+			SlotUsage('s', undefined, undefined),
+		]), `
+			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				s(___real, ___parent)
+			}
+			export default ___Component
+		`],
+
+		['usage of a required slot with args (default)', ComponentDefinition([], [], [], [['defaultSlot', false]], [], [
+			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
+		]), `
+			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { defaultSlot }
+			) => {
+				defaultSlot(___real, ___parent, complex.a(), hmm && something().e, ...rest)
+			}
+			export default ___Component
+		`],
+
+		['usage of a required slot with args (non-default)', ComponentDefinition([], [], [], [['s', false]], [], [
+			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
+		]), `
+			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				s(___real, ___parent, complex.a(), hmm && something().e, ...rest)
+			}
+			export default ___Component
+		`],
+
+		['mixed default and non-default required slot usages', ComponentDefinition([], [], [], [['s', false], ['defaultSlot', false]], [], [
+			SlotUsage('defaultSlot', 'complex.a(), hmm && something().e, ...rest', undefined),
+			emptyDiv(),
+			SlotUsage('s', undefined, undefined),
+		]), `
+			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				defaultSlot(___real, ___parent, complex.a(), hmm && something().e, ...rest)
+				___createElement(___parent, "div")
+				s(___real, ___parent)
+			}
+			export default ___Component
+		`],
+
+		['usage of the same required slot in multiple places, different args', ComponentDefinition([], [], [], [['s', false]], [], [
+			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
+			emptyDiv(),
+			SlotUsage('s', 'a, b, c', undefined),
+			SlotUsage('s', '1, 2, 3', undefined),
+			emptyDiv(),
+		]), `
+			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				s(___real, ___parent, complex.a(), hmm && something().e, ...rest)
+				___createElement(___parent, "div")
+				s(___real, ___parent, a, b, c)
+				s(___real, ___parent, 1, 2, 3)
+				___createElement(___parent, "div")
+			}
+			export default ___Component
+		`],
+
+		['optional slot, no fallback', ComponentDefinition([], [], [], [['s', true]], [], [
+			SlotUsage('s', undefined, undefined),
+		]), `
+			import { noop as ___noop, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				(s || ___noop)(___real, ___parent)
+			}
+			export default ___Component
+		`],
+
+		['optional slot, has fallback', ComponentDefinition([], [], [], [['s', true]], [], [
+			SlotUsage('s', undefined, [emptyDiv()]),
+		]), `
+			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				(s || ((___real, ___parent) => {
+					___createElement(___parent, "div")
+				}))(___real, ___parent)
+			}
+			export default ___Component
+		`],
+
+		['optional slot, one without fallback and another with', ComponentDefinition([], [], [], [['s', true]], [], [
+			SlotUsage('s', undefined, undefined),
+			emptyDiv(),
+			SlotUsage('s', undefined, [emptyDiv()]),
+		]), `
+			import { noop as ___noop, createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+			const ___Component: ___ComponentDefinition<Component> = (
+				___real, ___parent, {}, {}, {}, { s }
+			) => {
+				(s || ___noop)(___real, ___parent)
+
+				___createElement(___parent, "div")
+
+				(s || ((___real, ___parent) => {
+					___createElement(___parent, "div")
+				}))(___real, ___parent)
+			}
+			export default ___Component
+		`],
+	]
+
+	for (const [description, definition, generated] of cases)
+		it(description, () => {
+			const generatedCode = generateComponentDefinition(definition)
+			boilEqual(generatedCode, generated)
+		})
+
+
+	const throwCases: [string, ComponentDefinition][] = [
+		['required slot, has fallback', ComponentDefinition([], [], [], [['s', false]], [], [
+			emptyDiv(),
+			SlotUsage('s', undefined, [emptyDiv()]),
+		])],
+		['usage of an undefined slot', ComponentDefinition([] [], [], [['s', false]], [], [
+			SlotUsage('a', undefined, undefined),
+		])],
+	]
+
+	for (const [description, definition] of throwCases)
+		it(description, () => {
+			expect(() => generateComponentDefinition(definition)).throw()
+		})
 })
 
 

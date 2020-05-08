@@ -1,12 +1,13 @@
-import { NonEmpty } from '../utils'
+import { Dict, NonEmpty } from '../utils'
 
 export class ComponentDefinition {
 	constructor(
-		// just using name/optional pairs is the simplest thing we need to render all of the code
-		readonly props: { name: string, optional: boolean }[],
-		readonly syncs: { name: string, optional: boolean }[],
-		readonly events: { name: string, optional: boolean }[],
-		readonly slots: { name: string, optional: boolean }[],
+		readonly props: string[],
+		readonly syncs: string[],
+		readonly events: string[],
+		readonly slots: Dict<boolean>,
+		readonly createFns: string[],
+		readonly entities: NonEmpty<Entity>,
 	) {}
 }
 
@@ -68,7 +69,7 @@ export type Directive =
 	| EachBlock
 	| MatchBlock
 	| SwitchBlock
-	| SlotDefinition
+	| SlotUsage
 	| SlotInsertion
 	| TemplateDefinition
 	| TemplateInclusion
@@ -96,7 +97,7 @@ export class IfBlock {
 export class EachBlock {
 	readonly type = 'EachBlock' as const
 	constructor(
-		readonly receiverExpression: string,
+		readonly paramsExpression: string,
 		readonly listExpression: string,
 		// readonly keyExpression: string | undefined,
 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
@@ -142,8 +143,8 @@ export class SwitchDefault {
 	) {}
 }
 
-export class SlotDefinition {
-	readonly type = 'SlotDefinition' as const
+export class SlotUsage {
+	readonly type = 'SlotUsage' as const
 	constructor(
 		readonly name: string | undefined,
 		readonly argsExpression: string | undefined,
@@ -155,7 +156,7 @@ export class SlotInsertion {
 	readonly type = 'SlotInsertion' as const
 	constructor(
 		readonly name: string | undefined,
-		readonly receiverExpression: string | undefined,
+		readonly paramsExpression: string | undefined,
 		readonly entities: NonEmpty<Entity>,
 	) {}
 }

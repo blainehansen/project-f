@@ -781,6 +781,7 @@ export function MatchStatement(realParent: Node, parent: DocumentFragment) {
 			default:
 				const span = createElement(parent, 'span')
 				span.textContent = 'unknown weapon type'
+				break
 		}
 	}, realParent, parent)
 
@@ -879,8 +880,8 @@ describe('SwitchStatement', () => it('works', () => {
 }))
 
 
-// p(&fn=makeRed)
-// p(&fn={ p => { p.style.color = 'red' } })
+// p((fn)=makeRed)
+// p((fn)={ p => { p.style.color = 'red' } })
 export function NodeReceiver(realParent: Node, parent: DocumentFragment) {
 	const p1Color = value('red')
 	function makeRed(node: HTMLParagraphElement) {

@@ -64,9 +64,9 @@ export type SwitchDefault = ast.SwitchDefault
 export function SwitchDefault(...params: ConstructorParameters<typeof ast.SwitchDefault>): ast.SwitchDefault {
 	return new ast.SwitchDefault(...params)
 }
-export type SlotDefinition = ast.SlotDefinition
-export function SlotDefinition(...params: ConstructorParameters<typeof ast.SlotDefinition>): ast.SlotDefinition {
-	return new ast.SlotDefinition(...params)
+export type SlotUsage = ast.SlotUsage
+export function SlotUsage(...params: ConstructorParameters<typeof ast.SlotUsage>): ast.SlotUsage {
+	return new ast.SlotUsage(...params)
 }
 export type SlotInsertion = ast.SlotInsertion
 export function SlotInsertion(...params: ConstructorParameters<typeof ast.SlotInsertion>): ast.SlotInsertion {
