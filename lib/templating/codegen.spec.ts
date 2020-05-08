@@ -307,13 +307,11 @@ describe('generateComponentInclusion', () => {
 		['sync, fake and setter together', ComponentInclusion('Comp', [
 			Attribute('!y|fake|setter', AttributeCode(true, 'doit')),
 		], [])],
-
 		['duplicate event handlers on components', ComponentInclusion('Comp', [
 			Attribute('@msg', AttributeCode(true, 'first')),
 			Attribute('@msg', AttributeCode(true, 'second')),
 		], [])],
-
-		['mixing orphaned entities with an explicit default slot insert, throw', ComponentInclusion('Comp', [], [
+		['mixing orphaned entities with an explicit default slot insert', ComponentInclusion('Comp', [], [
 			Tag('div', [], [], []),
 			SlotInsertion(undefined, undefined, [Tag('h1', [], [], [])]),
 		])],
@@ -462,47 +460,19 @@ describe('generateTag', () => {
 			), '0', ctx(), realParent, parent)).throw()
 	})
 
-	it('handler event modifier with bare code', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute('@click|handler', AttributeCode(true, 'doit'))], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
+	const throwCases: [string, Attribute][] = [
+		['handler event modifier with bare code', Attribute('@click|handler', AttributeCode(true, 'doit'))],
+		['any modifiers on empty attribute', Attribute('anything|whatever', undefined)],
+		['any modifiers on static attribute', Attribute('anything|whatever', "doesn't matter")],
+		['any modifiers on reactive attribute', Attribute(':anything|whatever', AttributeCode(true, 'doit'))],
+		['any modifiers on node receiver', Attribute('(fn)|whatever', AttributeCode(true, 'doit'))],
+		['parentheses used as anything other than (fn)', Attribute('(notfn)', AttributeCode(true, 'doit'))],
+	]
 
-	it('any modifiers on empty attribute', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute('anything|whatever', undefined)], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
-
-	it('any modifiers on static attribute', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute('anything|whatever', "doesn't matter")], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
-
-	it('any modifiers on reactive attribute', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute(':anything|whatever', AttributeCode(true, 'doit'))], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
-
-	it('any modifiers on node receiver', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute('(fn)|whatever', AttributeCode(true, 'doit'))], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
-
-	it('parentheses used as anything other than (fn)', () => {
-		expect(() => generateTag(Tag(
-			'div', [],
-			[Attribute('(notfn)', AttributeCode(true, 'doit'))], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
+	for (const [description, attribute] of throwCases)
+		it(description, () => {
+			expect(() => generateTag(Tag('div', [], [attribute], []), '0', ctx(), realParent, parent)).throw()
+		})
 
 	for (const [type, attribute] of [['reactive', ':a'], ['sync', '!a'], ['event', '@a'], ['receiver', '(fn)']]) {
 		it(`empty for ${type}`, () => {
