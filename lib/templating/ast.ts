@@ -6,7 +6,7 @@ export class ComponentDefinition {
 		readonly syncs: string[],
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
-		readonly createFns: string[],
+		readonly createFnNames: string[],
 		readonly entities: NonEmpty<Entity>,
 	) {}
 }
@@ -84,13 +84,13 @@ export class ComponentInclusion {
 	) {}
 }
 
-// TODO Also, given this change, it probably makes sense to change the ast structure of if-blocks to instead have a list of intermediary `else-if` sections and a single trailing `else` that can be undefined. Then you can just move the reactivity switch onto that single structure and avoid nesting altogether.
 export class IfBlock {
 	readonly type = 'IfBlock' as const
 	constructor(
 		readonly expression: string,
-		readonly entities: Entity[],
-		readonly elseBranch: IfBlock | Entity[] | undefined,
+		readonly entities: NonEmpty<Entity>,
+		readonly elseIfBranches: [string, NonEmpty<Entity>][],
+		readonly elseBranch: NonEmpty<Entity> | undefined,
 	) {}
 }
 

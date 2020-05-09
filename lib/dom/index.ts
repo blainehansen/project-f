@@ -258,20 +258,20 @@ export function rangeEffect(fn: (realParent: Node, container: DocumentFragment) 
 
 	// TODO it might be worth inlining the creation of the actual StatefulComputation here
 	const destructor = statefulEffect((range, destroy) => {
-		const fragment = document.createDocumentFragment()
-		fn(range.realParent, fragment)
+		const container = document.createDocumentFragment()
+		fn(range.realParent, container)
 
 		// normalizing contents of the fragment that the sub function appended, and performing the actual replaceRange
 		// in the future, we'll instead simply reconcile the fragment against current directly?
 		// or rather, replaceRange will take a fragment and normalize based on its length rather than a union
-		switch (fragment.childNodes.length) {
+		switch (container.childNodes.length) {
 		case 0:
 			return replaceRange(range, undefined)
 		case 1:
-			return replaceRange(range, fragment.childNodes[0])
+			return replaceRange(range, container.childNodes[0])
 		default:
 			const nodes = []
-			for (const node of fragment.childNodes)
+			for (const node of container.childNodes)
 				nodes.push(node)
 			return replaceRange(range, nodes as unknown as NonLone<Node>)
 		}
@@ -293,21 +293,21 @@ export function rangeEffect(fn: (realParent: Node, container: DocumentFragment) 
 
 // 	const destructor = statefulEffect((content, destroy) => {
 // 		const container = document.createDocumentFragment()
-// 		fn(content.parent, fragment)
+// 		fn(content.parent, container)
 
 // 		// don't normalize here, eventually this will be moved
-// 		switch (fragment.childNodes.length) {
+// 		switch (container.childNodes.length) {
 // 		case 0:
 // 			return replaceContent(content, undefined)
 // 		case 1:
-// 			return replaceContent(content, fragment.childNodes[0])
+// 			return replaceContent(content, container.childNodes[0])
 // 		default:
 // 			const nodes = []
-// 			for (const node of fragment.childNodes)
+// 			for (const node of container.childNodes)
 // 				nodes.push(node)
 // 			return replaceContent(content, nodes as unknown as NonLone<Node>)
 // 		}
-// 		// return replaceContent(content, fragment)
+// 		// return replaceContent(content, container)
 // 	}, content)
 
 // 	return destructor

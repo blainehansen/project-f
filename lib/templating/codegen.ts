@@ -56,7 +56,7 @@ export class CodegenContext {
 
 const realParentText = safePrefix('real')
 const parentText = safePrefix('parent')
-export const resetParentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
+const resetParentIdents = () => t(ts.createIdentifier(realParentText), ts.createIdentifier(parentText))
 const untypedParentParams = () => t(createParameter(realParentText), createParameter(parentText))
 const typedParentParams = () => t(
 	createParameter(realParentText, ts.createTypeReferenceNode(ts.createIdentifier('Node'), undefined)),
@@ -67,7 +67,7 @@ const typedParentParams = () => t(
 // you can pass a reference to the same global empty object for all the groups that haven't provided anything
 export function generateComponentDefinition({
 	props, syncs, events,
-	slots: slotMap, createFns, entities,
+	slots: slotMap, createFnNames, entities,
 }: ComponentDefinition) {
 	const ctx = new CodegenContext()
 
@@ -118,8 +118,8 @@ export function generateComponentDefinition({
 
 
 	const args = props.concat(syncs).concat(events)
-	const createFnInvocation = createFns.length === 0 ? [] : [createConst(
-		createFns,
+	const createFnInvocation = createFnNames.length === 0 ? [] : [createConst(
+		createFnNames,
 		createCall('create', [ts.createAsExpression(
 			ts.createObjectLiteral(
 				args.map(arg => {
@@ -182,8 +182,7 @@ export function generateEntity(
 		return generateComponentInclusion(entity, ctx, realParent, parent)
 
 	case 'IfBlock':
-		// return generateIfBlock(entity, offset, isRealLone, parent)
-		throw new Error('unimplemented')
+		return generateIfBlock(entity, offset, isRealLone, ctx, realParent, parent)
 	case 'EachBlock':
 		// return generateEachBlock(entity, offset, isRealLone, parent)
 		throw new Error('unimplemented')
@@ -627,37 +626,71 @@ export function generateComponentInclusion(
 	))]
 }
 
-// function createIf(
-// 	{ expression, entities, elseBranch }: IfBlock,
-// 	reactiveSoFar: boolean, isRealLone: boolean,
-// ) {
-// 	const reactive = reactiveSoFar || expression.startsWith(':')
 
-// 	return ts.createIf(
-// 		createRawCodeSegment(expression),
-// 		ts.createBlock(generateEntities(entities), true),
-// 		elseBranch === undefined ? undefined
-// 			: Array.isArray(elseBranch) ? ts.createBlock(generateEntities(elseBranch), true)
-// 			: createIf(elseBranch),
-// 	)
-// }
-// export function generateIfBlock(
-// 	ifBlock: IfBlock, offset: string, isRealLone: boolean,
-// 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
-// ): ts.Statement[] {
-// 	const [reactive, ifStatement] = createIf(ifBlock, false, isRealLone)
+// function createIf(expression: Expression, thenStatement: Statement, elseStatement?: Statement): IfStatement;
+function createIf(
+	expression: string, entities: NonEmpty<Entity>, elseBranch: ts.Statement | undefined,
+	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	return ts.createIf(
+		createRawCodeSegment(expression),
+		ts.createBlock(generateEntities(entities, offset, isRealLone, ctx, realParent, parent), true),
+		elseBranch,
+	)
+}
+export function generateIfBlock(
+	{ expression, entities, elseIfBranches, elseBranch }: IfBlock,
+	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
+): ts.Statement[] {
+	// TODO I'm slowly settling on :expression for code that is simply some Immutable (so we add the actual call),
+	// and ::expression for code that is reactive, but is already applying the call
+	// that seems not terrible, and it keeps things granular
+	// it does mean a few things for this function though:
+	// - we can't know `reactive` until we've examined all the expressions and done a "strongest" computation
+	// - that means that if the first one isn't reactive, you have to iterate over them
 
-// 	const params = [createParameter(realParent), createParameter(parent)]
-// 	const closure = createArrowFunction(params, ts.createBlock([ifStatement], true))
+	// function processExpressionReactive(expression: string) {
+	// 	return expression.startsWith('::') ? [expression.slice(2), true]
+	// 	: expression.startsWith(':') ? [expression.slice(1), true]
+	// 	: [expression, false]
+	// }
 
-// 	return isRealLone
-// 		? reactive
-// 			? [ts.createExpressionStatement(createCall(requireRuntime('contentEffect'), [closure, realParent]))]
-// 			: ifStatement
-// 		: reactive
-// 			? createCall(requireRuntime('rangeEffect'), [closure, realParent, parent])
-// 			: ifStatement
-// }
+	// const [usedExpression, reactive] =
+	// 	expression.startsWith('::') ? [expression.slice(2), true]
+	// 	: expression.startsWith(':') ? [expression.slice(1), true]
+	// 	: [expression, elseIfBranches.some(([expression, ]) => expression.startsWith(':'))]
+
+	const [realParent, parent] = reactive
+		? resetParentIdents()
+		: [aboveRealParent, aboveParent]
+
+	// we start with the else block and work our way backwards
+	// this way we avoid needing any pesky recursion to build up the recursive ts.IfStatement
+	let currentElse: ts.Statement | undefined = elseBranch === undefined
+		? undefined
+		: ts.createBlock(generateEntities(elseBranch, offset, false, ctx, realParent, parent), true)
+
+	for (let index = elseIfBranches.length - 1; index >= 0; index--) {
+		const [expression, entities] = elseIfBranches[index]
+		currentElse = createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)
+	}
+
+	const ifStatement = createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)
+	if (!reactive)
+		return [ifStatement]
+
+	const closure = createArrowFunction(untypedParentParams(), ts.createBlock([ifStatement], true))
+	// TODO it seems the only way we can safely use `isRealLone` to optimize anything
+	// is by simply using `contentEffect` ourselves if our parent has given the all clear
+	// all the sub entities might be able to piggyback from that?
+	return [ts.createExpressionStatement(
+		/*isRealLone
+			? createCall(ctx.requireRuntime('contentEffect'), [closure, aboveRealParent])
+			:*/ createCall(ctx.requireRuntime('rangeEffect'), [closure, aboveRealParent, aboveParent])
+	)]
+}
 
 // function generateEachBlock(e: EachBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 

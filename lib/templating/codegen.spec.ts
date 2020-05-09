@@ -1,8 +1,9 @@
 import 'mocha'
 import { expect } from 'chai'
+import ts = require('typescript')
 
-import { NonEmpty } from '../utils'
 import { boilString } from '../utils.spec'
+import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
 	Entity, Directive,
 	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
@@ -10,14 +11,11 @@ import {
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast.spec'
 import {
-	BindingType, LivenessType,
-	printNodes, printNodesArray, CodegenContext, resetParentIdents, generateComponentDefinition,
-	generateTag, generateText, generateComponentInclusion, /*generateIfBlock,*/ generateTemplateDefinition, generateTemplateInclusion,
+	BindingType, LivenessType, printNodes, printNodesArray, CodegenContext,
+	generateComponentDefinition, generateTag, generateText, generateComponentInclusion,
+	generateIfBlock, generateTemplateDefinition, generateTemplateInclusion,
 } from './codegen'
 
-// function b(node: Parameters<typeof printNode>[0]) {
-// 	return expect(boilString(printNode(node)))
-// }
 function boilEqual(actual: string, expected: string) {
 	expect(boilString(actual)).equal(boilString(expected))
 }
@@ -25,8 +23,17 @@ type ctx = CodegenContext
 function ctx() {
 	return new CodegenContext()
 }
-const [realParent, parent] = resetParentIdents()
-const emptyDiv = () => Tag('div', [], [], [])
+
+const realParent = ts.createIdentifier('___real')
+const parent = ts.createIdentifier('___parent')
+const namedParentIdents = (real: string, parent: string) => t(ts.createIdentifier(real), ts.createIdentifier(parent))
+
+const empty = (tagName: string) => Tag(tagName, [], [], [])
+const emptyDiv = () => empty('div')
+const emptyH1 = () => empty('h1')
+const emptyEm = () => empty('em')
+const emptySpan = () => empty('span')
+const emptyStrong = () => empty('strong')
 
 describe('generateComponentDefinition', () => {
 	const cases: [string, ComponentDefinition, string][] = [
@@ -319,7 +326,7 @@ describe('generateComponentInclusion', () => {
 
 		// slots
 		['only orphaned entities (single)', ComponentInclusion('Comp', [], [
-			Tag('div', [], [], []),
+			emptyDiv(),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
@@ -330,8 +337,8 @@ describe('generateComponentInclusion', () => {
 		`],
 
 		['only orphaned entities (multiple)', ComponentInclusion('Comp', [], [
-			Tag('h1', [], [], []),
-			Tag('div', [], [], []),
+			emptyH1(),
+			emptyDiv(),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
@@ -343,7 +350,7 @@ describe('generateComponentInclusion', () => {
 		`],
 
 		['only explicit default (single)', ComponentInclusion('Comp', [], [
-			SlotInsertion(undefined, 'a: string', [Tag('div', [], [], [])]),
+			SlotInsertion(undefined, 'a: string', [emptyDiv()]),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
@@ -355,8 +362,8 @@ describe('generateComponentInclusion', () => {
 
 		['only explicit default (multiple)', ComponentInclusion('Comp', [], [
 			SlotInsertion(undefined, 'a: string', [
-				Tag('h1', [], [], []),
-				Tag('div', [], [], []),
+				emptyH1(),
+				emptyDiv(),
 			]),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
@@ -370,11 +377,11 @@ describe('generateComponentInclusion', () => {
 
 		['only explicit inserts', ComponentInclusion('Comp', [], [
 			SlotInsertion('first', 'name?: string', [
-				Tag('h1', [], [], []),
-				Tag('div', [], [], []),
+				emptyH1(),
+				emptyDiv(),
 			]),
 			SlotInsertion('second', 'a: string, b: boolean', [
-				Tag('span', [], [], []),
+				emptySpan(),
 			]),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
@@ -390,11 +397,11 @@ describe('generateComponentInclusion', () => {
 		`],
 
 		['mixed explicit inserts with orphaned', ComponentInclusion('Comp', [], [
-			Tag('h1', [], [], []),
+			emptyH1(),
 			SlotInsertion('second', 'a: string, b: boolean', [
-				Tag('span', [], [], []),
+				emptySpan(),
 			]),
-			Tag('div', [], [], []),
+			emptyDiv(),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
@@ -410,14 +417,14 @@ describe('generateComponentInclusion', () => {
 
 		['mixed explicit inserts with explicit default', ComponentInclusion('Comp', [], [
 			SlotInsertion('first', 'name?: string', [
-				Tag('h1', [], [], []),
+				emptyH1(),
 			]),
 			SlotInsertion(undefined, 'a: string', [
-				Tag('h1', [], [], []),
-				Tag('div', [], [], []),
+				emptyH1(),
+				emptyDiv(),
 			]),
 			SlotInsertion('second', undefined, [
-				Tag('span', [], [], []),
+				emptySpan(),
 			]),
 		]), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
@@ -455,8 +462,8 @@ describe('generateComponentInclusion', () => {
 			Attribute('@msg', AttributeCode(true, 'second')),
 		], [])],
 		['mixing orphaned entities with an explicit default slot insert', ComponentInclusion('Comp', [], [
-			Tag('div', [], [], []),
-			SlotInsertion(undefined, undefined, [Tag('h1', [], [], [])]),
+			emptyDiv(),
+			SlotInsertion(undefined, undefined, [emptyH1()]),
 		])],
 	]
 
@@ -487,7 +494,7 @@ describe('generateTag', () => {
 
 		[`div: [span hello, div]`, Tag('div', [], [], [
 			Tag('span', [], [], [TextSection(TextItem(false, 'hello'))]),
-			Tag('div', [], [], []),
+			emptyDiv(),
 		]), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
@@ -742,28 +749,106 @@ describe('generateText', () => {
 })
 
 
-// describe('generateIfBlock', () => {
-// 	const cases: [boolean, IfBlock, string][] = [
-// 		// dynamic, one layer
-// 		// @if (checked)
-// 		[true, IfBlock('checked', [], undefined), `
-// 			if (checked) {}
-// 		`],
-// 		[false, IfBlock(), `
-// 			if (checked) {}
-// 		`],
-// 	]
+describe('generateIfBlock', () => {
+	const cases: [string, IfBlock, string][] = [
+		['nonreactive single if', IfBlock('checked', [emptyDiv()], [], undefined), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+		`],
 
-// 	for (const [lone, block, generated] of cases) {
-// 		const context = ctx()
-// 		const nodes = generateIfBlock(block, '0', lone, context, realParent, parent)
-// 		const generatedCode = context.finalize(nodes)
+		['nonreactive if, else', IfBlock('checked', [emptyDiv()], [], [emptySpan()]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+			else {
+				___createElement(___parent, "span")
+			}
+		`],
 
-// 		const itemsString = items.map(({ isCode, content }) => `(isCode: ${isCode}, ${content.replace(/\n/g, ' ')})`).join(', ')
-// 		it(`lone: ${lone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
-// 	}
+		['nonreactive if, else if', IfBlock('checked', [emptyDiv()], [['other', [emptySpan()]]], undefined), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+			else if (other) {
+				___createElement(___parent, "span")
+			}
+		`],
 
-// })
+		['nonreactive if, else if else if', IfBlock(
+			'checked', [emptyDiv()],
+			[['other', [emptySpan()]], ['dude', [emptyH1()]]],
+			undefined,
+		), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+			else if (other) {
+				___createElement(___parent, "span")
+			}
+			else if (dude) {
+				___createElement(___parent, "h1")
+			}
+		`],
+
+		['nonreactive if, else if else', IfBlock(
+			'checked', [emptyDiv()],
+			[['other', [emptySpan()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+			else if (other) {
+				___createElement(___parent, "span")
+			}
+			else {
+				___createElement(___parent, "strong")
+			}
+		`],
+
+		['nonreactive if, else if else if else', IfBlock(
+			'checked', [emptyDiv()],
+			[['other', [emptySpan()]], ['dude', [emptyH1()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			if (checked) {
+				___createElement(___parent, "div")
+			}
+			else if (other) {
+				___createElement(___parent, "span")
+			}
+			else if (dude) {
+				___createElement(___parent, "h1")
+			}
+			else {
+				___createElement(___parent, "strong")
+			}
+		`],
+
+		// ['reactive nonempty single if', IfBlock(true, 'checked', [], [], [emptyDiv()]), `
+		// 	import { rangeEffect as ___rangeEffect, createElement as ___createElement } from "project-f/runtime"
+		// 	___rangeEffect((___real, ___parent) => {
+		// 		if (checked()) {
+		// 			___createElement(___parent, "div")
+		// 		}
+		// 	}, ___real, ___parent)
+		// `],
+	]
+
+	// TODO can add plenty of cases to figure out loneness
+	for (const [description, block, generated] of cases)
+		it(description, () => {
+			const context = ctx()
+			generateIfBlock(block, '0', false, context, realParent, parent)
+		})
+})
 
 
 

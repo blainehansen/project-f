@@ -82,7 +82,7 @@ Then we can set `makeRed` to receive our paragraph:
 ```wolf
 p((fn)=makeRed)
 
-//- Since we can pass any expression to fn, it can be anything
+//- we can pass any expression to fn
 p((fn)={ p => { p.style.color = 'red' } })
 ```
 
@@ -775,6 +775,6 @@ type Component = {
 should we allow refs?
 we have a few ways to do it:
 
-- just allow them to create nodes themselves and expose them to the template, and then have a special syntax to indicate "hey this node is the place where I want you to put this" (might as well include this, use syntax `div($nodeBinding)`)
+- just allow them to create nodes themselves and expose them to the template, and then have a special syntax to indicate "hey this node is the place where I want you to put this" (might as well include this, use syntax `div(*nodeBinding)`)
 - simply allow the `(fn)` feature so they can attach to and manipulate the nodes we've already created
 - put a `refs` property on the `Component` type, so they'll receive it in their setup function (don't like this as much, less flexible and it fairly substantially complicates codegen)
