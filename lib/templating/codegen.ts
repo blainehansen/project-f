@@ -85,7 +85,7 @@ export function generateComponentDefinition({
 			continue
 		}
 
-		const { name: slotName = 'default', argsExpression, fallback } = entity
+		const { name: slotName = 'def', argsExpression, fallback } = entity
 		const slotOptional = slotMap[slotName]
 		// TODO if you want to get really fancy, this function can essentially augment the type definition to include slots that are only defined in the template. The `ComponentDefinition` type can look something like this
 		// type ComponentDefinition<C, Backfill = {}> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C> & Slots<Backfill>]>
@@ -94,35 +94,25 @@ export function generateComponentDefinition({
 		// HOWEVER, these slots couldn't take any parameters
 		if (slotOptional === undefined) throw new Error(`slot ${slotName} doesn't exist`)
 
-		// TODO there's a cleanup here where we simply assign to some usageTarget and pass it to generateGenericInsertableCall
-		if (!slotOptional) {
-			if (fallback !== undefined)
-				// required, has fallback: pointless, and typescript won't throw an error so we will
-				throw new Error(`fallback provided for slot ${slotName} even though it's required`)
+		if (!slotOptional && fallback !== undefined)
+			// required, has fallback: pointless, and typescript won't throw an error so we will
+			throw new Error(`fallback provided for slot ${slotName} even though it's required`)
 
-			// required, no fallback: perfectly fine, generate a simple usage
-			const slotUsageStatement = generateGenericInsertableCall(slotName, argsExpression, realParentIdent, parentIdent)
-			entitiesStatements.push(slotUsageStatement)
-			continue
-		}
-
-		const fallbackFunction = fallback === undefined
-			// optional, no fallback: default to noop, thereby outputing nothing
-			? ctx.requireRuntime('noop')
-			// optional, has fallback: default to their fallback, which takes no arguments because it captures its environment
-			: exec(() => {
-				const [params, block] = generateGenericInsertableDefinition(slotName, paramsExpression, entities, false)
-				return ts.createParen(createArrowFunction(params, block))
-			})
-
-		const slotUsageStatement = generateGenericInsertableCall(
-			ts.createParen(ts.createBinary(
+		const usageTarget = !slotOptional
+			? slotName
+			: ts.createParen(ts.createBinary(
 				ts.createIdentifier(slotName),
 				ts.createToken(ts.SyntaxKind.BarBarToken),
-				fallbackFunction,
-			)),
-			argsExpression, realParentIdent, parentIdent
-		)
+				fallback === undefined
+					// optional, no fallback: default to noop, thereby outputing nothing
+					? ctx.requireRuntime('noop')
+					// optional, has fallback: default to their fallback, which takes no arguments because it captures its environment
+					: ts.createParen(createArrowFunction(
+						...generateGenericInsertableDefinition(ctx, undefined, fallback, false),
+					)),
+			))
+
+		const slotUsageStatement = generateGenericInsertableCall(usageTarget, argsExpression, realParentIdent, parentIdent)
 		entitiesStatements.push(slotUsageStatement)
 	}
 
@@ -204,9 +194,6 @@ export function generateEntity(
 		// return generateSwitchBlock(entity, offset, isRealLone, parent)
 		throw new Error('unimplemented')
 
-	// the below context will pluck out the valid ones they're interested in and save them from entering this function
-	// - in generateComponentInclusion, plucking out SlotInsertion
-	// - in generateComponentDefinition, plucking out SlotUsage
 	case 'SlotUsage':
 		throw new Error("@slot isn't valid in this context")
 	case 'SlotInsertion':
@@ -613,19 +600,19 @@ export function generateComponentInclusion(
 			continue
 		}
 
-		const name = entity.name || 'default'
+		const name = entity.name || 'def'
 		const result = slotInsertions.set(name, entity)
 		if (result.is_err()) throw new Error(`duplicate slot insertion ${name}`)
 	}
 
 	if (nonInsertEntities.length > 0) {
 		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
-		const result = slotInsertions.set('default', defaultInsertion)
+		const result = slotInsertions.set('def', defaultInsertion)
 		if (result.is_err()) throw new Error("can't use an explicit default slot insert and nodes outside of a slot insert")
 	}
 
 	const slots = slotInsertions.entries().map(([slotName, { paramsExpression, entities }]) => {
-		const [params, block] = generateGenericInsertableDefinition(paramsExpression, entities, false)
+		const [params, block] = generateGenericInsertableDefinition(ctx, paramsExpression, entities, false)
 		return ts.createPropertyAssignment(slotName, createArrowFunction(params, block))
 	})
 
@@ -692,7 +679,7 @@ export function generateTemplateDefinition(
 	{ name, paramsExpression, entities }: TemplateDefinition,
 	ctx: CodegenContext,
 ): ts.Statement[] {
-	const [params, block] = generateGenericInsertableDefinition(paramsExpression, entities, true)
+	const [params, block] = generateGenericInsertableDefinition(ctx, paramsExpression, entities, true)
 	return [ts.createFunctionDeclaration(
 		undefined, undefined, undefined, ts.createIdentifier(name),
 		undefined, params, undefined, block,
@@ -700,6 +687,7 @@ export function generateTemplateDefinition(
 }
 
 function generateGenericInsertableDefinition(
+	ctx: CodegenContext,
 	paramsExpression: string | undefined,
 	entities: NonEmpty<Entity>,
 	typed: boolean,
