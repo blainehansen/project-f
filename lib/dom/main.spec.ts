@@ -29,7 +29,7 @@ function eachText<T>(collection: T[], fn: (t: T) => string) {
 
 
 export function switcher(parent: Node, checked: Mutable<boolean>) {
-	const input = document.createElement('input')
+	const input = createElement(parent, 'input')
 	input.type = 'checkbox'
 	effect(() => {
 		input.checked = checked()
@@ -37,7 +37,6 @@ export function switcher(parent: Node, checked: Mutable<boolean>) {
 	input.onchange = $event => {
 		checked(input.checked)
 	}
-	parent.appendChild(input)
 	return input
 }
 describe('switcher', () => it('works', () => {
@@ -57,7 +56,7 @@ describe('switcher', () => it('works', () => {
 }))
 
 export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) => T) {
-	const input = document.createElement('input')
+	const input = createElement(parent, 'input')
 	input.type = 'text'
 	input.placeholder = 'append'
 	input.onkeyup = $event => {
@@ -71,7 +70,6 @@ export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) =>
 		list(currentList)
 	}
 
-	parent.appendChild(input)
 	return input
 }
 // describe('appender', () => it('works', () => {
@@ -82,14 +80,13 @@ export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) =>
 // }))
 
 export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
-	const button = document.createElement('button')
+	const button = createElement(parent, 'button')
 	button.textContent = "delete"
 	button.onclick = $event => {
 		const currentList = list()
 		currentList.splice(index, 1)
 		list(currentList)
 	}
-	parent.appendChild(button)
 	return button
 }
 // describe('deleter', () => it('works', () => {
@@ -108,16 +105,14 @@ export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
 // 		@if (checked()) hello checked world
 // 		@else: b oh no!
 export function CheckboxIfElseBlock(realParent: Node, parent: DocumentFragment) {
-	const component = document.createElement('div')
-	parent.appendChild(component)
+	const component = createElement(parent, 'div')
 
 	const checked = value(true)
 	switcher(component, checked)
 
-	const div = document.createElement('div')
+	const div = createElement(component, 'div')
 	const b = document.createElement('b')
 	b.textContent = 'oh no!'
-	component.appendChild(div)
 	contentEffect(() => {
 		return checked()
 			? 'hello checked world'
@@ -195,11 +190,10 @@ describe('ChainedIfElse', () => it('works', () => {
 // 	input(type="text", placeholder="yo yo", !sync=text)
 // 	| {{ text() }}
 export function TextInput(realParent: Node, parent: DocumentFragment) {
-	const component = document.createElement('div')
-	parent.appendChild(component)
+	const component = createElement(parent, 'div')
 
 	const text = value('')
-	const input = document.createElement('input')
+	const input = createElement(component, 'input')
 	input.type = 'text'
 	input.placeholder = 'yo yo'
 	input.oninput = $event => {
@@ -208,13 +202,11 @@ export function TextInput(realParent: Node, parent: DocumentFragment) {
 	effect(() => {
 		input.value = text()
 	})
-	component.appendChild(input)
 
-	const display = document.createTextNode('')
+	const display = createTextNode(component, '')
 	effect(() => {
 		display.data = text()
 	})
-	component.appendChild(display)
 
 	return { text, input }
 }
@@ -237,18 +229,15 @@ describe('TextInput', () => it('works', () => {
 // 	button(@click={ deleteItem(index) }) delete this letter
 // input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
 export function BasicEach(realParent: Node, parent: DocumentFragment) {
-	const header = document.createElement('h1')
+	const header = createElement(parent, 'h1')
 	header.textContent = "Letters:"
-	parent.appendChild(header)
 
 	const list = channel(['a', 'b', 'c'])
 	rangeEffect((realParent, parent) => {
 		for (const [index, letter] of list().entries()) {
-			const div = document.createElement('div')
-			parent.appendChild(div)
-			const item = document.createElement('i')
+			const div = createElement(parent, 'div')
+			const item = createElement(div, 'i')
 			item.textContent = `letter: "${letter}"`
-			div.appendChild(item)
 			deleter(div, list, index)
 		}
 	}, realParent, parent)
@@ -293,10 +282,8 @@ export function IfThenEach(realParent: Node, parent: DocumentFragment) {
 	rangeEffect((realParent, parent) => {
 		if (condition()) {
 			for (const [index, item] of items().entries()) {
-				const div = document.createElement('div')
-				parent.appendChild(div)
-				const text = document.createTextNode(item)
-				div.appendChild(text)
+				const div = createElement(parent, 'div')
+				const text = createTextNode(div, item)
 				deleter(div, items, index)
 			}
 		}
@@ -356,10 +343,8 @@ export function EachThenIf(realParent: Node, parent: DocumentFragment) {
 		for (const [index, item] of items().entries()) {
 			rangeEffect((realParent, parent) => {
 				if (item.condition()) {
-					const div = document.createElement('div')
-					parent.appendChild(div)
-					const text = document.createTextNode(item.name)
-					div.appendChild(text)
+					const div = createElement(parent, 'div')
+					const text = createTextNode(div, item.name)
 					deleter(div, items, index)
 				}
 			}, realParent, parent)
