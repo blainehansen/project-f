@@ -94,6 +94,10 @@ function processCreateFn(createFn: ts.FunctionDeclaration) {
 		// TODO it's possible to do anything with a value known at compile time
 		// so computed or spreads with some known values could be done
 		// https://learning-notes.mistermicheels.com/javascript/typescript/compiler-api/#getting-type-information
+
+		// a simple way to let people get around this restriction is to allow some decorator or naming the function differently
+		// and for that function's results to simply be exposed as `ctx` or something similar
+		// that way, anything they can produce in their createFn that will behave properly from a type theoretical perspective is allowed
 		throw new Error("at this point we can only handle simple property assignments")
 	}
 }
