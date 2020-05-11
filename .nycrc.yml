@@ -1,0 +1,12 @@
+extension:
+- ".ts"
+include:
+- lib/templating/**.ts
+exclude:
+- coverage/**
+- node_modules/**
+- "**/*.d.ts"
+- "**/*.spec.ts"
+reporter:
+- html
+all: true

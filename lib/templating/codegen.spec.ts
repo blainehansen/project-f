@@ -465,6 +465,11 @@ describe('generateComponentInclusion', () => {
 			emptyDiv(),
 			SlotInsertion(undefined, undefined, [emptyH1()]),
 		])],
+		['duplicate slot insert', ComponentInclusion('Comp', [], [
+			emptyDiv(),
+			SlotInsertion('a', undefined, [emptyH1()]),
+			SlotInsertion('a', undefined, [emptySpan()]),
+		])],
 	]
 
 	for (const [description, inclusion] of throwCases)
@@ -509,12 +514,13 @@ describe('generateTag', () => {
 			___div0.appendChild(___div0fragment)
 		`],
 
-		['#i.one.two(disabled=true, thing.children().stuff[0]="whatever", :visible={ env.immutable })', Tag(
+		['#i.one.two(disabled=false, thing.children().stuff[0]="whatever", checked, :visible={ env.immutable })', Tag(
 			'div',
 			[Meta(false, false, 'i'), Meta(true, false, 'one'), Meta(true, false, 'two')],
 			[
-				Attribute('disabled', AttributeCode(true, 'true')),
+				Attribute('disabled', AttributeCode(true, 'false')),
 				Attribute('thing.children().stuff[0]', "whatever"),
+				Attribute('checked', undefined),
 				Attribute(':visible', AttributeCode(false, 'env.immutable')),
 			], [],
 		), `
@@ -523,8 +529,9 @@ describe('generateTag', () => {
 			const ___div0 = ___createElement(___parent, "div")
 			___div0.id = "i"
 			___div0.className = "one two"
-			___div0.disabled = true
+			___div0.disabled = false
 			___div0.thing.children().stuff[0] = "whatever"
+			___div0.checked = true
 			___effect(() => {
 			    ___div0.visible = env.immutable()
 			})
@@ -612,6 +619,7 @@ describe('generateTag', () => {
 
 	const throwCases: [string, Attribute][] = [
 		['handler event modifier with bare code', Attribute('@click|handler', AttributeCode(true, 'doit'))],
+		['duplicate modifier', Attribute('@click|handler|handler', AttributeCode(true, 'doit'))],
 		['any modifiers on empty attribute', Attribute('anything|whatever', undefined)],
 		['any modifiers on static attribute', Attribute('anything|whatever', "doesn't matter")],
 		['any modifiers on reactive attribute', Attribute(':anything|whatever', AttributeCode(true, 'doit'))],
@@ -647,6 +655,20 @@ describe('generateTag', () => {
 				[Attribute(attribute + '|invalidmodifier', AttributeCode(true, 'code'))], [],
 			), '0', ctx(), realParent, parent)).throw()
 		})
+
+	for (const [type, attribute] of [['static', 'a'], ['reactive', ':a'], ['sync', '!a']])
+		it(`duplicate binding against ${type}`, () => {
+			expect(() => generateTag(Tag(
+				'div', [],
+				[Attribute('a', AttributeCode(true, 'code')), Attribute(attribute, AttributeCode(true, 'w'))], [],
+			), '0', ctx(), realParent, parent)).throw()
+		})
+
+	it(`multiple id metas`, () => {
+		expect(() => generateTag(Tag(
+			'div', [Meta(false, false, 'whatever'), Meta(false, true, 'dude')], [], [],
+		), '0', ctx(), realParent, parent)).throw()
+	})
 })
 
 
@@ -1348,6 +1370,20 @@ describe('generateSwitchBlock', () => {
 			const context = ctx()
 			const nodes = generateSwitchBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
 			boilEqual(context.finalize(nodes), generated)
+		})
+
+	const throwCases: [string, SwitchBlock][] = [
+		['reactive assign, no default, empty case', SwitchBlock(':ty = type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchDefault(true, [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', []),
+			SwitchDefault(false, []),
+		])],
+	]
+
+	for (const [description, block] of throwCases)
+		it(description, () => {
+			expect(() => generateSwitchBlock(block, '0', false, ctx(), ...namedParentIdents('r', 'p'))).throw()
 		})
 })
 

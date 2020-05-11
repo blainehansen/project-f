@@ -930,16 +930,13 @@ function createFragmentConstructor(target: ts.Identifier) {
 }
 
 function createFieldAssignment(
-	target: string | ts.Expression,
+	target: ts.Expression,
 	field: string,
 	expression: ts.Expression,
 ) {
 	return ts.createExpressionStatement(
 		ts.createBinary(
-			ts.createPropertyAccess(
-				typeof target === 'string' ? ts.createIdentifier(target) : target,
-				field,
-			),
+			ts.createPropertyAccess(target, field),
 			ts.createToken(ts.SyntaxKind.FirstAssignment),
 			expression,
 		),
@@ -948,7 +945,7 @@ function createFieldAssignment(
 
 function createEffectBind(
 	ctx: CodegenContext,
-	target: string | ts.Expression,
+	target: ts.Expression,
 	field: string,
 	expression: ts.Expression,
 ) {
