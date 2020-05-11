@@ -63,8 +63,6 @@ const typedParentParams = () => t(
 	createParameter(parentText, ts.createTypeReferenceNode(ts.createIdentifier('Node'), undefined)),
 )
 
-// as an optimization for the call sites to avoid a bunch of empty object allocations,
-// you can pass a reference to the same global empty object for all the groups that haven't provided anything
 export function generateComponentDefinition({
 	props, syncs, events,
 	slots: slotMap, createFnNames, entities,
@@ -87,7 +85,7 @@ export function generateComponentDefinition({
 
 		const { name: slotName = 'def', argsExpression, fallback } = entity
 		const slotOptional = slotMap[slotName]
-		// TODO if you want to get really fancy, this function can essentially augment the type definition to include slots that are only defined in the template. The `ComponentDefinition` type can look something like this
+		// TODO if you want to get really fancy, this function can augment the type definition to include slots that are only defined in the template. The `ComponentDefinition` type can look something like this
 		// type ComponentDefinition<C, Backfill = {}> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C> & Slots<Backfill>]>
 		// and then this file can simply insert all extra slots found here
 		// this would make the job of scriptless components easier
@@ -612,6 +610,8 @@ export function generateComponentInclusion(
 		return ts.createPropertyAssignment(slotName, createArrowFunction(params, block))
 	})
 
+	// as an optimization for the call sites to avoid a bunch of empty object allocations,
+	// you can pass a reference to the same global empty object for all the groups that haven't provided anything
 	const propsArgs = props.length !== 0 ? ts.createObjectLiteral(props, false) : ctx.requireRuntime('EMPTYOBJECT')
 	const syncsArgs = syncs.length !== 0 ? ts.createObjectLiteral(syncs, false) : ctx.requireRuntime('EMPTYOBJECT')
 	const eventsArgs = events.length !== 0 ? ts.createObjectLiteral(events, false) : ctx.requireRuntime('EMPTYOBJECT')
