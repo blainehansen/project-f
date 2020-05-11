@@ -94,11 +94,24 @@ export class IfBlock {
 	) {}
 }
 
+// this would allow a more literal for block, giving them more control
+// export class ForBlock {
+// 	readonly type = 'ForBlock' as const
+// 	constructor(
+// 		readonly paramsExpression: string,
+// 		readonly listExpression: string,
+// 		readonly entities: NonEmpty<Entity>,
+// 		// readonly keyExpression: string | undefined,
+// 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
+// 	) {}
+// }
+
 export class EachBlock {
 	readonly type = 'EachBlock' as const
 	constructor(
 		readonly paramsExpression: string,
 		readonly listExpression: string,
+		readonly entities: NonEmpty<Entity>,
 		// readonly keyExpression: string | undefined,
 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
 	) {}
@@ -108,28 +121,21 @@ export class MatchBlock {
 	readonly type = 'MatchBlock' as const
 	constructor(
 		readonly matchExpression: string,
-		readonly patterns: MatchPattern[],
-		// if no default is provided, we can inject an exhaustiveness check
+		// readonly patterns: [string, Entity[]][],
+		readonly patterns: NonEmpty<[string, Entity[]]>,
 		readonly defaultPattern: Entity[] | undefined,
 	) {}
 }
-export class MatchPattern {
-	constructor(
-		readonly expression: string,
-		readonly entities: Entity[],
-	) {}
-}
 
-// in switch blocks, I'll have to track whether a default has occurred myself
-// and then inject an exhaustiveness check if none appears
 export class SwitchBlock {
 	readonly type = 'SwitchBlock' as const
 	constructor(
 		readonly switchExpression: string,
-		readonly cases: SwitchCase[],
+		readonly cases: NonEmpty<SwitchCase | SwitchDefault>,
 	) {}
 }
 export class SwitchCase {
+	readonly isDefault = false
 	constructor(
 		readonly isFallthrough: boolean,
 		readonly expression: string,
@@ -137,6 +143,7 @@ export class SwitchCase {
 	) {}
 }
 export class SwitchDefault {
+	readonly isDefault = true
 	constructor(
 		readonly isFallthrough: boolean,
 		readonly entities: Entity[],

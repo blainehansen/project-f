@@ -7,13 +7,13 @@ import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
 	Entity, Directive,
 	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
-	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
+	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast.spec'
 import {
 	BindingType, LivenessType, printNodes, printNodesArray, CodegenContext,
 	generateComponentDefinition, generateTag, generateText, generateComponentInclusion,
-	generateIfBlock, generateTemplateDefinition, generateTemplateInclusion,
+	generateIfBlock, generateEachBlock, generateMatchBlock, generateSwitchBlock, generateTemplateDefinition, generateTemplateInclusion,
 } from './codegen'
 
 function boilEqual(actual: string, expected: string) {
@@ -26,7 +26,7 @@ function ctx() {
 
 const realParent = ts.createIdentifier('___real')
 const parent = ts.createIdentifier('___parent')
-const namedParentIdents = (real: string, parent: string) => t(ts.createIdentifier(real), ts.createIdentifier(parent))
+const namedParentIdents = (real: string, parent: string) => t(ts.createIdentifier(`___${real}`), ts.createIdentifier(`___${parent}`))
 
 const empty = (tagName: string) => Tag(tagName, [], [], [])
 const emptyDiv = () => empty('div')
@@ -753,28 +753,31 @@ describe('generateIfBlock', () => {
 	const cases: [string, IfBlock, string][] = [
 		['nonreactive single if', IfBlock('checked', [emptyDiv()], [], undefined), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 		`],
 
 		['nonreactive if, else', IfBlock('checked', [emptyDiv()], [], [emptySpan()]), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 			else {
-				___createElement(___parent, "span")
+				___createElement(___p, "span")
 			}
 		`],
 
 		['nonreactive if, else if', IfBlock('checked', [emptyDiv()], [['other', [emptySpan()]]], undefined), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 			else if (other) {
-				___createElement(___parent, "span")
+				___createElement(___p, "span")
 			}
 		`],
 
@@ -784,14 +787,15 @@ describe('generateIfBlock', () => {
 			undefined,
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 			else if (other) {
-				___createElement(___parent, "span")
+				___createElement(___p, "span")
 			}
 			else if (dude) {
-				___createElement(___parent, "h1")
+				___createElement(___p, "h1")
 			}
 		`],
 
@@ -801,14 +805,15 @@ describe('generateIfBlock', () => {
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 			else if (other) {
-				___createElement(___parent, "span")
+				___createElement(___p, "span")
 			}
 			else {
-				___createElement(___parent, "strong")
+				___createElement(___p, "strong")
 			}
 		`],
 
@@ -818,38 +823,533 @@ describe('generateIfBlock', () => {
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
+
 			if (checked) {
-				___createElement(___parent, "div")
+				___createElement(___p, "div")
 			}
 			else if (other) {
-				___createElement(___parent, "span")
+				___createElement(___p, "span")
 			}
 			else if (dude) {
-				___createElement(___parent, "h1")
+				___createElement(___p, "h1")
 			}
 			else {
-				___createElement(___parent, "strong")
+				___createElement(___p, "strong")
 			}
 		`],
 
-		// ['reactive nonempty single if', IfBlock(true, 'checked', [], [], [emptyDiv()]), `
-		// 	import { rangeEffect as ___rangeEffect, createElement as ___createElement } from "project-f/runtime"
-		// 	___rangeEffect((___real, ___parent) => {
-		// 		if (checked()) {
-		// 			___createElement(___parent, "div")
-		// 		}
-		// 	}, ___real, ___parent)
-		// `],
+
+		['reactive single if', IfBlock(':checked', [emptyDiv()], [], undefined), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked()) {
+					___createElement(___parent, "div")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive if, else', IfBlock(':checked', [emptyDiv()], [], [emptySpan()]), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked()) {
+					___createElement(___parent, "div")
+				}
+				else {
+					___createElement(___parent, "span")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive if, inert else if', IfBlock(':checked', [emptyDiv()], [['other', [emptySpan()]]], undefined), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked()) {
+					___createElement(___parent, "div")
+				}
+				else if (other) {
+					___createElement(___parent, "span")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive inert if, non-inert else if', IfBlock('checked', [emptyDiv()], [[':other', [emptySpan()]]], undefined), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked) {
+					___createElement(___parent, "div")
+				}
+				else if (other()) {
+					___createElement(___parent, "span")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive if, inert else if else if', IfBlock(
+			':checked', [emptyDiv()],
+			[['other', [emptySpan()]], [':dude', [emptyH1()]]],
+			undefined,
+		), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked()) {
+					___createElement(___parent, "div")
+				}
+				else if (other) {
+					___createElement(___parent, "span")
+				}
+				else if (dude()) {
+					___createElement(___parent, "h1")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive if, else if else', IfBlock(
+			'checked', [emptyDiv()],
+			[[':other', [emptySpan()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked) {
+					___createElement(___parent, "div")
+				}
+				else if (other()) {
+					___createElement(___parent, "span")
+				}
+				else {
+					___createElement(___parent, "strong")
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive if, else if else if else', IfBlock(
+			':checked', [emptyDiv()],
+			[[':other', [emptySpan()]], [':dude', [emptyH1()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				if (checked()) {
+					___createElement(___parent, "div")
+				}
+				else if (other()) {
+					___createElement(___parent, "span")
+				}
+				else if (dude()) {
+					___createElement(___parent, "h1")
+				}
+				else {
+					___createElement(___parent, "strong")
+				}
+			}, ___r, ___p)
+		`],
 	]
 
-	// TODO can add plenty of cases to figure out loneness
+	// TODO need cases to understand the lone optimization
 	for (const [description, block, generated] of cases)
 		it(description, () => {
 			const context = ctx()
-			generateIfBlock(block, '0', false, context, realParent, parent)
+			const nodes = generateIfBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			boilEqual(context.finalize(nodes), generated)
 		})
 })
 
+
+describe('generateEachBlock', () => {
+	const cases: [string, EachBlock, string][] = [
+		['nonreactive', EachBlock('item', 'list', [TextSection(TextItem(true, 'item'))]), `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+
+			for (const item of list) {
+				___createTextNode(___p, item)
+			}
+		`],
+
+		['reactive', EachBlock('item', ':list', [TextSection(TextItem(true, 'item'))]), `
+			import { createTextNode as ___createTextNode, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				for (const item of list()) {
+					___createTextNode(___parent, item)
+				}
+			}, ___r, ___p)
+		`],
+	]
+
+	// TODO need cases for lone
+	for (const [description, block, generated] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateEachBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			boilEqual(context.finalize(nodes), generated)
+		})
+})
+
+
+describe('generateMatchBlock', () => {
+	const cases: [string, MatchBlock, string][] = [
+		['nonreactive, no default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: ___exhaustive(type)
+			}
+		`],
+
+		['nonreactive, no default, empty case', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: { break }
+				default: ___exhaustive(type)
+			}
+		`],
+
+		['nonreactive, empty default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], []), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: { break }
+			}
+		`],
+
+		['nonreactive, nonempty default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], [emptyH1()]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: {
+					___createElement(___p, "h1")
+					break
+				}
+			}
+		`],
+
+
+		['reactive, no default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+						break
+					}
+					default: ___exhaustive(type())
+				}
+			}, ___r, ___p)
+		`],
+
+		// in both these reactive cases with no default
+		// in real usage these wouldn't type check, but that's fine since this isn't correct
+		// they need to assign their switch expression to something first
+		['reactive, no default, empty case', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(type())
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive, empty default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], []), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+						break
+					}
+					default: { break }
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive, nonempty default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], [emptyH1()]), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+						break
+					}
+					default: {
+						___createElement(___parent, "h1")
+						break
+					}
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive assign, no default, empty case', MatchBlock(':ty = type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				const ty = type()
+				switch (ty) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(ty)
+				}
+			}, ___r, ___p)
+		`],
+	]
+
+	// TODO need cases for lone
+	for (const [description, block, generated] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateMatchBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			boilEqual(context.finalize(nodes), generated)
+		})
+})
+
+
+describe('generateSwitchBlock', () => {
+	const cases: [string, SwitchBlock, string][] = [
+		['nonreactive, one fallthrough, no default', SwitchBlock('type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: ___exhaustive(type)
+			}
+		`],
+
+		['nonreactive, no default, empty case', SwitchBlock('type', [
+			SwitchCase(false, '"a"', [emptyDiv()]),
+			SwitchCase(true, 'Something.whatever', []),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {}
+				default: ___exhaustive(type)
+			}
+		`],
+
+		['nonreactive, empty default', SwitchBlock('type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+			SwitchDefault(true, []),
+		]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: {}
+			}
+		`],
+
+		['nonreactive, nonempty default', SwitchBlock('type', [
+			SwitchCase(false, '"a"', [emptyDiv()]),
+			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+			SwitchDefault(false, [emptyH1()]),
+		]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+				}
+				default: {
+					___createElement(___p, "h1")
+					break
+				}
+			}
+		`],
+
+
+		['reactive, no default', SwitchBlock(':type', [
+			SwitchCase(false, '"a"', [emptyDiv()]),
+			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+					}
+					default: ___exhaustive(type())
+				}
+			}, ___r, ___p)
+		`],
+
+		// in both these reactive cases with no default
+		// in real usage these wouldn't type check, but that's fine since this isn't correct
+		// they need to assign their switch expression to something first
+		['reactive, no default, empty case', SwitchBlock(':type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', []),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(type())
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive, empty default', SwitchBlock(':type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+			SwitchDefault(false, []),
+		]), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+						break
+					}
+					default: { break }
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive, nonempty default', SwitchBlock(':type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+			SwitchDefault(true, [emptyH1()]),
+		]), `
+			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				switch (type()) {
+					case "a": {
+						___createElement(___parent, "div")
+					}
+					case Something.whatever: {
+						___createElement(___parent, "span")
+					}
+					default: {
+						___createElement(___parent, "h1")
+					}
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive assign, no default, empty case', SwitchBlock(':ty = type', [
+			SwitchCase(true, '"a"', [emptyDiv()]),
+			SwitchCase(false, 'Something.whatever', []),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				const ty = type()
+				switch (ty) {
+					case "a": {
+						___createElement(___parent, "div")
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(ty)
+				}
+			}, ___r, ___p)
+		`],
+	]
+
+	// TODO need cases for lone
+	for (const [description, block, generated] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateSwitchBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			boilEqual(context.finalize(nodes), generated)
+		})
+})
 
 
 describe('generateTemplateDefinition', () => {

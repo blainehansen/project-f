@@ -15,6 +15,7 @@ export const noop = () => {}
 export const alwaysTrue = () => true
 export const alwaysFalse = () => false
 export const eq = <T>(left: T, right: T) => left === right
+export function exhaustive(v: never) {}
 
 export type Fn = () => unknown
 export type Handle = () => void

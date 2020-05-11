@@ -2,7 +2,6 @@ import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
 
 import { statefulEffect } from '../reactivity'
 
-// function __exhaustive(v: never) {}
 
 export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
 	fn(node)

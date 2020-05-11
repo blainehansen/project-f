@@ -6,7 +6,7 @@ import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
 	Entity, Directive,
 	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
-	ComponentInclusion, IfBlock, EachBlock, MatchBlock, MatchPattern, SwitchBlock, SwitchCase, SwitchDefault,
+	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 
@@ -184,14 +184,11 @@ export function generateEntity(
 	case 'IfBlock':
 		return generateIfBlock(entity, offset, isRealLone, ctx, realParent, parent)
 	case 'EachBlock':
-		// return generateEachBlock(entity, offset, isRealLone, parent)
-		throw new Error('unimplemented')
+		return generateEachBlock(entity, offset, isRealLone, ctx, realParent, parent)
 	case 'MatchBlock':
-		// return generateMatchBlock(entity, offset, isRealLone, parent)
-		throw new Error('unimplemented')
+		return generateMatchBlock(entity, offset, isRealLone, ctx, realParent, parent)
 	case 'SwitchBlock':
-		// return generateSwitchBlock(entity, offset, isRealLone, parent)
-		throw new Error('unimplemented')
+		return generateSwitchBlock(entity, offset, isRealLone, ctx, realParent, parent)
 
 	case 'SlotUsage':
 		throw new Error("@slot isn't valid in this context")
@@ -627,7 +624,28 @@ export function generateComponentInclusion(
 }
 
 
-// function createIf(expression: Expression, thenStatement: Statement, elseStatement?: Statement): IfStatement;
+function processExpressionReactive(expression: string): [string, boolean] {
+	/*return expression.startsWith('::') ? [expression.slice(2), true]
+	:*/ return expression.startsWith(':') ? [`${expression.slice(1)}()`, true]
+	: [expression, false]
+}
+
+function generateAreaEffect(
+	statements: ts.Statement[], isRealLone: boolean, ctx: CodegenContext,
+	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
+) {
+	const closure = createArrowFunction(untypedParentParams(), ts.createBlock(statements, true))
+	// TODO it seems the only way we can safely use `isRealLone` to optimize anything
+	// is by simply using `contentEffect` ourselves if our parent has given the all clear
+	// all the sub entities might be able to piggyback from that?
+	return [ts.createExpressionStatement(
+		/*isRealLone
+			? createCall(ctx.requireRuntime('contentEffect'), [closure, aboveRealParent])
+			:*/ createCall(ctx.requireRuntime('rangeEffect'), [closure, aboveRealParent, aboveParent])
+	)]
+}
+
+
 function createIf(
 	expression: string, entities: NonEmpty<Entity>, elseBranch: ts.Statement | undefined,
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
@@ -651,16 +669,10 @@ export function generateIfBlock(
 	// - we can't know `reactive` until we've examined all the expressions and done a "strongest" computation
 	// - that means that if the first one isn't reactive, you have to iterate over them
 
-	// function processExpressionReactive(expression: string) {
-	// 	return expression.startsWith('::') ? [expression.slice(2), true]
-	// 	: expression.startsWith(':') ? [expression.slice(1), true]
-	// 	: [expression, false]
-	// }
-
-	// const [usedExpression, reactive] =
-	// 	expression.startsWith('::') ? [expression.slice(2), true]
-	// 	: expression.startsWith(':') ? [expression.slice(1), true]
-	// 	: [expression, elseIfBranches.some(([expression, ]) => expression.startsWith(':'))]
+	const [usedExpression, reactive] =
+		/*expression.startsWith('::') ? [expression.slice(2), true]
+		:*/ expression.startsWith(':') ? processExpressionReactive(expression)
+		: [expression, elseIfBranches.some(([expression, ]) => expression.startsWith(':'))]
 
 	const [realParent, parent] = reactive
 		? resetParentIdents()
@@ -670,43 +682,146 @@ export function generateIfBlock(
 	// this way we avoid needing any pesky recursion to build up the recursive ts.IfStatement
 	let currentElse: ts.Statement | undefined = elseBranch === undefined
 		? undefined
+		// TODO if an IfBlock is truly lone, could we determine that its children are as well?
+		// it seems that only if each section is also lone could we use anything useful
+		// otherwise the best we could do is just use contentEffect
 		: ts.createBlock(generateEntities(elseBranch, offset, false, ctx, realParent, parent), true)
 
 	for (let index = elseIfBranches.length - 1; index >= 0; index--) {
 		const [expression, entities] = elseIfBranches[index]
-		currentElse = createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)
+		const [usedExpression, ] = processExpressionReactive(expression)
+		currentElse = createIf(usedExpression, entities, currentElse, offset, false, ctx, realParent, parent)
 	}
 
-	const ifStatement = createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)
-	if (!reactive)
-		return [ifStatement]
-
-	const closure = createArrowFunction(untypedParentParams(), ts.createBlock([ifStatement], true))
-	// TODO it seems the only way we can safely use `isRealLone` to optimize anything
-	// is by simply using `contentEffect` ourselves if our parent has given the all clear
-	// all the sub entities might be able to piggyback from that?
-	return [ts.createExpressionStatement(
-		/*isRealLone
-			? createCall(ctx.requireRuntime('contentEffect'), [closure, aboveRealParent])
-			:*/ createCall(ctx.requireRuntime('rangeEffect'), [closure, aboveRealParent, aboveParent])
-	)]
+	const statements = [createIf(usedExpression, entities, currentElse, offset, false, ctx, realParent, parent)]
+	return !reactive
+		? statements
+		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)
 }
 
-// function generateEachBlock(e: EachBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
-// }
-// function generateMatchBlock(e: MatchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+export function generateEachBlock(
+	{ paramsExpression, listExpression, entities }: EachBlock,
+	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
+): ts.Statement[] {
+	const [usedListExpression, reactive] = processExpressionReactive(listExpression)
 
-// }
-// function generateSwitchBlock(e: SwitchBlock, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+	const [realParent, parent] = reactive
+		? resetParentIdents()
+		: [aboveRealParent, aboveParent]
 
-// }
-// export function generateSlotDefinition(e: SlotUsage, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
+	const statements = [ts.createForOf(
+		undefined, ts.createVariableDeclarationList(
+			[ts.createVariableDeclaration(createRawCodeSegment(paramsExpression), undefined, undefined)],
+			ts.NodeFlags.Const,
+		),
+		createRawCodeSegment(usedListExpression),
+		// all the children of an each loop are by definition not robustly safe to call lone
+		ts.createBlock(generateEntities(entities, offset, false, ctx, realParent, parent), true)
+	)]
+	return !reactive
+		? statements
+		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)
+}
 
-// }
-// export function generateSlotInsertion(e: SlotInsertion, offset: string, isRealLone: boolean, ctx: CodegenContext, parent: ts.Identifier) {
 
-// }
+function createBreakBlock(...args: Parameters<typeof generateEntities>) {
+	const statements = generateEntities(...args)
+	statements.push(ts.createBreak(undefined))
+	return ts.createBlock(statements, true)
+}
+
+function processExpressionReactiveAssignable(expression: string) {
+	const [firstSegment, ...restSegments] = expression.startsWith(':')
+		? expression.slice(1).split(/ += +/)
+		: [expression]
+	const [statements, [usedExpression, reactive]] = restSegments.length === 0
+		? [[] as ts.Statement[], processExpressionReactive(expression)]
+		: [
+			[createConst(firstSegment, createRawCodeSegment(restSegments[0] + '()'))],
+			[firstSegment, true],
+		]
+
+	const codeExpression = createRawCodeSegment(usedExpression)
+	return [statements, codeExpression, reactive] as [typeof statements, typeof codeExpression, typeof reactive]
+}
+
+export function generateMatchBlock(
+	{ matchExpression, patterns, defaultPattern }: MatchBlock,
+	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
+): ts.Statement[] {
+	const [statements, codeMatchExpression, reactive] = processExpressionReactiveAssignable(matchExpression)
+	const [realParent, parent] = reactive
+		? resetParentIdents()
+		: [aboveRealParent, aboveParent]
+
+	const blocks = patterns.map(([expression, entities], index) => {
+		const block = createBreakBlock(entities, nextOffset(offset, index), false, ctx, realParent, parent)
+		return ts.createCaseClause(createRawCodeSegment(expression), [block]) as ts.CaseOrDefaultClause
+	})
+	const defaultBlock = ts.createDefaultClause([
+		defaultPattern === undefined
+			? ts.createExpressionStatement(
+				createCall(ctx.requireRuntime('exhaustive'), [codeMatchExpression]),
+			)
+			: createBreakBlock(defaultPattern, nextOffset(offset, patterns.length), false, ctx, realParent, parent)
+	])
+	blocks.push(defaultBlock)
+
+	statements.push(ts.createSwitch(codeMatchExpression, ts.createCaseBlock(blocks)))
+	return !reactive
+		? statements
+		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)
+}
+
+
+export function generateSwitchBlock(
+	{ switchExpression, cases }: SwitchBlock,
+	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
+) {
+	const [statements, codeSwitchExpression, reactive] = processExpressionReactiveAssignable(switchExpression)
+	const [realParent, parent] = reactive
+		? resetParentIdents()
+		: [aboveRealParent, aboveParent]
+
+	const blocks: ts.CaseOrDefaultClause[] = []
+	let seenDefault = false
+	for (const [index, switchCase] of cases.entries()) {
+		const { isFallthrough, entities } = switchCase
+
+		const entitiesStatements = generateEntities(entities, nextOffset(offset, index), false, ctx, realParent, parent)
+		if (!isFallthrough)
+			entitiesStatements.push(ts.createBreak(undefined))
+		const block = ts.createBlock(entitiesStatements, true)
+
+		const [isDefault, clause] = switchCase.isDefault
+			? [true, ts.createDefaultClause([block])]
+			: [false, ts.createCaseClause(createRawCodeSegment(switchCase.expression), [block])]
+
+		if (isDefault) {
+			if (seenDefault) throw new Error("duplicate default cases")
+			seenDefault = true
+		}
+
+		blocks.push(clause)
+	}
+
+	if (!seenDefault)
+		blocks.push(ts.createDefaultClause([
+			ts.createExpressionStatement(
+				createCall(ctx.requireRuntime('exhaustive'), [codeSwitchExpression]),
+			),
+		]))
+
+	statements.push(ts.createSwitch(codeSwitchExpression, ts.createCaseBlock(blocks)))
+	return !reactive
+		? statements
+		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)
+}
+
 
 export function generateTemplateDefinition(
 	{ name, paramsExpression, entities }: TemplateDefinition,

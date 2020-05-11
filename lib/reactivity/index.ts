@@ -219,6 +219,13 @@ class StatelessComputation<T> extends Computation<T> {
 	}
 }
 
+// class DirectComputation<T> extends Computation<T> {
+// 	constructor(
+// 		STATE: STATE,
+// 	) {
+// 		super()
+// 	}
+// }
 
 class Batch {
 	protected readonly signals: Signal[] = []
@@ -394,6 +401,22 @@ export function statefulEffect<T>(
 
 	return () => { computation.unregister() }
 }
+// export function reactiveBind<T, K extends keyof T>(
+// 	item: T,
+// 	property: K,
+// 	immutable: Immutable<T[K]>,
+// ) {
+// 	if (!(immutable instanceof ReactiveImmutable)) {
+// 		item[property] = immutable()
+// 		return
+// 	}
+
+// 	// this would bind to the current STATE.owner
+// 	// so it would be properly deactivated when that owner was destroyed
+// 	createDirectComputation(immutable.signal, value => {
+// 		item[property] = value
+// 	})
+// }
 
 export function computed<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> {
 	const computation = new StatelessComputation(fn, noop, STATE, undefined)

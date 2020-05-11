@@ -48,10 +48,6 @@ export type MatchBlock = ast.MatchBlock
 export function MatchBlock(...params: ConstructorParameters<typeof ast.MatchBlock>): ast.MatchBlock {
 	return new ast.MatchBlock(...params)
 }
-export type MatchPattern = ast.MatchPattern
-export function MatchPattern(...params: ConstructorParameters<typeof ast.MatchPattern>): ast.MatchPattern {
-	return new ast.MatchPattern(...params)
-}
 export type SwitchBlock = ast.SwitchBlock
 export function SwitchBlock(...params: ConstructorParameters<typeof ast.SwitchBlock>): ast.SwitchBlock {
 	return new ast.SwitchBlock(...params)
