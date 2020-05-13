@@ -6,7 +6,7 @@ export class ComponentDefinition {
 		readonly syncs: string[],
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
-		readonly createFnNames: string[],
+		readonly createFn: string[] | undefined,
 		readonly entities: NonEmpty<Entity>,
 	) {}
 }

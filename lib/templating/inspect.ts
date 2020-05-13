@@ -1,24 +1,51 @@
 import ts = require('typescript')
+import { Dict } from '../utils'
 import { ComponentDefinition } from './ast'
+import { generateComponentDefinition } from './codegen'
 
-export function inspector(file: ts.SourceFile): ComponentDefinition | undefined {
-	return file.forEachChild(visitor)
+
+export function processFile(source: string) {
+	const { template, script, style, others } = cutSource(source)
+	const sourceFile = ts.createSourceFile('', script, ts.ScriptTarget.Latest, true)
+	const { props, syncs, events, slots, createFn } = inspect(sourceFile)
+
+	// TODO here's where template parsing happens
+	// const entities = [] as unknown as ConstructorParameters<typeof ComponentDefinition>[5]
+	// TODO what to do with these? style, others
+
+	const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities)
+	return generateComponentDefinition(definition)
 }
 
-function visitor(node: ts.Node): ComponentDefinition | undefined {
-	if (ts.isTypeAliasDeclaration(node)) {
-		if (node.name.text !== 'Component') return undefined
-		processComponentType(node)
-	}
-	if (ts.isFunctionDeclaration(node)) {
-		if (!node.name || node.name.text !== 'create') return undefined
-		processCreateFn(node)
+
+const CTXFN: unique symbol = Symbol()
+type CTXFN = typeof CTXFN
+export function inspect(file: ts.SourceFile) {
+	let foundCreateFn = undefined as string[] | CTXFN | undefined
+	let foundNames = undefined as ReturnType<typeof processComponentType> | undefined
+
+	function visitor(node: ts.Node): undefined {
+		if (ts.isFunctionDeclaration(node)) {
+			if (!node.name || !['create', 'createCtx'].includes(node.name.text)) return undefined
+			if (foundCreateFn !== undefined) throw new Error("you can't have a create function and a createCtx function")
+			foundCreateFn = node.name.text === 'createCtx' ? CTXFN : processCreateFn(node)
+		}
+		if (ts.isTypeAliasDeclaration(node)) {
+			if (node.name.text !== 'Component') return undefined
+			// not going to bother getting mad about foundNames !== undefined, typescript will give them an error soon
+			foundNames = processComponentType(node)
+		}
+		return undefined
 	}
 
-	// createFnNames
-	// entities
-	// return new ComponentDefinition()
-	return undefined
+	file.forEachChild(visitor)
+
+	if (foundCreateFn === undefined || foundNames === undefined)
+		throw new Error("mad")
+
+	const createFn = foundCreateFn === CTXFN ? undefined : foundCreateFn
+	const { bindings: { props, syncs, events }, slots } = foundNames
+	return { props, syncs, events, slots, createFn }
 }
 
 
@@ -28,6 +55,8 @@ function processComponentType(componentType: ts.TypeAliasDeclaration) {
 	const definition = componentType.type
 	if (!ts.isTypeLiteralNode(definition)) throw new Error("your Component type must be an object literal type")
 
+	const bindings = { props: [] as string[], events: [] as string[], syncs: [] as string[] }
+	const slots = {} as Dict<boolean>
 	for (const definitionMember of definition.members) {
 		const [signature, variety, optional] = processMember(definitionMember)
 		if (optional)
@@ -38,20 +67,18 @@ function processComponentType(componentType: ts.TypeAliasDeclaration) {
 
 		switch (variety) {
 			case 'props': case 'events': case 'syncs':
-				const bindings = signatureType
-				for (const bindingMember of bindings.members) {
+				for (const bindingMember of signatureType.members) {
 					const [, binding, optional] = processMember(bindingMember)
 					if (optional)
 						throw new Error("doesn't make sense here")
-					console.log(`${variety}:`, binding)
+					bindings[variety].push(binding)
 				}
 				break
 
 			case 'slots':
-				const syncs = signatureType
-				for (const syncsMember of syncs.members) {
+				for (const syncsMember of signatureType.members) {
 					const [, sync, optional] = processMember(syncsMember)
-					console.log('slot:', sync, optional)
+					slots[sync] = optional
 				}
 				break
 
@@ -59,15 +86,17 @@ function processComponentType(componentType: ts.TypeAliasDeclaration) {
 				throw new Error("doesn't make sense here")
 		}
 	}
+
+	return { bindings, slots }
 }
 
-function processCreateFn(createFn: ts.FunctionDeclaration) {
+function processCreateFn(createFn: ts.FunctionDeclaration): string[] {
 	if (!isNodeExported(createFn)) throw new Error("your create function isn't exported")
 
 	const block = createFn.body
 	if (!block) throw new Error("undefined FunctionDeclaration block??")
 	// in the future we should emit a warning that they don't have to have a create function if there's nothing for it to do
-	if (block.statements.length === 0) return
+	if (block.statements.length === 0) return []
 
 	const lastStatement = block.statements[block.statements.length - 1]
 	if (!lastStatement || !ts.isReturnStatement(lastStatement))
@@ -76,30 +105,26 @@ function processCreateFn(createFn: ts.FunctionDeclaration) {
 	if (!returnExpression || !ts.isObjectLiteralExpression(returnExpression))
 		throw new Error("the return value of a create function has to be an object literal")
 
+	const returnNames = [] as string[]
 	for (const property of returnExpression.properties) {
 		if (ts.isShorthandPropertyAssignment(property)) {
-			console.log('shorthand:', property.name.text)
+			returnNames.push(property.name.text)
 			continue
 		}
 		if (ts.isPropertyAssignment(property) || ts.isMethodDeclaration(property)) {
 			if (!ts.isIdentifier(property.name))
 				throw new Error("at this point we can only handle simple property assignments")
-			console.log('property:', property.name.text)
+			returnNames.push(property.name.text)
 			continue
 		}
 		if (ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property)) {
 			throw new Error("get or set accessors don't really make any sense in a component create function")
 		}
 
-		// TODO it's possible to do anything with a value known at compile time
-		// so computed or spreads with some known values could be done
-		// https://learning-notes.mistermicheels.com/javascript/typescript/compiler-api/#getting-type-information
-
-		// a simple way to let people get around this restriction is to allow some decorator or naming the function differently
-		// and for that function's results to simply be exposed as `ctx` or something similar
-		// that way, anything they can produce in their createFn that will behave properly from a type theoretical perspective is allowed
 		throw new Error("at this point we can only handle simple property assignments")
 	}
+
+	return returnNames
 }
 
 function processMember(member: ts.TypeElement): [ts.PropertySignature, string, boolean] {
@@ -123,27 +148,59 @@ function isNodeExported(node: ts.Node): boolean {
 }
 
 
-const source = `
-export type Component = {
-	props: {
-		a: number, b: Something<whatever>,
-	},
-	events: {
-		msg: [string, boolean],
-	},
-	syncs: {
-		checked: boolean,
-	},
-	slots: {
-		s: whatever,
-		y?: anything,
-	},
-}
-export function create() {
-	const a = d()
-	return { a, e: 'a', s() {} }
-}
-`
+const sectionMarker = /^#! (\w+)(?: lang="(\w+)")?[ \t]*\n?/m
+type Section = { name: string, lang: string, text: string }
+function cutSource(rawSource: string) {
+	let scriptSection = undefined as string | undefined
+	let styleSection = undefined as Section | undefined
+	let templateSection = undefined as Section | undefined
+	const sections = {} as Dict<Section>
 
-const sourceFile = ts.createSourceFile('blah', source, ts.ScriptTarget.Latest, /*setParentNodes */ true)
-inspector(sourceFile)
+	function placeSection(name: string, lang: string | undefined, text: string) {
+		switch (name) {
+			case 'script':
+				if (lang !== undefined) throw new Error("script section must be in typescript")
+				if (scriptSection !== undefined) throw new Error("duplicate scriptSection")
+				scriptSection = text
+				break
+			case 'style':
+				if (styleSection !== undefined) throw new Error("duplicate styleSection")
+				styleSection = { name, lang: lang || 'css', text }
+				break
+			case 'template':
+				if (templateSection !== undefined) throw new Error("duplicate templateSection")
+				templateSection = { name, lang: lang || 'wolf', text }
+				break
+			default:
+				if (lang === undefined) throw new Error("sections other than the script and template must specify a lang")
+				if (sections[name] !== undefined) throw new Error(`duplicate section ${name}`)
+				sections[name] = { name, lang, text }
+		}
+	}
+
+	let source = rawSource
+	let last = undefined as { name: string, lang: string | undefined } | undefined
+	let result
+	while (result = source.match(sectionMarker)) {
+		const [entireMatch, sectionName, lang = undefined] = result
+		const index = result.index!
+		const sectionIndex = index + entireMatch.length
+
+		if (last !== undefined)
+			placeSection(last.name, last.lang, source.slice(0, index))
+
+		source = source.slice(sectionIndex)
+		last = { name: sectionName, lang }
+	}
+
+	if (last === undefined) throw new Error("no sections?")
+	placeSection(last.name, last.lang, source)
+
+	if (templateSection === undefined) throw new Error("component files have to have a template")
+	return {
+		template: templateSection,
+		script: scriptSection || '',
+		style: styleSection || '',
+		others: Object.values(sections),
+	}
+}

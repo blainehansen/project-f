@@ -68,6 +68,17 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
+		['createFn signaling to use ctx instead', ComponentDefinition([], [], [], {}, undefined, [emptyDiv()]), `
+			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+
+			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
+				const ctx = create(({} as ___Args<Component>))
+				___createElement(___parent, "div")
+			}
+			export default ___Component
+		`],
+
+
 		['both component args and createFn', ComponentDefinition(
 			['p1', 'p2'], ['y1', 'y2'], ['e1', 'e2'], { s1: false, s2: false }, ['a', 'b'], [emptyDiv()],
 		), `

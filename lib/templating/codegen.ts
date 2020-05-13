@@ -65,12 +65,10 @@ const typedParentParams = () => t(
 
 export function generateComponentDefinition({
 	props, syncs, events,
-	slots: slotMap, createFnNames, entities,
+	slots: slotMap, createFn, entities,
 }: ComponentDefinition) {
 	const ctx = new CodegenContext()
-
 	const [realParentIdent, parentIdent] = resetParentIdents()
-
 
 	const entitiesStatements = [] as ts.Statement[]
 	for (let index = 0; index < entities.length; index++) {
@@ -116,8 +114,9 @@ export function generateComponentDefinition({
 
 
 	const args = props.concat(syncs).concat(events)
-	const createFnInvocation = createFnNames.length === 0 ? [] : [createConst(
-		createFnNames,
+	const createFnTarget = createFn === undefined ? 'ctx' : createFn
+	const createFnInvocation = createFn && createFn.length === 0 ? [] : [createConst(
+		createFnTarget,
 		createCall('create', [ts.createAsExpression(
 			ts.createObjectLiteral(
 				args.map(arg => {
