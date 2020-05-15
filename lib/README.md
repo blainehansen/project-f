@@ -65,7 +65,7 @@ div(id={ 'list-' + id })
 
 # Node Functions
 
-Sometimes we need to act on some dom node directly. The `&receive` attribute allows us to do that.
+Sometimes we need to act on some dom node directly. The `(fn)` attribute allows us to do that.
 
 In this example, let's say `makeRed` is a function in scope that looks like this:
 
@@ -82,7 +82,7 @@ Then we can set `makeRed` to receive our paragraph:
 ```wolf
 p((fn)=makeRed)
 
-//- we can pass any expression to fn
+//- we can pass any expression to (fn)
 p((fn)={ p => { p.style.color = 'red' } })
 ```
 
@@ -108,8 +108,8 @@ TODO Still figuring this out. Dynamic metas can do some of this lifting, but ult
 @else: h1 Oh no 😢
 
 @if (type === 'A'): div A
-@else-if (type === 'B'): div B
-@else-if (type === 'C'): div C
+@elseif (type === 'B'): div B
+@elseif (type === 'C'): div C
 @else: Not A/B/C
 ```
 
@@ -244,7 +244,7 @@ Sometimes we find ourself in a situation where some little piece of our template
 h1 Hello World!
 
 //- excitedGreeting is the name of this template
-@template (excitedGreeting)
+@template (&excitedGreeting)
   strong Wow how are you doing!!!!
   strong 🥰 🥰 🥰 🥰 🥰
 

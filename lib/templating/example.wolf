@@ -1,0 +1,41 @@
+//- allows for arbitrary declarations of at-rules
+//- @sometext sdfskfjsl
+//- meaning that someone can extend the language
+//- when someone sets up their compiler, they can pass a dictionary
+//- of at-rules to functions that receive the raw string that followed
+//- the at-rule, and all the children that may have come underneath it
+
+//- the main differences that sets this language apart from pug are:
+//- allows bare attributes enclosed by brackets or a single identifier
+p(href=variable)
+div(data-thing={ arbitrary.expression(stuff) }, ...ident, ...{ complex.expression() })
+	//- the above spreads have to be objects
+	| automatically supports *[smartmark] style [inline elements](https://example.com)
+	//- which can always be escaped
+	| automatically supports \*[smartmark] style \[inline elements](https://example.com)
+	|
+		plain text pipes work for whole indented blocks
+		here's some more stuff
+
+@if ()
+
+//- plus directives are also fully pluggable
+//- some people will use them for template inclusion, others for subcomponents
+//- we ultimately don't care
+//- prefixing with a plus allows things to be named arbitrarily
++MyComponent
+
+//- tags can contain any character that isn't whitespace or wrapping characters () {} []
+div(*4%#$="sdf")
+
+//- //- contains a base "tag" that embeds indented smartmark
+//- ||
+//- 	this is all just smartmark
+
+//- allows for computed classes
+//- these idents must be strings, arrays of strings, or dictionaries of strings to booleans
+.{ ident }
+
+//- uses doubles for interpolation
+p {{ variable }}'s Pug source code!
+p {{! raw !}} since the contents of interpolations are merely handed off to someone else, it's easy for that someone else to check some pattern to decide how to handle them

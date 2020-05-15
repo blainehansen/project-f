@@ -148,7 +148,7 @@ function isNodeExported(node: ts.Node): boolean {
 }
 
 
-const sectionMarker = /^#! (\w+)(?: lang="(\w+)")?[ \t]*\n?/m
+const sectionMarker = /^#! (\S+)(?: lang="(\S+)")?[ \t]*\n?/m
 type Section = { name: string, lang: string, text: string }
 function cutSource(rawSource: string) {
 	let scriptSection = undefined as string | undefined

@@ -1,0 +1,108 @@
+:space = ' '
+:large_space = ' '+
+:colon = ':'
+:slash = '/'
+:quote = '"'
+:equals = ' '* '=' ' '*
+:comma = ' '* ',' ' '*
+:text_bar = '|'
+:str = '"' (^[\\"\n] | [\\] '"')* '"' | "'" (^[\\'\n] | [\\] "'")* "'"
+
+:comment = '//' '-'? ^[\n]*
+
+:open_paren = '('
+:close_paren = ')'
+:not_paren = (:str | ^[()\n])+
+
+:open_bracket = '{'
+:close_bracket = '}'
+:not_bracket = (:str | ^[{}\n])+
+
+:open_double_bracket = '{{'
+:close_double_bracket = '}}'
+:not_double_bracket = (^[\\{}\n] | '{' ^[\\{\n] | '}' ^[\\}\n] | [\\] ^[\\\n]{1,2})+
+
+:identifier = #word+
+:tag_identifier = (#word | '-')+
+:at_identifier = '@' :tag_identifier
+:plus_identifier = '+' :tag_identifier
+// this can handle *one level deep* of balanced parens within the name
+:attribute_name = (^[\s,'"=()] | '(' ^[\s,'"=()]* ')')+ | :str
+
+:dot = '.'
+:pound = '#'
+:id_identifier = :pound :tag_identifier
+:class_identifier = :dot :tag_identifier
+
+{ :indent, :deindent, :indent_continue } = use 'kreia/dist/virtual_lexers/IndentationLexer'
+// { :indent, :deindent, :indent_continue } = use 'kreia/dist/virtual_lexers/IndentationLexerWithIndentedBlock' with :
+
+
+wolf = @lines[entity | comment]
+
+entity =
+	|
+		entity_descriptor
+		?
+			| :colon :large_space entity
+			| :indent wolf :deindent
+			| :space text+
+	|
+		:text_bar
+		| :indent @lines[text+] :deindent
+		| :space text+
+
+entity_descriptor =
+	| tag attributes? :slash?
+	| :plus_identifier attributes?
+	| :at_identifier (:large_space? :open_paren paren_code+ :close_paren)?
+
+tag =
+	| :tag_identifier meta*
+	| meta+
+
+meta =
+	| :id_identifier
+	| :class_identifier
+	| :dot code_segment
+	| :pound code_segment
+
+// the difference between enforcing trailing commas always or never
+// | :indent @lines[attribute_line] :deindent :indent_continue
+attributes =
+	:open_paren
+	| :indent @lines[attribute_line :comma] :deindent
+	| :large_space? attribute_line :large_space?
+	:close_paren
+
+attribute_line = attribute (:comma attribute)*
+
+attribute =
+	:attribute_name
+	?
+		:equals
+		| :identifier
+		| str
+		| code_segment
+
+str = :str
+
+code_segment = :open_bracket code* :close_bracket
+
+code =
+	| :open_bracket code* :close_bracket
+	| :str
+	| :not_bracket
+
+paren_code =
+	| :open_paren paren_code* :close_paren
+	| :not_paren
+
+text =
+	| :open_double_bracket code* :close_double_bracket
+	| :not_double_bracket
+
+comment = :comment
+
+// @many_separated[$body, $separator] = $body ($separator $body)*
+@lines[$content] = $content (:indent_continue $content)*

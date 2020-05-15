@@ -2,7 +2,7 @@ import 'mocha'
 import { expect } from 'chai'
 import ts = require('typescript')
 
-import { boilString } from '../utils.spec'
+import { boilEqual } from '../utils.spec'
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
 	Entity, Directive,
@@ -16,9 +16,7 @@ import {
 	generateIfBlock, generateEachBlock, generateMatchBlock, generateSwitchBlock, generateTemplateDefinition, generateTemplateInclusion,
 } from './codegen'
 
-function boilEqual(actual: string, expected: string) {
-	expect(boilString(actual)).equal(boilString(expected))
-}
+
 type ctx = CodegenContext
 function ctx() {
 	return new CodegenContext()

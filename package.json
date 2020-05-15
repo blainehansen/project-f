@@ -9,6 +9,7 @@
     "lab": "ts-node lab/main.ts",
     "macros": "rm -rf lab/macros/transformed/ && ts-node ./lab/macros/transformer.ts && ttsc -P ./lab/macros/tsconfig.json",
     "macros:dev": "ts-node lab/macros/index.ts",
+    "kreia:wolf": "kreia ./lib/templating/wolf.grammar.peg ./lib/templating/wolf.grammar.staging.ts && eslint --fix --ext .ts lib/templating/wolf.grammar.staging.ts",
 
     "test": "mocha -r ts-node/register -r source-map-support/register lib/**/*.spec.ts",
     "coverage": "nyc npm run test",
@@ -29,20 +30,21 @@
     "@ts-std/types": "^1.2.0",
     "@types/chai": "^4.2.11",
     "@types/mocha": "^7.0.2",
-    "@types/node": "^13.13.5",
-    "@typescript-eslint/eslint-plugin": "^2.31.0",
-    "@typescript-eslint/parser": "^2.31.0",
+    "@types/node": "^13.13.6",
+    "@typescript-eslint/eslint-plugin": "^2.33.0",
+    "@typescript-eslint/parser": "^2.33.0",
     "chai": "^4.2.0",
     "eslint": "^6.8.0",
     "jsdom": "^16.2.2",
     "jsdom-global": "^3.0.2",
+    "kreia": "^0.4.4",
     "mocha": "^7.1.2",
     "nyc": "^15.0.1",
     "source-map-support": "^0.5.19",
     "ts-creator": "^1.2.5",
     "ts-node": "^8.10.1",
     "ttypescript": "^1.5.10",
-    "typescript": "^3.8.3"
+    "typescript": "^3.9.2"
   },
   "dependencies": {
     "@ts-std/collections": "^1.1.1",
