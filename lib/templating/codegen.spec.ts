@@ -22,8 +22,8 @@ function ctx() {
 	return new CodegenContext()
 }
 
-const realParent = ts.createIdentifier('___real')
-const parent = ts.createIdentifier('___parent')
+export const realParent = ts.createIdentifier('___real')
+export const parent = ts.createIdentifier('___parent')
 const namedParentIdents = (real: string, parent: string) => t(ts.createIdentifier(`___${real}`), ts.createIdentifier(`___${parent}`))
 
 const empty = (tagName: string) => Tag(tagName, [], [], [])
@@ -995,19 +995,49 @@ describe('generateIfBlock', () => {
 
 describe('generateEachBlock', () => {
 	const cases: [string, EachBlock, string][] = [
-		['nonreactive', EachBlock('item', 'list', [TextSection(TextItem(true, 'item'))]), `
+		['nonreactive', EachBlock({ variableCode: 'item', indexCode: undefined }, 'list', [TextSection(TextItem(true, 'item'))]), `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 
-			for (const item of list) {
+			const ___eachBlockCollection0 = list
+			const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+			for (let ___eachBlockIndex0 = 0; ___eachBlockIndex0 < ___eachBlockCollectionLength0; ___eachBlockIndex0++) {
+				const item = ___eachBlockCollection0[___eachBlockIndex0]
 				___createTextNode(___p, item)
 			}
 		`],
 
-		['reactive', EachBlock('item', ':list', [TextSection(TextItem(true, 'item'))]), `
+		['nonreactive, requests index', EachBlock({ variableCode: 'item', indexCode: 'index' }, 'list', [TextSection(TextItem(true, 'item'))]), `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+
+			const ___eachBlockCollection0 = list
+			const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+			for (let index = 0; index < ___eachBlockCollectionLength0; index++) {
+				const item = ___eachBlockCollection0[index]
+				___createTextNode(___p, item)
+			}
+		`],
+
+		['reactive', EachBlock({ variableCode: 'item', indexCode: undefined }, ':list', [TextSection(TextItem(true, 'item'))]), `
 			import { createTextNode as ___createTextNode, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				for (const item of list()) {
+				const ___eachBlockCollection0 = list()
+				const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+				for (let ___eachBlockIndex0 = 0; ___eachBlockIndex0 < ___eachBlockCollectionLength0; ___eachBlockIndex0++) {
+					const item = ___eachBlockCollection0[___eachBlockIndex0]
+					___createTextNode(___parent, item)
+				}
+			}, ___r, ___p)
+		`],
+
+		['reactive, requests index', EachBlock({ variableCode: 'item', indexCode: 'index' }, ':list', [TextSection(TextItem(true, 'item'))]), `
+			import { createTextNode as ___createTextNode, rangeEffect as ___rangeEffect } from "project-f/runtime"
+
+			___rangeEffect((___real, ___parent) => {
+				const ___eachBlockCollection0 = list()
+				const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+				for (let index = 0; index < ___eachBlockCollectionLength0; index++) {
+					const item = ___eachBlockCollection0[index]
 					___createTextNode(___parent, item)
 				}
 			}, ___r, ___p)

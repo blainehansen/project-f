@@ -700,7 +700,7 @@ export function generateIfBlock(
 
 
 export function generateEachBlock(
-	{ paramsExpression, listExpression, entities }: EachBlock,
+	{ params: { variableCode, indexCode }, listExpression, entities }: EachBlock,
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
@@ -710,15 +710,32 @@ export function generateEachBlock(
 		? resetParentIdents()
 		: [aboveRealParent, aboveParent]
 
-	const statements = [ts.createForOf(
-		undefined, ts.createVariableDeclarationList(
-			[ts.createVariableDeclaration(createRawCodeSegment(paramsExpression), undefined, undefined)],
-			ts.NodeFlags.Const,
+	const variableIdent = createRawCodeSegment(variableCode)
+	const indexIdent = indexCode !== undefined
+		? ts.createIdentifier(indexCode)
+		: safePrefixIdent('eachBlockIndex', offset)
+
+	const collectionIdent = safePrefixIdent('eachBlockCollection', offset)
+	const lengthIdent = safePrefixIdent('eachBlockCollectionLength', offset)
+	const statements = [
+		createConst(collectionIdent, createRawCodeSegment(usedListExpression)),
+		createConst(lengthIdent, ts.createPropertyAccess(collectionIdent, 'length')),
+		ts.createFor(
+			ts.createVariableDeclarationList(
+				[ts.createVariableDeclaration(indexIdent, undefined, ts.createNumericLiteral('0'))],
+				ts.NodeFlags.Let,
+			),
+			ts.createBinary(indexIdent, ts.createToken(ts.SyntaxKind.FirstBinaryOperator), lengthIdent),
+			ts.createPostfix(indexIdent, ts.SyntaxKind.PlusPlusToken),
+			ts.createBlock(
+				[createConst(variableIdent, ts.createElementAccess(collectionIdent, indexIdent)) as ts.Statement]
+					// all the children of an each loop are by definition not robustly safe to call lone
+					.concat(generateEntities(entities, offset, false, ctx, realParent, parent)),
+				true,
+			),
 		),
-		createRawCodeSegment(usedListExpression),
-		// all the children of an each loop are by definition not robustly safe to call lone
-		ts.createBlock(generateEntities(entities, offset, false, ctx, realParent, parent), true)
-	)]
+	]
+
 	return !reactive
 		? statements
 		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)

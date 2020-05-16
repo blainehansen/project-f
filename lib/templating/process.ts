@@ -1,19 +1,22 @@
 import ts = require('typescript')
-import { Dict } from '../utils'
-import { ComponentDefinition } from './ast'
+import { Dict, NonEmpty } from '../utils'
+import { ComponentDefinition, Entity } from './ast'
+import { reset, exit, wolf } from './wolf.grammar'
 import { generateComponentDefinition } from './codegen'
 
-
 export function processFile(source: string) {
+	// TODO what to do with these? style, others
 	const { template, script, style, others } = cutSource(source)
 	const sourceFile = ts.createSourceFile('', script, ts.ScriptTarget.Latest, true)
 	const { props, syncs, events, slots, createFn } = inspect(sourceFile)
 
-	// TODO here's where template parsing happens
-	// const entities = [] as unknown as ConstructorParameters<typeof ComponentDefinition>[5]
-	// TODO what to do with these? style, others
-
-	const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities)
+	reset(template)
+	const entities = wolf()
+	exit()
+	const definition = new ComponentDefinition(
+		props, syncs, events, slots, createFn,
+		NonEmpty.expect(entities, "a component definition's template shouldn't be empty"),
+	)
 	return generateComponentDefinition(definition)
 }
 
@@ -150,7 +153,7 @@ function isNodeExported(node: ts.Node): boolean {
 
 const sectionMarker = /^#! (\S+)(?: lang="(\S+)")?[ \t]*\n?/m
 type Section = { name: string, lang: string, text: string }
-function cutSource(rawSource: string) {
+export function cutSource(rawSource: string) {
 	let scriptSection = undefined as string | undefined
 	let styleSection = undefined as Section | undefined
 	let templateSection = undefined as Section | undefined

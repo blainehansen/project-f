@@ -136,7 +136,7 @@ export class IfBlock {
 export class EachBlock {
 	readonly type = 'EachBlock' as const
 	constructor(
-		readonly paramsExpression: { variable: string, index: string | undefined },
+		readonly params: { variableCode: string, indexCode: string | undefined },
 		readonly listExpression: string,
 		readonly entities: NonEmpty<Entity>,
 		// readonly keyExpression: string | undefined,

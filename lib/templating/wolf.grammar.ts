@@ -210,14 +210,14 @@ function finalizeEntities(items: (NotReadyEntity | undefined)[]): Entity[] {
 
 			case 'each':
 				finalizeInProgressDirective()
-				function processEachBlockCode(code: string): [EachBlock['paramsExpression'], string] {
+				function processEachBlockCode(code: string): [EachBlock['params'], string] {
 					const [paramsSection, ...remainingSections] = code.split(/ +of +/)
 					const paramsMatch = paramsSection.match(/\( *(\S+) *, *(\S+) *\)/)
-					const [variable, index] = paramsMatch === null
+					const [variableCode, indexCode] = paramsMatch === null
 						? [paramsSection, undefined]
 						: [paramsMatch[1], paramsMatch[2]]
 
-					return [{ variable, index }, remainingSections.join(' of ')]
+					return [{ variableCode, indexCode }, remainingSections.join(' of ')]
 				}
 				const [paramsExpression, listExpression] = processEachBlockCode(validateCode(command, code))
 				giveEntities.push(new EachBlock(
