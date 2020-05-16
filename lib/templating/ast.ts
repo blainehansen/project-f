@@ -1,28 +1,28 @@
-import { Result, Ok, Err } from '@ts-std/monads'
+// import { Result, Ok, Err } from '@ts-std/monads'
 
 import { Dict, NonEmpty } from '../utils'
 
-export type ParseError = string[]
-export type ParseResult<T> = Result<T, ParseError>
-export class InProgressParseResult<T> {
-	private state: ParseResult<T>
-	constructor(initial: T) {
-		this.state = Ok(initial)
-	}
-	progress(fn: (state: T) => ParseResult<T>): ParseResult<void> {
-		if (this.state.is_err()) return this.state as ParseResult<void>
+// export type ParseError = string[]
+// export type ParseResult<T> = Result<T, ParseError>
+// export class InProgressParseResult<T> {
+// 	private state: ParseResult<T>
+// 	constructor(initial: T) {
+// 		this.state = Ok(initial)
+// 	}
+// 	progress(fn: (state: T) => ParseResult<T>): ParseResult<void> {
+// 		if (this.state.is_err()) return this.state as ParseResult<void>
 
-		this.state = fn(this.state.value)
-		return this.state.change(() => undefined as void)
-	}
-	complete<U>(fn: (state: T) => ParseResult<U>): ParseResult<U> {
-		return this.try_change(fn)
-	}
-}
+// 		this.state = fn(this.state.value)
+// 		return this.state.change(() => undefined as void)
+// 	}
+// 	complete<U>(fn: (state: T) => ParseResult<U>): ParseResult<U> {
+// 		return this.try_change(fn)
+// 	}
+// }
 
-export class ParseResultContext<T> {
-	//
-}
+// export class ParseResultContext<T> {
+// 	//
+// }
 
 export class ComponentDefinition {
 	constructor(
@@ -136,7 +136,7 @@ export class IfBlock {
 export class EachBlock {
 	readonly type = 'EachBlock' as const
 	constructor(
-		readonly paramsExpression: string,
+		readonly paramsExpression: { variable: string, index: string | undefined },
 		readonly listExpression: string,
 		readonly entities: NonEmpty<Entity>,
 		// readonly keyExpression: string | undefined,

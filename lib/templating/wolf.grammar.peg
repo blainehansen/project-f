@@ -71,7 +71,7 @@ meta =
 // | :indent @lines[attribute_line] :deindent :indent_continue
 attributes =
 	:open_paren
-	| :indent @lines[attribute_line :comma] :deindent
+	| :indent @lines[attribute_line :comma] :deindent :indent_continue
 	| :large_space? attribute_line :large_space?
 	:close_paren
 

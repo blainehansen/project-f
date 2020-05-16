@@ -4,7 +4,7 @@ import { expect } from 'chai'
 import {
 	reset, exit, tok,
 	wolf, entity, entity_descriptor, tag, meta, attributes, attribute_line, attribute, str, code_segment, code, paren_code, text,
-} from './grammar'
+} from './wolf.grammar'
 import { boilString } from '../utils.spec'
 
 // _Z1s8tjH: branch(
@@ -253,10 +253,10 @@ const entity_descriptor_attrs = `div(disabled)`
 // const entity_descriptor_attrs_closed = `div(disabled)/`
 const entity_descriptor_plus = `+Something-123`
 const entity_descriptor_plus_attrs = `+Something-123${attributes_multi_indented}`
-const entity_descriptor_at = `@Something-123`
-const entity_descriptor_at_attrs = `@Something-123${paren_code_complex}`
-const entity_descriptor_at_spaced = `@Something-123 ${paren_code_complex}`
-const entity_descriptor_at_spaced_more = `@Something-123  ${paren_code_complex}`
+const entity_descriptor_at = `@slot`
+const entity_descriptor_at_attrs = `@match${paren_code_complex}`
+const entity_descriptor_at_spaced = `@match ${paren_code_complex}`
+const entity_descriptor_at_spaced_more = `@match  ${paren_code_complex}`
 
 
 describe('entity_descriptor', () => it('works', () => {
@@ -322,6 +322,7 @@ describe('wolf', () => it('works', () => {
 	// parse(wolf, entity_descriptor_closed)
 	// parse(wolf, entity_descriptor_attrs_closed)
 	parse(wolf, entity_descriptor_plus)
+
 	parse(wolf, entity_descriptor_plus_attrs)
 	parse(wolf, entity_descriptor_at)
 	parse(wolf, entity_descriptor_at_attrs)

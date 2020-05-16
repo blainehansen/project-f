@@ -34,6 +34,19 @@ export type Overwrite<A, B> = {
 } & B
 
 export type NonEmpty<T> = [T, ...T[]]
+export namespace NonEmpty {
+	export function expect<T>(list: T[], message: string): NonEmpty<T> {
+		if (list.length === 0)
+			throw new Error(message)
+		return list as NonEmpty<T>
+	}
+	export function undef<T>(list: T[]): NonEmpty<T> | undefined {
+		return list.length === 0
+			? undefined
+			: list as NonEmpty<T>
+	}
+}
+
 export type NonLone<T> = [T, T, ...T[]]
 
 export type NonRedundant<T> = null | undefined | T | NonLone<T>

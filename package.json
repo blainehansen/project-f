@@ -16,7 +16,7 @@
 
     "test:reactivity": "mocha lib/reactivity/**/*.spec.ts",
     "test:dom": "mocha -r jsdom-global/register lib/dom/**/*.spec.ts",
-    "test:dev": "mocha -r jsdom-global/register lib/templating/codegen.spec.ts",
+    "test:dev": "mocha -r jsdom-global/register lib/templating/wolf.grammar.spec.ts",
     "coverage:dev": "nyc npm run test:dev",
 
     "build": "npm run clean && tsc -p tsconfig.build.json",

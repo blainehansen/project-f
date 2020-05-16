@@ -1,4 +1,3 @@
-import '@ts-std/extensions/dist/array'
 import { Parser, ParseArg, Decidable, path, branch, c } from 'kreia'
 import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
 
@@ -9,7 +8,6 @@ import {
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 import { NonEmpty } from '../utils'
-// import * as raw from '../C/compiler/AST'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
 	space: / /,
@@ -92,95 +90,228 @@ export function wolf(): Entity[] {
 		)
 	}, _Z1F9dGs)
 
-	// TODO mutJoinTextSections
-	return items.flat_map(e => e === undefined ? [] : e)
+	return finalizeEntities(items)
 }
 
-function finalizeEntities(items: NotReadyEntity[]): Entity[] {
+function processInsertableCode(isSlot: boolean, code: string | undefined): [string | undefined, string | undefined] {
+	if (code === undefined || code.trim() === '')
+		return [undefined, undefined]
+
+	const [nameSection, ...codeSections] = code.split(/; */)
+	if (isSlot && !/^&\S+$/.test(nameSection))
+		throw new Error(`invalid slot usage ${code}`)
+
+	const argsExpression = codeSections.join('; ')
+	return [isSlot ? nameSection.slice(1) : nameSection, argsExpression]
+}
+
+type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
+type InProgressIf = {
+	type: 'if', expression: string, entities: NonEmpty<Entity>,
+	elseIfBranches: [string, NonEmpty<Entity>][], elseBranch: NonEmpty<Entity> | undefined,
+}
+type InProgressMatch = {
+	type: 'match', matchExpression: string,
+	patterns: [string, Entity[]][], defaultPattern: Entity[] | undefined,
+}
+type InProgressSwitch = {
+	type: 'switch', switchExpression: string,
+	cases: (SwitchCase | SwitchDefault)[],
+}
+function finalizeEntities(items: (NotReadyEntity | undefined)[]): Entity[] {
 	const giveEntities = []
-	let inprogressTextSection = undefined as NonEmpty<TextItem> | undefined
-	let inprogressDirective = undefined as s | undefined
+	let inProgressTextSection = undefined as NonEmpty<TextItem> | undefined
+	let inProgressDirective = undefined as InProgressDirective | undefined
+	function finalizeInProgressDirective() {
+		if (inProgressDirective === undefined) return
+
+		switch (inProgressDirective.type) {
+			case 'if':
+				const { expression, entities, elseIfBranches, elseBranch } = inProgressDirective
+				giveEntities.push(new IfBlock(expression, entities, elseIfBranches, elseBranch))
+				break
+			case 'match':
+				const { matchExpression, patterns, defaultPattern } = inProgressDirective
+				giveEntities.push(new MatchBlock(
+					matchExpression,
+					// TODO these should probably just be warnings
+					NonEmpty.expect(patterns, "no patterns given for @match"),
+					defaultPattern,
+				))
+				break
+			case 'switch':
+				const { switchExpression, cases } = inProgressDirective
+				giveEntities.push(new SwitchBlock(
+					switchExpression,
+					NonEmpty.expect(cases, "no cases given for @switch"),
+				))
+				break
+		}
+	}
+
 	for (const item of items) {
-		if (Array.isArray(item)) {
-			inprogressTextSection = (inprogressTextSection || []).concat(item) as NonEmpty<TextItem>
-			// finalize the inprogressDirective
-			throw
+		if (item === undefined) {
+			finalizeInProgressDirective()
 			continue
 		}
-		if (inprogressTextSection !== undefined) {
-			giveEntities.push(new TextSection(inprogressTextSection))
-			inprogressTextSection = undefined
+		if (Array.isArray(item)) {
+			finalizeInProgressDirective()
+			inProgressTextSection = (inProgressTextSection || [] as TextItem[]).concat(item) as NonEmpty<TextItem>
+			continue
+		}
+		// finalize inProgressTextSection
+		if (inProgressTextSection !== undefined) {
+			giveEntities.push(new TextSection(inProgressTextSection))
+			inProgressTextSection = undefined
 		}
 
 		if (item.type !== 'directive') {
+			finalizeInProgressDirective()
 			giveEntities.push(item)
-
-			// finalize the inprogressDirective
-			throw
 			continue
 		}
 
-		function processInsertableCode(isSlot: boolean, code: string): [string | undefined, string | undefined] {
-			if (code.trim() === '')
-				return [undefined, undefined]
-
-			const [nameSection, ...codeSections] = code.split(/; */)
-			if (isSlot && !/^&\S+$/.test(nameSection))
-				throw new Error(`invalid slot usage ${code}`)
-
-			const argsExpression = codeSections.join('; ')
-			return [isSlot ? nameSection.slice(1) : nameSection, argsExpression]
+		function validateCodeEmpty(command: string, code: string | undefined): undefined {
+			if (code !== undefined)
+				throw new Error(`code arguments have no meaning on @${command}`)
+			return code
+		}
+		function validateCode(command: string, code: string | undefined): string {
+			if (code === undefined)
+				throw new Error(`@${command} must have some code expression`)
+			return code
 		}
 
 		const { command, code, entities } = item
 		switch (command) {
 			case 'if':
+				finalizeInProgressDirective()
+				inProgressDirective = {
+					type: 'if', expression: validateCode(command, code),
+					entities: NonEmpty.expect(entities, "@if without any nested entities doesn't make any sense"),
+					elseIfBranches: [], elseBranch: undefined,
+				} as InProgressIf
+				break
 			case 'elseif':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
+					throw new Error("@elseif without a preceding @if")
+				inProgressDirective.elseIfBranches.push([
+					validateCode(command, code),
+					NonEmpty.expect(entities, "@elseif without any nested entities doesn't make any sense"),
+				])
+				break
 			case 'else':
-				// always completes the current in progress if it's an if
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
+					throw new Error("@else without a preceding @if")
+				validateCodeEmpty(command, code)
+				inProgressDirective.elseBranch = NonEmpty.expect(entities, "@else without any nested entities doesn't make any sense")
+				finalizeInProgressDirective()
+				break
 
-			case 'each': {
-				return new EachBlock(paramsExpression, listExpression, entities)
-			}
+			case 'each':
+				finalizeInProgressDirective()
+				function processEachBlockCode(code: string): [EachBlock['paramsExpression'], string] {
+					const [paramsSection, ...remainingSections] = code.split(/ +of +/)
+					const paramsMatch = paramsSection.match(/\( *(\S+) *, *(\S+) *\)/)
+					const [variable, index] = paramsMatch === null
+						? [paramsSection, undefined]
+						: [paramsMatch[1], paramsMatch[2]]
 
-			case 'match': {
-				for (const entity of entities) {
-					//
+					return [{ variable, index }, remainingSections.join(' of ')]
 				}
-				return new MatchBlock()
-			}
+				const [paramsExpression, listExpression] = processEachBlockCode(validateCode(command, code))
+				giveEntities.push(new EachBlock(
+					paramsExpression, listExpression,
+					NonEmpty.expect(entities, "@each without any nested entities doesn't make any sense"),
+				))
+				break
+
+			case 'match':
+				finalizeInProgressDirective()
+				if (entities.length > 0)
+					throw new Error("@match with nested entities doesn't make any sense")
+				inProgressDirective = { type: 'match', matchExpression: validateCode(command, code), patterns: [], defaultPattern: undefined } as InProgressMatch
+				break
 			case 'when':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'match')
+					throw new Error("@when without a preceding @match")
+				inProgressDirective.patterns.push([validateCode(command, code), entities])
+				break
+
 			case 'switch':
+				finalizeInProgressDirective()
+				if (entities.length > 0)
+					throw new Error("@switch with nested entities doesn't make any sense")
+				inProgressDirective = { type: 'switch', switchExpression: validateCode(command, code), cases: [] } as InProgressSwitch
+				break
 			case 'case':
 			case 'fallcase':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
+					throw new Error(`@${command} without a preceding @switch`)
+				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', validateCode(command, code), entities))
+				break
 			case 'falldefault':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
+					throw new Error("@falldefault without a preceding @switch")
+				validateCodeEmpty(command, code)
+				inProgressDirective.cases.push(new SwitchDefault(true, entities))
+				break
 
 			// belongs to both switch and match
 			case 'default':
+				validateCodeEmpty(command, code)
+				if (inProgressDirective === undefined)
+					throw new Error("@default without a preceding @match or @switch")
+				switch (inProgressDirective.type) {
+					case 'if':
+						throw new Error("@default without a preceding @match or @switch")
+					case 'match':
+						if (inProgressDirective.defaultPattern !== undefined)
+							throw new Error("duplicate @default in @match")
+						inProgressDirective.defaultPattern = entities
+						break
+					case 'switch':
+						inProgressDirective.cases.push(new SwitchDefault(false, entities))
+						break
+				}
+				break
 
 			case 'slot': {
-				const slotEntities = entities.length > 0 ? entities : undefined
+				finalizeInProgressDirective()
 				const [slotName, argsExpression] = processInsertableCode(true, code)
-				return new SlotUsage(slotName, argsExpression, slotEntities)
+				giveEntities.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
+				break
 			}
 			case 'insert': {
+				finalizeInProgressDirective()
 				if (entities.length === 0)
 					throw new Error("@insert with no nested entities doesn't make any sense")
 				const [slotName, paramsExpression] = processInsertableCode(true, code)
-				return new SlotInsertion(slotName, paramsExpression, entities)
+				giveEntities.push(new SlotInsertion(
+					slotName, paramsExpression,
+					NonEmpty.expect(entities, "@insert without any nested entities doesn't make any sense"),
+				))
+				break
 			}
 
 			case 'template': {
+				finalizeInProgressDirective()
 				const [templateName, argsExpression] = processInsertableCode(false, code)
 				if (templateName === undefined)
 					throw new Error("@template must provide template name")
-				return new TemplateDefinition(templateName, paramsExpression, entities)
+				giveEntities.push(new TemplateDefinition(
+					templateName, argsExpression,
+					NonEmpty.expect(entities, "@template without any nested entities doesn't make any sense"),
+				))
+				break
 			}
 			case 'include': {
+				finalizeInProgressDirective()
 				const [templateName, argsExpression] = processInsertableCode(false, code)
 				if (templateName === undefined)
 					throw new Error("@include must provide template name")
-				return new TemplateInclusion(templateName, argsExpression)
+				giveEntities.push(new TemplateInclusion(templateName, argsExpression))
+				break
 			}
 
 			default:
@@ -215,7 +346,7 @@ export function entity(): NotReadyEntity {
 					const children = many(text, _Z2evaAJ)
 					return [new TextSection(children)] as Entity[]
 				}, _7U1Cw),
-			)
+			) || []
 
 			switch (entity_item.type) {
 				case 'tag':
@@ -238,7 +369,7 @@ export function entity(): NotReadyEntity {
 						return many(text, _Z2evaAJ)
 					}, _Z1F9dGs)
 					consume(tok.deindent)
-					return text_items.flat_map(s => s)
+					return ([] as TextItem[]).concat(...text_items) as NonEmpty<TextItem>
 				}, _Z1owlnn),
 
 				c((): NonEmpty<TextItem> => {
@@ -254,29 +385,29 @@ export function entity(): NotReadyEntity {
 
 type TagDescriptor = { type: 'tag', ident: string, metas: Meta[], attributes: Attribute[] }
 type InclusionDescriptor = { type: 'inclusion', name: string, params: Attribute[] }
-type DirectiveDescriptor = { type: 'directive', command: string, code: string }
-export function entity_descriptor() {
+type DirectiveDescriptor = { type: 'directive', command: string, code: string | undefined }
+export function entity_descriptor(): TagDescriptor | InclusionDescriptor | DirectiveDescriptor {
 	return or(
 		c((): TagDescriptor => {
 			const { tag_name, metas } = tag()
-			const attributes = maybe(attributes, _NFQGh) || []
+			const attributes_list = maybe(attributes, _NFQGh) || []
 			// TODO this would allow children of a self-closing tag
 			// maybe(tok.slash)
 
-			return { type: 'tag', ident: tag_name, metas, attributes }
+			return { type: 'tag', ident: tag_name, metas, attributes: attributes_list }
 		}, _Z1s8tjH),
 
 		c((): InclusionDescriptor => {
 			const ident = consume(tok.plus_identifier)
-			const attributes = maybe(attributes, _NFQGh) || []
+			const attributes_list = maybe(attributes, _NFQGh) || []
 
 			const name = ident[0].content.slice(1)
-			return { type: 'inclusion', name, params: attributes }
+			return { type: 'inclusion', name, params: attributes_list }
 		}, _ZiAKh1),
 
 		c((): DirectiveDescriptor => {
 			const ident = consume(tok.at_identifier)
-			const segments = maybe(() => {
+			const code = maybe(() => {
 				maybe(tok.large_space)
 				consume(tok.open_paren)
 				const segments = many(paren_code, _Z1O2lKj)
@@ -285,7 +416,7 @@ export function entity_descriptor() {
 			}, _2w47cC)
 
 			const command = ident[0].content.slice(1)
-			return { type: 'directive', command, code: segments || '' }
+			return { type: 'directive', command, code }
 		}, _Z1kIVyP),
 	)
 }
@@ -341,8 +472,8 @@ export function attributes(): Attribute[] {
 				consume(tok.comma)
 				return result
 			}, _Z1F9dGs)
-			consume(tok.deindent)
-			return result_attributes.flat_map(r => r)
+			consume(tok.deindent, tok.indent_continue)
+			return ([] as Attribute[]).concat(...result_attributes)
 		}, _Z1owlnn),
 
 		c((): Attribute[] => {
@@ -433,7 +564,7 @@ export function text(): TextItem {
 	)
 
 	return Array.isArray(item)
-		? TextItem(false, item[0].content)
+		? new TextItem(false, item[0].content)
 		: item
 }
 
