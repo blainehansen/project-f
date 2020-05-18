@@ -609,6 +609,84 @@ describe('generateTag', () => {
 			___nodeReceiver(___div0, doit)
 			___nodeReceiver(___div0,  d => handle(d) )
 		`],
+
+		['input text without sync', Tag('input', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.disabled = true
+		`],
+		['textarea without sync', Tag('textarea', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			const ___textarea0 = ___createElement(___parent, "textarea")
+			___textarea0.disabled = true
+		`],
+		['select without sync', Tag('select', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+			import { createElement as ___createElement } from "project-f/runtime"
+			const ___select0 = ___createElement(___parent, "select")
+			___select0.disabled = true
+		`],
+
+		['input(type="radio", !sync=textValue, value="a")', Tag(
+			'input', [],
+			[
+				Attribute('type', "radio"),
+				Attribute('!sync', AttributeCode(true, 'textValue')),
+				Attribute('value', 'a'),
+			], [],
+		), `
+			import { createElement as ___createElement, syncRadioElement as ___syncRadioElement } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.type = "radio"
+			___syncRadioElement(___input0, textValue, "a")
+			___input0.value = "a"
+		`],
+		['input(type="radio", !sync=textValue, :value=changing)', Tag(
+			'input', [],
+			[
+				Attribute('type', "radio"),
+				Attribute('!sync', AttributeCode(true, 'textValue')),
+				Attribute(':value', AttributeCode(true, 'changing')),
+			], [],
+		), `
+			import { createElement as ___createElement, syncRadioElementReactive as ___syncRadioElementReactive, effect as ___effect } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.type = "radio"
+			___syncRadioElementReactive(___input0, textValue, changing)
+			___effect(() => {
+				___input0.value = changing()
+			})
+		`],
+
+		// TODO select
+
+		['input(!sync=textValue)', Tag(
+			'input', [],
+			[
+				Attribute('!sync', AttributeCode(true, 'textValue')),
+				Attribute('placeholder', 'hello'),
+			], [],
+		), `
+			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___syncTextElement(___input0, textValue)
+			___input0.placeholder = "hello"
+		`],
+		['textarea(!sync=textValue)', Tag(
+			'textarea', [],
+			[
+				Attribute('!sync', AttributeCode(true, 'textValue')),
+				Attribute('placeholder', 'hello'),
+			], [],
+		), `
+			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
+
+			const ___textarea0 = ___createElement(___parent, "textarea")
+			___syncTextElement(___textarea0, textValue)
+			___textarea0.placeholder = "hello"
+		`],
 	]
 
 	for (const [description, tag, generated] of cases)
@@ -617,6 +695,14 @@ describe('generateTag', () => {
 			const nodes = generateTag(tag, '0', context, realParent, parent)
 			boilEqual(context.finalize(nodes), generated)
 		})
+
+	it('sync of incorrect binding on input tag', () => {
+		for (const attribute of ['!anything', '!incorrect', '!notsync'])
+			expect(() => generateTag(Tag(
+				'input', [],
+				[Attribute(attribute, AttributeCode(true, 'doit'))], [],
+			), '0', ctx(), realParent, parent)).throw()
+	})
 
 	it('sync on non-input tag', () => {
 		for (const attribute of ['!anything', '!sync', '!sync|fake'])

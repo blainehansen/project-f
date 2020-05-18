@@ -1,12 +1,13 @@
 import 'mocha'
 import { expect } from 'chai'
 import { boilString } from '../utils.spec'
-import { divText, tagText } from './index.spec'
+import { divText, tagText, inputText } from './index.spec'
 
 import { NonLone, exec } from '../utils'
 import {
 	Displayable, DisplayType, Range, ContentState,
 	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
+	syncTextElement, syncElementAttribute, syncRadioElement, syncRadioElementReactive,
  } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
@@ -31,12 +32,7 @@ function eachText<T>(collection: T[], fn: (t: T) => string) {
 export function switcher(parent: Node, checked: Mutable<boolean>) {
 	const input = createElement(parent, 'input')
 	input.type = 'checkbox'
-	effect(() => {
-		input.checked = checked()
-	})
-	input.onchange = $event => {
-		checked(input.checked)
-	}
+	syncElementAttribute(input, 'onchange', 'checked', checked)
 	return input
 }
 describe('switcher', () => it('works', () => {
@@ -196,12 +192,7 @@ export function TextInput(realParent: Node, parent: DocumentFragment) {
 	const input = createElement(component, 'input')
 	input.type = 'text'
 	input.placeholder = 'yo yo'
-	input.oninput = $event => {
-		text(($event.target as typeof input).value)
-	}
-	effect(() => {
-		input.value = text()
-	})
+	syncTextElement(input, text)
 
 	const display = createTextNode(component, '')
 	effect(() => {
@@ -221,6 +212,95 @@ describe('TextInput', () => it('works', () => {
 	expect(body.innerHTML).equal(divText(`${inputText}stuff`))
 	expect(input.value).equal('stuff')
 }))
+
+
+// textarea(placeholder="yo yo", !sync=text)
+// | {{ text() }}
+export function TextareaInput(realParent: Node, parent: DocumentFragment) {
+	const text = value('')
+
+	const textarea = createElement(parent, 'textarea')
+	textarea.placeholder = 'yo yo'
+	syncTextElement(textarea, text)
+
+	const display = createTextNode(parent, '')
+	effect(() => {
+		display.data = text()
+	})
+
+	return { text, textarea }
+}
+describe('TextareaInput', () => it('works', () => {
+	const { text, textarea } = TextareaInput(body, body as unknown as DocumentFragment)
+
+	const textareaText = `<textarea placeholder="yo yo"></textarea>`
+	expect(body.innerHTML).equal(textareaText)
+
+	text('stuff')
+	expect(body.innerHTML).equal(textareaText + 'stuff')
+}))
+
+
+// input(type="radio", !sync=thing, value="some string")
+// input(type="radio", !sync=thing, value={ [1, 2, 3] })
+// input(type="radio", !sync=thing, :value=stringValue)
+// | {{ '' + thing() }}
+export function RadioInput(realParent: Node, parent: DocumentFragment) {
+	const thing = channel(null as null | string | number[])
+	const stringValue = value("changes")
+
+	const one = createElement(parent, 'input')
+	one.type = 'radio'
+	syncRadioElement(one, thing, "some string")
+	const two = createElement(parent, 'input')
+	two.type = 'radio'
+	const arr = [1, 2, 3]
+	syncRadioElement(two, thing, arr)
+	const three = createElement(parent, 'input')
+	three.type = 'radio'
+	syncRadioElementReactive(three, thing, stringValue)
+
+	const display = createTextNode(parent, '')
+	effect(() => {
+		display.data = '' + thing()
+	})
+
+	return { thing, arr, stringValue, one, two, three }
+}
+describe('RadioInput', () => it('works', () => {
+	const { thing, arr, stringValue, one, two, three } = RadioInput(body, body as unknown as DocumentFragment)
+	const radioText = inputText('radio')
+	const radioInputText = (v: string) => radioText + radioText + radioText + v
+
+	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
+	expect(body.innerHTML).equal(radioInputText('null'))
+
+	thing("some string")
+	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
+	expect(body.innerHTML).equal(radioInputText("some string"))
+
+	thing(arr)
+	expect([one.checked, two.checked, three.checked]).eql([false, true, false])
+	expect(body.innerHTML).equal(radioInputText([1, 2, 3].join(',')))
+
+	thing("changes")
+	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
+	expect(body.innerHTML).equal(radioInputText("changes"))
+
+	thing(null)
+	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
+	expect(body.innerHTML).equal(radioInputText('null'))
+
+	stringValue("not changes")
+	// AGH
+	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
+	expect(body.innerHTML).equal(radioInputText('null'))
+
+	thing("not changes")
+	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
+	expect(body.innerHTML).equal(radioInputText('not changes'))
+}))
+
 
 
 // h1 Letters:

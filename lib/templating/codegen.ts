@@ -334,14 +334,85 @@ function processAttributes(attributes: Attribute[]) {
 }
 
 
+function handleInput(
+	ctx: CodegenContext, statements: ts.Statement[],
+	tagIdent: ts.Identifier, code: string,
+	bindings: [string, [BindingType, Dict<true>, string]][],
+) {
+	const foundType = bindings.find(([binding, ]) => binding === 'type')
+	const [, [typeType = BindingType.static, typeModifiers = {}, typeCode = 'text'] = []] = foundType || []
+	switch (typeType) {
+		case BindingType.dynamic:
+		case BindingType.reactive:
+			throw new Error('unimplemented')
+		case BindingType.empty:
+			throw new Error("input type cannot be assigned to true")
+		case BindingType.sync:
+			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+
+		case BindingType.static: switch (typeCode) {
+			default:
+				throw new Error('unimplemented')
+			case 'radio':
+				const foundValue = bindings.find(([binding, ]) => binding === 'value')
+				if (foundValue === undefined) throw new Error("radio inputs need a value")
+				const [, [valueType, valueModifiers, valueCode]] = foundValue
+				switch (valueType) {
+					case BindingType.sync:
+						throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+					case BindingType.reactive: {
+						const statement = createCall(
+							ctx.requireRuntime('syncRadioElementReactive'),
+							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
+						)
+						statements.push(ts.createExpressionStatement(statement))
+						break
+					}
+					case BindingType.static: {
+						const statement = createCall(
+							ctx.requireRuntime('syncRadioElement'),
+							[tagIdent, createRawCodeSegment(code), ts.createStringLiteral(valueCode)],
+						)
+						statements.push(ts.createExpressionStatement(statement))
+						break
+					}
+					case BindingType.empty: {
+						const statement = createCall(
+							ctx.requireRuntime('syncRadioElement'),
+							[tagIdent, createRawCodeSegment(code), ts.createTrue()],
+						)
+						statements.push(ts.createExpressionStatement(statement))
+						break
+					}
+					case BindingType.dynamic:
+						const statement = createCall(
+							ctx.requireRuntime('syncRadioElement'),
+							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
+						)
+						statements.push(ts.createExpressionStatement(statement))
+						break
+				}
+				break
+			// case 'file':
+			// case 'image':
+			case 'checkbox': {
+				const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
+				statements.push(ts.createExpressionStatement(statement))
+				break
+			}
+			case 'text': case 'password': case 'search':
+				const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
+				statements.push(ts.createExpressionStatement(statement))
+				break
+		}
+	}
+}
+
+
 export function generateTag(
 	{ ident, metas, attributes, entities }: Tag, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ): ts.Statement[] {
-	if (ident === 'input' || ident === 'textarea' || ident === 'select') {
-		throw new Error('unimplemented')
-	}
-
 	// we only have to assign this thing a name if we interact with it afterwards
 	const tagIdent = safePrefixIdent(ident, offset)
 	let needTagIdent = false
@@ -410,7 +481,22 @@ export function generateTag(
 			statements.push(createEffectBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
 			break
 		case BindingType.sync:
-			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+			if (binding !== 'sync')
+				throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+
+			switch (ident) {
+				case 'input':
+					handleInput(ctx, statements, tagIdent, code, bindings)
+					break
+				case 'textarea':
+					const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
+					statements.push(ts.createExpressionStatement(statement))
+					break
+				case 'select':
+					throw new Error('unimplemented')
+				default:
+					throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+			}
 	}
 
 	for (const [event, handlers] of events) {

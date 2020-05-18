@@ -28,6 +28,9 @@ export function tagText(tag: string, text = '', className?: string) {
 	const classSection = className === undefined ? '' : ` class="${className}"`
 	return `<${tag}${classSection}>${text}</${tag}>`
 }
+export function inputText(type: string) {
+	return `<input type="${type}">`
+}
 // function toArray<T>(thing: null | undefined | T | T[]): T[] {
 // 	if (thing === null || thing === undefined) return []
 // 	return Array.isArray(thing) ? thing : [thing]

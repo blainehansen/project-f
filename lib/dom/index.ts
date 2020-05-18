@@ -1,6 +1,6 @@
-import { Panic, NonEmpty, NonLone, Overwrite } from '../utils'
+import { NonEmpty, NonLone, Overwrite, KeysOfType } from '../utils'
 
-import { statefulEffect } from '../reactivity'
+import { effect, statefulEffect, Mutable, Immutable } from '../reactivity'
 
 
 export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
@@ -34,6 +34,72 @@ export function createSvg<K extends keyof SVGElementTagNameMap>(
 	const el = document.createElementNS(svgNS, svgName)
 	parent.appendChild(el)
   return el
+}
+
+export function syncTextElement(
+	textElement: HTMLInputElement | HTMLTextAreaElement,
+	text: Mutable<string>,
+) {
+	textElement.oninput = $event => {
+		text(($event.target as typeof textElement).value)
+	}
+	effect(() => {
+		textElement.value = text()
+	})
+}
+
+export function syncCheckboxElement(
+	checkbox: HTMLInputElement,
+	checked: Mutable<boolean>,
+) {
+	checkbox.onchange = $event => {
+		checked(($event.target as typeof checkbox).checked)
+	}
+	effect(() => {
+		checkbox.checked = checked()
+	})
+}
+
+export function syncRadioElement<T>(radio: HTMLInputElement, mutable: Mutable<T>, value: T) {
+	radio.onchange = $event => {
+		if (($event.target as typeof radio).checked)
+			mutable(value)
+	}
+	effect(() => {
+		radio.checked = mutable() === value
+	})
+}
+export function syncRadioElementReactive<T>(radio: HTMLInputElement, mutable: Mutable<T>, value: Immutable<T>) {
+	radio.onchange = $event => {
+		if (($event.target as typeof radio).checked)
+			mutable(value())
+	}
+	effect(() => {
+		radio.checked = mutable() === value()
+		// if (mutable() === value()) {
+		// 	radio.checked = true
+		// 	// effect(() => {
+		// 	// 	mutable(value())
+		// 	// })
+		// }
+		// else
+		// 	radio.checked = false
+	})
+	// effect(() => {
+	// 	radio.value = '' + value()
+	// })
+}
+
+export function syncElementAttribute<E extends HTMLElement, KA extends keyof E>(
+	element: E, event: KeysOfType<E, ((this: GlobalEventHandlers, ev: Event) => unknown) | null>,
+	attribute: KA, mutable: Mutable<E[KA]>,
+) {
+	element[event as keyof E] = (($event: Event) => {
+		mutable(($event.target as typeof element)[attribute])
+	}) as any
+	effect(() => {
+		element[attribute] = mutable()
+	})
 }
 
 
