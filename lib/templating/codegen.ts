@@ -1,5 +1,4 @@
 import ts = require('typescript')
-import '@ts-std/extensions/dist/array'
 import { DefaultDict, UniqueDict } from '@ts-std/collections'
 
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
@@ -202,9 +201,6 @@ export function generateEntity(
 		// return generateVariableBinding(entity, offset, isRealLone, parent)
 	}
 }
-
-export const enum BindingType { empty, static, dynamic, reactive, sync }
-export type LivenessType = Exclude<BindingType, BindingType.empty | BindingType.sync>
 
 const fnModifiers = [] as const
 const emptyModifiers = [] as const

@@ -33,6 +33,14 @@ export type Overwrite<A, B> = {
 	[K in Exclude<keyof A, keyof B>]: A[K]
 } & B
 
+export type UnionKeys<T> = T extends T ? keyof T : never
+export type OmitVariants<U, K extends UnionKeys<U>, V extends U[K]> = U extends U
+	? U[K] extends V ? never : U
+	: never
+export type PickVariants<U, K extends UnionKeys<U>, V extends U[K]> = U extends U
+	? U[K] extends V ? U : never
+	: never
+
 export type NonEmpty<T> = [T, ...T[]]
 export namespace NonEmpty {
 	export function expect<T>(list: T[], message: string): NonEmpty<T> {

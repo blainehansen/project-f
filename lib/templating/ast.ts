@@ -1,28 +1,11 @@
 // import { Result, Ok, Err } from '@ts-std/monads'
-
-import { Dict, NonEmpty } from '../utils'
-
 // export type ParseError = string[]
 // export type ParseResult<T> = Result<T, ParseError>
-// export class InProgressParseResult<T> {
-// 	private state: ParseResult<T>
-// 	constructor(initial: T) {
-// 		this.state = Ok(initial)
-// 	}
-// 	progress(fn: (state: T) => ParseResult<T>): ParseResult<void> {
-// 		if (this.state.is_err()) return this.state as ParseResult<void>
 
-// 		this.state = fn(this.state.value)
-// 		return this.state.change(() => undefined as void)
-// 	}
-// 	complete<U>(fn: (state: T) => ParseResult<U>): ParseResult<U> {
-// 		return this.try_change(fn)
-// 	}
-// }
+import { Dict, NonEmpty, OmitVariants } from '../utils'
 
-// export class ParseResultContext<T> {
-// 	//
-// }
+
+export enum LivenessType { static, dynamic, reactive }
 
 export class ComponentDefinition {
 	constructor(
@@ -31,37 +14,47 @@ export class ComponentDefinition {
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
 		readonly createFn: string[] | undefined,
-		readonly entities: NonEmpty<Entity>,
+		readonly entities: NonEmpty<(Entity | SlotUsage)>,
 	) {}
 }
 
 export type Entity =
-	| Tag
+	| Html
 	| TextSection
 	| Directive
+
+
+export type Html =
+	| Tag
+	| SyncedTextInput
+	| SyncedCheckboxInput
+	| SyncedRadioInput
+	| SyncedSelect
 
 export class Tag {
 	readonly type = 'Tag' as const
 	constructor(
 		readonly ident: string,
-		readonly metas: Meta[],
-		readonly attributes: Attribute[],
+		readonly attributes: TagAttributes,
 		readonly entities: Entity[],
 	) {}
 }
-// enum MetaType { class, id }
+
+export class TagAttributes {
+	constructor(
+		readonly metas: Meta[],
+		readonly bindings: Dict<BindingAttribute>,
+		readonly events: Dict<NonEmpty<EventAttribute>>,
+		readonly receivers: ReceiverAttribute[],
+		// readonly refs: RefAttribute | undefined,
+	) {}
+}
+
 export class Meta {
 	constructor(
 		readonly isClass: boolean,
 		readonly isDynamic: boolean,
 		readonly value: string,
-	) {}
-}
-
-export class Attribute {
-	constructor(
-		readonly name: string,
-		readonly value: string | AttributeCode | undefined,
 	) {}
 }
 export class AttributeCode {
@@ -70,6 +63,85 @@ export class AttributeCode {
 		readonly code: string,
 	) {}
 }
+
+export class BindingAttribute {
+	constructor(
+		readonly attribute: string,
+		readonly value: BindingValue,
+	) {}
+}
+export type BindingValue =
+	| { type: 'empty' }
+	| { type: 'static', value: string }
+	| { type: 'dynamic', code: AttributeCode, initialModifier: boolean }
+	| { type: 'reactive', reactiveCode: AttributeCode }
+export type ExistentBindingValue = OmitVariants<BindingValue, 'type', 'empty'>
+
+export class EventAttribute {
+	constructor(
+		readonly event: string,
+		readonly variety: 'bare' | 'inline' | 'handler',
+		readonly code: string,
+	) {}
+}
+
+export class ReceiverAttribute {
+	constructor(
+		readonly code: string,
+	) {}
+}
+// export class RefAttribute {
+// 	constructor(
+// 		readonly ident: string,
+// 		readonly variety: 'ref' | 'deref',
+// 	) {}
+// }
+
+export class SyncedTextInput {
+	readonly type = 'SyncedTextInput' as const
+	constructor(
+		readonly isTextarea: boolean,
+		readonly mutable: AttributeCode,
+		readonly attributes: TagAttributes,
+	) {}
+}
+export class SyncedCheckboxInput {
+	readonly type = 'SyncedCheckboxInput' as const
+	constructor(
+		readonly mutable: AttributeCode,
+		readonly value: ExistentBindingValue | undefined,
+		readonly attributes: TagAttributes,
+	) {}
+}
+export class SyncedRadioInput {
+	readonly type = 'SyncedRadioInput' as const
+	constructor(
+		readonly mutable: AttributeCode,
+		readonly value: ExistentBindingValue,
+		readonly attributes: TagAttributes,
+	) {}
+}
+
+// export class SyncedSelect {
+// 	readonly type = 'SyncedSelect' as const
+// 	constructor(
+// 		readonly mutable: AttributeCode,
+// 		readonly groups: SyncedSelectGroup[],
+// 		readonly attributes: TagAttributes,
+// 	) {}
+// }
+// export class SyncedSelectGroup {
+// 	constructor(
+// 		readonly options: SyncedSelectOption[],
+// 		readonly attributes: TagAttributes,
+// 	) {}
+// }
+// export class SyncedSelectOption {
+// 	constructor(
+// 		readonly value: ExistentBindingValue,
+// 		readonly attributes: TagAttributes,
+// 	) {}
+// }
 
 
 export class TextSection {
@@ -96,8 +168,6 @@ export type Directive =
 	| EachBlock
 	| MatchBlock
 	| SwitchBlock
-	| SlotUsage
-	| SlotInsertion
 	| TemplateDefinition
 	| TemplateInclusion
 	// | VariableBinding
@@ -106,8 +176,20 @@ export class ComponentInclusion {
 	readonly type = 'ComponentInclusion' as const
 	constructor(
 		readonly name: string,
-		readonly params: Attribute[],
-		readonly entities: Entity[],
+		readonly props: Dict<BindingAttribute>,
+		readonly syncs: Dict<SyncAttribute>,
+		// readonly nativeEvents: Dict<NonEmpty<EventAttribute>>,
+		readonly events: Dict<NonEmpty<EventAttribute>>,
+		readonly slotInsertions: Dict<SlotInsertion>,
+	) {}
+}
+export const enum SyncModifier { fake, setter }
+export class SyncAttribute {
+	readonly type = 'SyncAttribute' as const
+	constructor(
+		readonly attribute: string,
+		readonly modifier: SyncModifier | undefined,
+		readonly code: AttributeCode,
 	) {}
 }
 
