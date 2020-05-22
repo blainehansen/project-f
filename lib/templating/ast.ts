@@ -1,7 +1,3 @@
-// import { Result, Ok, Err } from '@ts-std/monads'
-// export type ParseError = string[]
-// export type ParseResult<T> = Result<T, ParseError>
-
 import { Dict, NonEmpty, OmitVariants } from '../utils'
 
 
@@ -65,6 +61,7 @@ export class AttributeCode {
 }
 
 export class BindingAttribute {
+	readonly type = 'BindingAttribute' as const
 	constructor(
 		readonly attribute: string,
 		readonly value: BindingValue,
@@ -76,8 +73,10 @@ export type BindingValue =
 	| { type: 'dynamic', code: AttributeCode, initialModifier: boolean }
 	| { type: 'reactive', reactiveCode: AttributeCode }
 export type ExistentBindingValue = OmitVariants<BindingValue, 'type', 'empty'>
+export type InertBindingValue = OmitVariants<BindingValue, 'type', 'empty' | 'reactive'>
 
 export class EventAttribute {
+	readonly type = 'EventAttribute' as const
 	constructor(
 		readonly event: string,
 		readonly variety: 'bare' | 'inline' | 'handler',
@@ -86,16 +85,25 @@ export class EventAttribute {
 }
 
 export class ReceiverAttribute {
+	readonly type = 'ReceiverAttribute' as const
 	constructor(
-		readonly code: string,
+		readonly code: AttributeCode,
 	) {}
 }
 // export class RefAttribute {
+// 	readonly type = 'RefAttribute' as const
 // 	constructor(
 // 		readonly ident: string,
 // 		readonly variety: 'ref' | 'deref',
 // 	) {}
 // }
+
+export type Attribute =
+	| BindingAttribute
+	| SyncAttribute
+	| EventAttribute
+	| ReceiverAttribute
+	// | RefAttribute
 
 export class SyncedTextInput {
 	readonly type = 'SyncedTextInput' as const
@@ -109,7 +117,8 @@ export class SyncedCheckboxInput {
 	readonly type = 'SyncedCheckboxInput' as const
 	constructor(
 		readonly mutable: AttributeCode,
-		readonly value: ExistentBindingValue | undefined,
+		// readonly value: ExistentBindingValue | undefined,
+		readonly value: InertBindingValue | undefined,
 		readonly attributes: TagAttributes,
 	) {}
 }
@@ -117,31 +126,19 @@ export class SyncedRadioInput {
 	readonly type = 'SyncedRadioInput' as const
 	constructor(
 		readonly mutable: AttributeCode,
-		readonly value: ExistentBindingValue,
+		// readonly value: ExistentBindingValue,
+		readonly value: InertBindingValue,
 		readonly attributes: TagAttributes,
 	) {}
 }
-
-// export class SyncedSelect {
-// 	readonly type = 'SyncedSelect' as const
-// 	constructor(
-// 		readonly mutable: AttributeCode,
-// 		readonly groups: SyncedSelectGroup[],
-// 		readonly attributes: TagAttributes,
-// 	) {}
-// }
-// export class SyncedSelectGroup {
-// 	constructor(
-// 		readonly options: SyncedSelectOption[],
-// 		readonly attributes: TagAttributes,
-// 	) {}
-// }
-// export class SyncedSelectOption {
-// 	constructor(
-// 		readonly value: ExistentBindingValue,
-// 		readonly attributes: TagAttributes,
-// 	) {}
-// }
+export class SyncedSelect {
+	readonly type = 'SyncedSelect' as const
+	constructor(
+		readonly mutable: AttributeCode,
+		readonly isMultiple: boolean,
+		readonly attributes: TagAttributes,
+	) {}
+}
 
 
 export class TextSection {
@@ -269,7 +266,6 @@ export class SlotUsage {
 }
 
 export class SlotInsertion {
-	readonly type = 'SlotInsertion' as const
 	constructor(
 		readonly name: string | undefined,
 		readonly paramsExpression: string | undefined,

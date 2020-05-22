@@ -4,27 +4,23 @@
 import {
 	Displayable, DisplayType, Range, ContentState,
 	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
-	syncTextElement, syncCheckboxElement, syncGroupCheckboxElement, syncElementAttribute, syncRadioElement,
+	syncTextElement, syncCheckboxElement, syncElementAttribute,
+	syncRadioElement, syncRadioElementReactive, syncSelectElement, syncSelectMultipleElement
  } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
 export function SelectInput(realParent: Node, parent: DocumentFragment) {
-	const selected = value(null as null | string)
+	const selected = value("")
 	const changingC = value("C")
 
 	const select = createElement(parent, 'select')
-	select.onchange = $event => {
-		selected(($event.target as typeof select).value)
-	}
-	// effect(() => {
-	// 	select.value = selected()
-	// })
-	// syncSelectElement(select, selected)
+	select.multiple = true
+	syncSelectElement(select, selected)
 
 	const def = createElement(select, 'option')
-	def.textContent = 'Please select one'
+	def.textContent = "Please select one"
 	def.disabled = true
-
+	def.value = ""
 	const A = createElement(select, 'option')
 	A.textContent = 'A'
 	const B = createElement(select, 'option')
@@ -41,9 +37,8 @@ export function SelectInput(realParent: Node, parent: DocumentFragment) {
 		display.data = '' + selected()
 	})
 
-	return { selected, changingC, A, B, C }
+	return { selected, changingC, def, A, B, C }
 }
-
 
 const parent = document.body
 const container = document.createDocumentFragment()

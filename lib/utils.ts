@@ -6,6 +6,15 @@ export function exec<T>(fn: () => T): T {
 	return fn()
 }
 
+export function splitGuard<T, U>(arr: (T | U)[], fn: (v: T | U) => v is U): [U[], T[]] {
+	const guarded: U[] = []
+	const rest: T[] = []
+	for (const item of arr)
+		if (fn(item)) guarded.push(item)
+		else rest.push(item)
+	return [guarded, rest]
+}
+
 export type Dict<T> = { [key: string]: T }
 export type Primitive = string | number | boolean | null | undefined
 export type OnlyAllow<A, E> = A extends E ? A : never

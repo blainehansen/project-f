@@ -7,7 +7,8 @@ import { NonLone, exec } from '../utils'
 import {
 	Displayable, DisplayType, Range, ContentState,
 	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
-	syncTextElement, syncCheckboxElement, syncGroupCheckboxElement, syncElementAttribute, syncRadioElement, syncSelectElement,
+	syncTextElement, syncCheckboxElement, syncElementAttribute,
+	syncRadioElement, syncRadioElementReactive, syncSelectElement, syncSelectMultipleElement
  } from './index'
 import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
 
@@ -241,122 +242,116 @@ describe('TextareaInput', () => it('works', () => {
 }))
 
 
-// input(type="checkbox", !sync=thing, value="some string")
-// input(type="checkbox", !sync=thing, value={ [1, 2, 3] })
-// input(type="checkbox", !sync=thing, :value=stringValue)
-// | {{ '' + thing() }}
-export function CheckboxGroupInput(realParent: Node, parent: DocumentFragment) {
-	const things = channel([] as (string | number[])[])
-	const stringValue = value("changes")
+// // input(type="checkbox", !sync=thing, value="some string")
+// // input(type="checkbox", !sync=thing, value={ [1, 2, 3] })
+// // input(type="checkbox", !sync=thing, :value=stringValue)
+// // | {{ '' + thing() }}
+// export function CheckboxGroupInput(realParent: Node, parent: DocumentFragment) {
+// 	const things = channel([] as (string | number[])[])
+// 	const stringValue = value("changes")
 
-	const one = createElement(parent, 'input')
-	one.type = 'checkbox'
-	syncGroupCheckboxElement(one, things, () => "some string")
-	const two = createElement(parent, 'input')
-	two.type = 'checkbox'
-	const arr = [1, 2, 3]
-	syncGroupCheckboxElement(two, things, () => arr)
-	const three = createElement(parent, 'input')
-	three.type = 'checkbox'
-	syncGroupCheckboxElement(three, things, stringValue)
+// 	const one = createElement(parent, 'input')
+// 	one.type = 'checkbox'
+// 	syncGroupCheckboxElement(one, things, () => "some string")
+// 	const two = createElement(parent, 'input')
+// 	two.type = 'checkbox'
+// 	const arr = [1, 2, 3]
+// 	syncGroupCheckboxElement(two, things, () => arr)
+// 	const three = createElement(parent, 'input')
+// 	three.type = 'checkbox'
+// 	syncGroupCheckboxElement(three, things, stringValue)
 
-	const display = createTextNode(parent, '')
-	effect(() => {
-		display.data = '' + things()
-	})
+// 	const display = createTextNode(parent, '')
+// 	effect(() => {
+// 		display.data = '' + things()
+// 	})
 
-	return { things, arr, stringValue, one, two, three }
-}
-describe('CheckboxGroupInput', () => it('works', () => {
-	const { things, arr, stringValue, one, two, three } = CheckboxGroupInput(body, body as unknown as DocumentFragment)
-	const checkboxText = inputText('checkbox')
-	const checkboxInputText = (v: string) => checkboxText + checkboxText + checkboxText + v
+// 	return { things, arr, stringValue, one, two, three }
+// }
+// describe('CheckboxGroupInput', () => it('works', () => {
+// 	const { things, arr, stringValue, one, two, three } = CheckboxGroupInput(body, body as unknown as DocumentFragment)
+// 	const checkboxText = inputText('checkbox')
+// 	const checkboxInputText = (v: string) => checkboxText + checkboxText + checkboxText + v
 
-	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(checkboxInputText(''))
+// 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
+// 	expect(body.innerHTML).equal(checkboxInputText(''))
 
-	let t = things()
-	t.push("some string")
-	things(t)
-	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
-	expect(body.innerHTML).equal(checkboxInputText("some string"))
+// 	let t = things()
+// 	t.push("some string")
+// 	things(t)
+// 	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
+// 	expect(body.innerHTML).equal(checkboxInputText("some string"))
 
-	t.push(arr)
-	things(t)
-	expect([one.checked, two.checked, three.checked]).eql([true, true, false])
-	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3"))
+// 	t.push(arr)
+// 	things(t)
+// 	expect([one.checked, two.checked, three.checked]).eql([true, true, false])
+// 	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3"))
 
-	t.push("changes")
-	things(t)
-	expect([one.checked, two.checked, three.checked]).eql([true, true, true])
-	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
+// 	t.push("changes")
+// 	things(t)
+// 	expect([one.checked, two.checked, three.checked]).eql([true, true, true])
+// 	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
 
-	stringValue("not changes")
-	things(t)
-	expect([one.checked, two.checked, three.checked]).eql([true, true, false])
-	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
+// 	stringValue("not changes")
+// 	things(t)
+// 	expect([one.checked, two.checked, three.checked]).eql([true, true, false])
+// 	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
 
-	t = []
-	things(t)
-	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(checkboxInputText(''))
-}))
+// 	t = []
+// 	things(t)
+// 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
+// 	expect(body.innerHTML).equal(checkboxInputText(''))
+// }))
 
 
+// input(type="radio", !sync=thing, value="")
 // input(type="radio", !sync=thing, value="some string")
-// input(type="radio", !sync=thing, value={ [1, 2, 3] })
 // input(type="radio", !sync=thing, :value=stringValue)
 // | {{ '' + thing() }}
 export function RadioInput(realParent: Node, parent: DocumentFragment) {
-	const thing = channel(null as null | string | number[])
+	const thing = channel("blargh")
 	const stringValue = value("changes")
 
 	const one = createElement(parent, 'input')
 	one.type = 'radio'
-	syncRadioElement(one, thing, () => "some string")
+	syncRadioElement(one, thing, '')
 	const two = createElement(parent, 'input')
 	two.type = 'radio'
-	const arr = [1, 2, 3]
-	syncRadioElement(two, thing, () => arr)
+	syncRadioElement(two, thing, "some string")
 	const three = createElement(parent, 'input')
 	three.type = 'radio'
-	syncRadioElement(three, thing, stringValue)
+	syncRadioElementReactive(three, thing, stringValue)
 
 	const display = createTextNode(parent, '')
 	effect(() => {
 		display.data = '' + thing()
 	})
 
-	return { thing, arr, stringValue, one, two, three }
+	return { thing, stringValue, one, two, three }
 }
 describe('RadioInput', () => it('works', () => {
-	const { thing, arr, stringValue, one, two, three } = RadioInput(body, body as unknown as DocumentFragment)
-	const radioText = inputText('radio')
-	const radioInputText = (v: string) => radioText + radioText + radioText + v
+	const { thing, stringValue, one, two, three } = RadioInput(body, body as unknown as DocumentFragment)
+	const radioInputText = (v: string) => one.outerHTML + two.outerHTML + three.outerHTML + v
 
 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(radioInputText('null'))
+	expect(body.innerHTML).equal(radioInputText('blargh'))
+
+	thing("")
+	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
+	expect(body.innerHTML).equal(radioInputText(""))
 
 	thing("some string")
-	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
-	expect(body.innerHTML).equal(radioInputText("some string"))
-
-	thing(arr)
 	expect([one.checked, two.checked, three.checked]).eql([false, true, false])
-	expect(body.innerHTML).equal(radioInputText([1, 2, 3].join(',')))
+	expect(body.innerHTML).equal(radioInputText("some string"))
 
 	thing("changes")
 	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
 	expect(body.innerHTML).equal(radioInputText("changes"))
 
-	thing(null)
-	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(radioInputText('null'))
-
 	stringValue("not changes")
 	// AGH
 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(radioInputText('null'))
+	expect(body.innerHTML).equal(radioInputText('changes'))
 
 	thing("not changes")
 	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
@@ -365,21 +360,21 @@ describe('RadioInput', () => it('works', () => {
 
 
 // select(!sync=selected)
-//   option(disabled, value=null) Please select one
+//   option(disabled, value="") Please select one
 //   option A
 //   option(value="Basic") B
 //   option(:value=changingC) C
 // {{ '' + selected }}
 export function SelectInput(realParent: Node, parent: DocumentFragment) {
-	const selected = value(null as null | string)
+	const selected = value("")
 	const changingC = value("C")
 
 	const select = createElement(parent, 'select')
-	// syncSelectElement(select, selected)
 
 	const def = createElement(select, 'option')
+	def.textContent = "Please select one"
 	def.disabled = true
-	def.value = null
+	def.value = ""
 	const A = createElement(select, 'option')
 	A.textContent = 'A'
 	const B = createElement(select, 'option')
@@ -387,26 +382,118 @@ export function SelectInput(realParent: Node, parent: DocumentFragment) {
 	B.value = 'Basic'
 	const C = createElement(select, 'option')
 	C.textContent = 'C'
-	C.value = 'C'
+	effect(() => {
+		C.value = changingC()
+	})
+	syncSelectElement(select, selected)
 
 	const display = createTextNode(parent, '')
 	effect(() => {
 		display.data = '' + selected()
 	})
 
-	return { selected, changingC, A, B, C }
+	return { selected, select, changingC, def, A, B, C }
 }
 describe('SelectInput', () => it('works', () => {
-	const { thing, arr, stringValue, one, two, three } = SelectInput(body, body as unknown as DocumentFragment)
-	const radioText = inputText('radio')
-	const radioInputText = (v: string) => radioText + radioText + radioText + v
+	const { selected, select, changingC, def, A, B, C } = SelectInput(body, body as unknown as DocumentFragment)
+	const selectText = (v: string) => select.outerHTML + v
 
-	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
-	expect(body.innerHTML).equal(radioInputText('null'))
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([true, false, false, false])
+	expect(body.innerHTML).equal(selectText(''))
 
-	thing("some string")
-	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
-	expect(body.innerHTML).equal(radioInputText("some string"))
+	selected("some string")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, false])
+	expect(body.innerHTML).equal(selectText("some string"))
+
+	selected("A")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, true, false, false])
+	expect(body.innerHTML).equal(selectText("A"))
+
+	selected("Basic")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, true, false])
+	expect(body.innerHTML).equal(selectText("Basic"))
+
+	selected("C")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
+	expect(body.innerHTML).equal(selectText("C"))
+
+	changingC("Casic")
+	// AGH
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
+	expect(body.innerHTML).equal(selectText("C"))
+
+	selected("Casic")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
+	expect(body.innerHTML).equal(selectText("Casic"))
+
+	selected("")
+	expect([def.selected, A.selected, B.selected, C.selected]).eql([true, false, false, false])
+	expect(body.innerHTML).equal(selectText(''))
+}))
+
+
+// select(!sync=selected, multiple)
+//   option A
+//   option(value="Basic") B
+//   option(:value=changingC) C
+// {{ '' + selected }}
+export function SelectInputMultiple(realParent: Node, parent: DocumentFragment) {
+	const selected = channel([] as string [])
+	const changingC = value("C")
+
+	const select = createElement(parent, 'select')
+	select.multiple = true
+
+	const A = createElement(select, 'option')
+	A.textContent = 'A'
+	const B = createElement(select, 'option')
+	B.textContent = 'B'
+	B.value = 'Basic'
+	const C = createElement(select, 'option')
+	C.textContent = 'C'
+	effect(() => {
+		C.value = changingC()
+	})
+	syncSelectMultipleElement(select, selected)
+
+	const display = createTextNode(parent, '')
+	effect(() => {
+		display.data = '' + selected()
+	})
+
+	return { selected, select, changingC, A, B, C }
+}
+describe('SelectInputMultiple', () => it('works', () => {
+	const { selected, select, changingC, A, B, C } = SelectInputMultiple(body, body as unknown as DocumentFragment)
+	const selectText = (v: string) => select.outerHTML + v
+
+	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
+	expect(body.innerHTML).equal(selectText(''))
+
+	selected(["some string"])
+	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
+	expect(body.innerHTML).equal(selectText("some string"))
+
+	selected(["A", "Basic"])
+	expect([A.selected, B.selected, C.selected]).eql([true, true, false])
+	expect(body.innerHTML).equal(selectText("A,Basic"))
+
+	selected(["C"])
+	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
+	expect(body.innerHTML).equal(selectText("C"))
+
+	changingC("Casic")
+	// AGH
+	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
+	expect(body.innerHTML).equal(selectText("C"))
+
+	selected(["Casic"])
+	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
+	expect(body.innerHTML).equal(selectText("Casic"))
+
+	selected([])
+	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
+	expect(body.innerHTML).equal(selectText(''))
 }))
 
 

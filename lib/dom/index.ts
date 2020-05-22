@@ -59,64 +59,101 @@ export function syncCheckboxElement(
 		checkbox.checked = checked()
 	})
 }
-export function syncCheckboxElementOnOff<T>(
-	checkbox: HTMLInputElement,
-	value: Mutable<T>,
-	on: T, off: T,
-) {
-	checkbox.onchange = $event => {
-		value(($event.target as typeof checkbox).checked ? on : off)
-	}
-	effect(() => {
-		checkbox.checked = value() === on
-	})
-}
-export function syncGroupCheckboxElement<T>(checkbox: HTMLInputElement, group: Mutable<T[]>, value: Immutable<T>) {
-	checkbox.onchange = $event => {
-		const val = value()
-		const current = group()
-		const index = current.indexOf(val)
-		if (index >= 0) {
-			current.splice(index, 1)
-			group(current)
-		}
-		else {
-			current.push(val)
-			group(current)
-		}
-	}
-	effect(() => {
-		checkbox.checked = group().includes(value())
-	})
-}
-
-export function syncRadioElement<T>(radio: HTMLInputElement, mutable: Mutable<T>, value: Immutable<T>) {
-	radio.onchange = $event => {
-		if (($event.target as typeof radio).checked)
-			mutable(value())
-	}
-	effect(() => {
-		radio.checked = mutable() === value()
-	})
-}
-// export function syncRadioElement(radio: HTMLInputElement, mutable: Mutable<string>) {
-// 	radio.onchange = $event => {
-// 		const target = $event.target as typeof radio
-// 		if (target.checked)
-// 			mutable(target.value)
-// 			// mutable(value())
+// export function syncCheckboxElementOnOff<T>(
+// 	checkbox: HTMLInputElement,
+// 	value: Mutable<T>,
+// 	on: T, off: T,
+// ) {
+// 	checkbox.onchange = $event => {
+// 		value(($event.target as typeof checkbox).checked ? on : off)
 // 	}
 // 	effect(() => {
-// 		radio.checked = mutable() === radio.value
+// 		checkbox.checked = value() === on
 // 	})
 // }
+// export function syncGroupCheckboxElement(checkbox: HTMLInputElement, group: Mutable<string[]>) {
+// 	checkbox.onchange = $event => {
+// 		const value = ($event.target as typeof checkbox).value
+// 		const current = group()
+// 		const index = current.indexOf(value)
+// 		if (index >= 0) {
+// 			current.splice(index, 1)
+// 			group(current)
+// 		}
+// 		else {
+// 			current.push(value)
+// 			group(current)
+// 		}
+// 	}
+// 	effect(() => {
+// 		checkbox.checked = group().includes(checkbox.value)
+// 	})
+// }
+
+export function syncRadioElement(radio: HTMLInputElement, mutable: Mutable<string>, initial: string) {
+	radio.value = initial
+	radio.onchange = $event => {
+		const { checked, value } = $event.target as typeof radio
+		if (checked)
+			mutable(value)
+	}
+	effect(() => {
+		radio.checked = mutable() === radio.value
+	})
+}
+export function syncRadioElementReactive(radio: HTMLInputElement, mutable: Mutable<string>, value: Immutable<string>) {
+	radio.onchange = $event => {
+		const target = $event.target as typeof radio
+		if (target.checked)
+			mutable(target.value)
+	}
+	effect(() => {
+		radio.value = value()
+		radio.checked = mutable() === radio.value
+		// if (radio.checked)
+		// 	link(mutable, value)
+		// else
+		// 	unlink(mutable, value)
+	})
+}
 
 export function syncSelectElement(select: HTMLSelectElement, mutable: Mutable<string>) {
 	select.onchange = $event => {
 		mutable(($event.target as typeof select).value)
 	}
 	effect(() => {
-		select.value = mutable()
+		const value = mutable()
+		for (const child of select.children)
+			if (child instanceof HTMLOptionElement)
+				child.selected = value === child.value
+			else if (child instanceof HTMLOptGroupElement)
+				for (const groupChild of child.children)
+					if (groupChild instanceof HTMLOptionElement)
+						groupChild.selected = value === groupChild.value
+	})
+}
+export function syncSelectMultipleElement(select: HTMLSelectElement, mutable: Mutable<string[]>) {
+	select.onchange = $event => {
+		const values = []
+		const target = $event.target as typeof select
+		for (const child of target.children)
+			if (child instanceof HTMLOptionElement && child.selected)
+				values.push(child.value)
+			else if (child instanceof HTMLOptGroupElement)
+				for (const groupChild of child.children)
+					if (groupChild instanceof HTMLOptionElement && groupChild.selected)
+						values.push(groupChild.value)
+		mutable(values)
+	}
+	effect(() => {
+		const values = mutable()
+		for (const child of select.children)
+			if (child instanceof HTMLOptionElement)
+				child.selected = values.includes(child.value)
+			else if (child instanceof HTMLOptGroupElement)
+				for (const groupChild of child.children)
+					if (groupChild instanceof HTMLOptionElement)
+						groupChild.selected = values.includes(groupChild.value)
 	})
 }
 
