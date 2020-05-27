@@ -1,0 +1,34 @@
+#! template
+.rating
+	ul.list: @each (star of :starItems)
+		li.star.{ star.active && 'active' }(@click={ stars(star.amount) })
+			i.{ star.active ? 'fas fa-star' : 'far fa-star' }
+
+	@if (:hasCounter): .counter
+		span.score-rating {{: stars }}
+		span.divider
+		span.score-max {{: maxStars }}
+
+#! script
+import { Args, derived } from 'project-f'
+
+export type Component = {
+	props: {
+		maxStars: number, hasCounter: boolean,
+	},
+	syncs: {
+		stars: number,
+	},
+}
+
+export function create({ maxStars, stars }: Args<Component>) {
+	const starItems = derived((stars, maxStars) => {
+		const items: { active: boolean, amount: number }[] = []
+		for (let starIndex = 0; starIndex <= maxStars; starIndex++)
+			items.push({ active: starIndex + 1 <= stars, amount: starIndex + 1 })
+
+		return items
+	}, stars, maxStars)
+
+	return { starItems }
+}

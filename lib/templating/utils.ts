@@ -1,4 +1,7 @@
+import { Span } from 'kreia/dist/runtime/lexer'
 import { Result, Ok, Err } from '@ts-std/monads'
+
+import { NonEmpty, Dict } from '../utils'
 
 export type ParseError = Readonly<{ span: Span, title: string, message: string, error: true }>
 export function ParseError(span: Span, title: string, message: string) {
@@ -10,7 +13,9 @@ export function ParseWarning(span: Span, title: string, message: string): ParseW
 	return { span, title, message, error: false } as ParseWarning
 }
 
-export type ParseResult<T> = Result<{ value: T, warnings: ParseWarning[] }, { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }>
+export type ParseOkPayload<T> = { value: T, warnings: ParseWarning[] }
+export type ParseErrorPayload = { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }
+export type ParseResult<T> = Result<ParseOkPayload<T>, ParseErrorPayload>
 
 export class Parse<T> {
 	private errors: ParseError[] = []
@@ -20,6 +25,20 @@ export class Parse<T> {
 	}
 	error(error: ParseError) {
 		this.errors.push(error)
+	}
+
+	subsume<T>(result: ParseResult<T>): Result<T, ParseErrorPayload> {
+		if (result.is_err()) return Err(result.error)
+
+		const { value, warnings } = result.value
+		this.warnings = this.warnings.concat(warnings)
+		return Ok(value)
+	}
+	ret(err: ParseErrorPayload): ParseResult<T> {
+		const { errors: selfErrors, warnings: selfWarnings } = this.drop()
+		const errors = selfErrors.concat(err.errors) as NonEmpty<ParseError>
+		const warnings = selfWarnings.concat(err.warnings)
+		return Err({ errors, warnings })
 	}
 
 	private drop() {
@@ -32,21 +51,25 @@ export class Parse<T> {
 	Err(error: ParseError): ParseResult<T> {
 		const { errors, warnings } = this.drop()
 		errors.push(error)
-		return Err({ errors, warnings })
+		return Err({ errors: errors as NonEmpty<ParseError>, warnings })
 	}
-	Ok(value: T): ParseResult<T> {
+	Ok(lazyValue: () => T): ParseResult<T> {
 		const { errors, warnings } = this.drop()
 		return errors.length > 0
-			? Err({ errors, warnings })
-			: Ok({ value, warnings })
+			? Err({ errors: errors as NonEmpty<ParseError>, warnings })
+			: Ok({ value: lazyValue(), warnings })
 	}
 }
 
 
 export const Errors = {
-	requiresCode: (span: Span, variety: string) => ParseError(span, "requires code", `static attribute values are invalid for ${variety}`),
-	// noModifiers: (span: Span, variety: string) => ParseError(span, "invalid modifiers", `modifiers aren't allowed on ${variety}`),
-	conflictingModifiers: (span: Span, message: string) => ParseError(span, "conflicting modifiers", message),
+	requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
+	// noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
+	conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
+	invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
+	invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
+	invalidSelectMultiple: (span: Span) =>
+		ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
 }
 export const Warnings = {
 	checkExtraneousModifiers(parse: Parse<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
@@ -56,3 +79,92 @@ export const Warnings = {
 	},
 	leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
 }
+
+
+export function parseExpect<T>(result: ParseResult<T>, lineWidth: number): ParseOkPayload<T> {
+	if (result.is_ok()) return result.value
+
+	const { errors, warnings } = result.error
+	const message = (errors as (ParseError | ParseWarning)[]).concat(warnings)
+		.sort((a, b) => a.span.start - b.span.start)
+		.map(d => formatDiagnostic(d, lineWidth))
+		.join('\n\n\n') + '\n'
+	throw new Error(message)
+}
+
+
+const chalk = require('chalk')
+const info = chalk.blue.bold
+const file = chalk.magentaBright.bold
+
+export function formatDiagnostic(
+	{ span: { file: { source, filename }, start, end, line, column }, title, message, error }: ParseError | ParseWarning,
+	lineWidth: number,
+): string {
+	const headerPrefix = info(`-- ${title.toUpperCase()} `)
+	const header = headerPrefix + info('-'.repeat(lineWidth - (title.length + 4)))
+	const fileHeader = (filename ? file(filename) + '\n' : '')
+
+	const pointerWidth = end - start
+	const lineNumberWidth = line.toString().length
+	function makeGutter(lineNumber?: number) {
+		const insert = lineNumber !== undefined
+			? ' '.repeat(lineNumberWidth - lineNumber.toString().length) + lineNumber
+			: ' '.repeat(lineNumberWidth)
+		return info(`\n ${insert} |  `)
+	}
+	const blankGutter = makeGutter()
+	const margin = `\n${' '.repeat(lineNumberWidth)}  `
+
+	let sourceLineStart = start
+	for (; sourceLineStart >= 0; sourceLineStart--)
+		if (source[sourceLineStart] === '\n') break
+
+	const sourceLineEnd = source.indexOf('\n', start)
+	const sourceLine = source.slice(sourceLineStart + 1, sourceLineEnd)
+
+	const printSourceLine = sourceLine.replace('\t', '  ')
+	const pointerPrefix = sourceLine.slice(0, column).replace('\t', '  ')
+	const highlight = error ? chalk.red.bold : chalk.yellow.bold
+	const pointer = pointerPrefix + highlight('^'.repeat(pointerWidth))
+
+	return header
+		+ '\n' + fileHeader
+		+ blankGutter
+		+ makeGutter(line) + printSourceLine
+		+ blankGutter + pointer
+		+ '\n' + formatMessage(message, margin, lineWidth)
+}
+
+function formatMessage(message: string, margin: string, lineWidth: number) {
+	return message.split(/\n+/).map(paragraph => {
+		const lines: string[] = []
+		let line = margin
+		const words = paragraph.split(/[ \t]+/)
+		for (const word of words) {
+			if (line.length + word.length + 1 > lineWidth) {
+				lines.push(line)
+				line = margin + ' ' + word
+			}
+			else line += ' ' + word
+		}
+		if (line !== margin)
+			lines.push(line)
+
+		return lines.join('')
+	}).join('\n')
+}
+
+// const source = `span something stufff
+// if (def)
+// 	whatevs() then sdf
+// sdfd
+// `
+
+
+// const span = { file: { source, filename: 'lib/compiler/lexer.ts' }, start: 32, end: 32 + 7, line: 3, column: 1 }
+// const m = [
+// 	formatDiagnostic(ParseError(span, 'big problem', "This is a very big problem.\nIn order to solve this you really have to do a big thing and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this.\nSound good?"), process.stdout.columns),
+// 	formatDiagnostic(ParseWarning(span, 'big problem', "This is a very big problem"), process.stdout.columns),
+// ].join('\n\n\n') + '\n'
+// console.log(m)

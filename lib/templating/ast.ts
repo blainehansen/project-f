@@ -1,5 +1,5 @@
+import { Span } from 'kreia/dist/runtime/lexer'
 import { Dict, NonEmpty, OmitVariants } from '../utils'
-
 
 export enum LivenessType { static, dynamic, reactive }
 
@@ -266,6 +266,7 @@ export class SlotUsage {
 }
 
 export class SlotInsertion {
+	readonly type = 'SlotInsertion' as const
 	constructor(
 		readonly name: string | undefined,
 		readonly paramsExpression: string | undefined,

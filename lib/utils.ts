@@ -6,12 +6,12 @@ export function exec<T>(fn: () => T): T {
 	return fn()
 }
 
-export function splitGuard<T, U>(arr: (T | U)[], fn: (v: T | U) => v is U): [U[], T[]] {
+export function splitGuard<T, U extends T>(arr: T[], fn: (v: T) => v is U): [U[], Exclude<T, U>[]] {
 	const guarded: U[] = []
-	const rest: T[] = []
+	const rest: Exclude<T, U>[] = []
 	for (const item of arr)
 		if (fn(item)) guarded.push(item)
-		else rest.push(item)
+		else rest.push(item as Exclude<T, U>)
 	return [guarded, rest]
 }
 

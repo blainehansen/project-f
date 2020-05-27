@@ -1,22 +1,33 @@
 import ts = require('typescript')
+import { Span } from 'kreia/dist/runtime/lexer'
+import { Result, Ok, Err, Maybe, Some, None } from '@ts-std/monads'
+
+import { parseExpect } from './utils'
 import { Dict, NonEmpty } from '../utils'
-import { ComponentDefinition, Entity } from './ast'
 import { reset, exit, wolf } from './wolf.grammar'
+import { ComponentDefinition, Entity } from './ast'
 import { generateComponentDefinition } from './codegen'
 
-export function processFile(source: string) {
+// we generally want to allow people to have scriptless component files
+// if there's no script section at all, then we can backfill slots (which suddenly requires that useages are unique),
+// and we simply don't call
+
+export function processFile(source: string, filename = '') {
 	// TODO what to do with these? style, others
 	const { template, script, style, others } = cutSource(source)
-	const sourceFile = ts.createSourceFile('', script, ts.ScriptTarget.Latest, true)
+	const sourceFile = ts.createSourceFile(filename, script, ts.ScriptTarget.Latest, true)
 	const { props, syncs, events, slots, createFn } = inspect(sourceFile)
 
 	reset(template)
-	const entities = wolf()
+	const entitiesResult = wolf()
 	exit()
+	const { value: entities, warnings } = parseExpect(entitiesResult)
+
 	const definition = new ComponentDefinition(
 		props, syncs, events, slots, createFn,
 		NonEmpty.expect(entities, "a component definition's template shouldn't be empty"),
 	)
+	// warnings
 	return generateComponentDefinition(definition)
 }
 
@@ -154,28 +165,28 @@ function isNodeExported(node: ts.Node): boolean {
 const sectionMarker = /^#! (\S+)(?: lang="(\S+)")?[ \t]*\n?/m
 type Section = { name: string, lang: string, text: string }
 export function cutSource(rawSource: string) {
-	let scriptSection = undefined as string | undefined
-	let styleSection = undefined as Section | undefined
-	let templateSection = undefined as Section | undefined
+	let scriptSection = None as Maybe<string>
+	let styleSection = None as Maybe<Section>
+	let templateSection = None as Maybe<Section>
 	const sections = {} as Dict<Section>
 
 	function placeSection(name: string, lang: string | undefined, text: string) {
 		switch (name) {
 			case 'script':
 				if (lang !== undefined) throw new Error("script section must be in typescript")
-				if (scriptSection !== undefined) throw new Error("duplicate scriptSection")
+				if (scriptSection !== undefined) throw new Error("duplicate script section")
 				scriptSection = text
 				break
 			case 'style':
-				if (styleSection !== undefined) throw new Error("duplicate styleSection")
+				if (styleSection !== undefined) throw new Error("duplicate style section")
 				styleSection = { name, lang: lang || 'css', text }
 				break
 			case 'template':
-				if (templateSection !== undefined) throw new Error("duplicate templateSection")
+				if (templateSection !== undefined) throw new Error("duplicate template section")
 				templateSection = { name, lang: lang || 'wolf', text }
 				break
 			default:
-				if (lang === undefined) throw new Error("sections other than the script and template must specify a lang")
+				if (lang === undefined) throw new Error("custom sections must specify a lang")
 				if (sections[name] !== undefined) throw new Error(`duplicate section ${name}`)
 				sections[name] = { name, lang, text }
 		}
