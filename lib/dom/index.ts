@@ -16,6 +16,17 @@ export function createElement<K extends keyof HTMLElementTagNameMap>(
   return el
 }
 
+export function createElementClass<K extends keyof HTMLElementTagNameMap>(
+	parent: Node,
+	tagName: K,
+	className: string
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tagName)
+  el.className = className
+  parent.appendChild(el)
+  return el
+}
+
 export function createTextNode(
 	parent: Node,
 	content: string,
@@ -155,6 +166,12 @@ export function syncSelectMultipleElement(select: HTMLSelectElement, mutable: Mu
 					if (groupChild instanceof HTMLOptionElement)
 						groupChild.selected = values.includes(groupChild.value)
 	})
+}
+
+export function bindProperty<T, K extends keyof T>(obj: T, key: K, value: Immutable<T[K]>) {
+	watch(value, (value, obj, key) => {
+		obj[key] = value
+	}, obj, key)
 }
 
 export function syncElementAttribute<E extends HTMLElement, KA extends keyof E>(
@@ -383,7 +400,11 @@ export function replaceRange(
 }
 
 
-export function rangeEffect(fn: (realParent: Node, container: DocumentFragment) => void, realParent: Node, container: DocumentFragment) {
+export function rangeEffect(
+	fn: (realParent: Node, container: DocumentFragment) => void,
+	realParent: Node,
+	container?: DocumentFragment,
+) {
 	const placeholder = new Comment()
 	const range = new Range(realParent, container, { type: DisplayType.empty, item: placeholder })
 	container.appendChild(placeholder)

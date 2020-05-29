@@ -14,27 +14,46 @@ export function ParseWarning(span: Span, title: string, message: string): ParseW
 }
 
 export type ParseOkPayload<T> = { value: T, warnings: ParseWarning[] }
-export type ParseErrorPayload = { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }
-export type ParseResult<T> = Result<ParseOkPayload<T>, ParseErrorPayload>
+export type ParseErrPayload = { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }
+export type ParseResult<T> = Result<ParseOkPayload<T>, ParseErrPayload>
 
 export class Parse<T> {
 	private errors: ParseError[] = []
 	private warnings: ParseWarning[] = []
-	warn(warning: ParseWarning) {
-		this.warnings.push(warning)
+	warn<K extends keyof Warnings>(warningName: K, ...args: Parameters<Warnings[K]>) {
+		this.warnings.push(Warnings[warningName](...args))
 	}
-	error(error: ParseError) {
-		this.errors.push(error)
+	error<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
+		this.errors.push(Errors[errorName](...args))
+	}
+	expect<T>(result: ParseResult<T>, lineWidth: number): T {
+		const r = this.take(result)
+		if (r.is_ok()) return result.value
+		return parseDie(this.errors, this.warnings)
+	}
+	die<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
+		this.error(errorName, ...args)
+		return parseDie(this.errors, this.warnings)
 	}
 
-	subsume<T>(result: ParseResult<T>): Result<T, ParseErrorPayload> {
+	take<T>(result: ParseResult<T>): Result<T, void> {
+		if (result.is_err()) {
+			this.errors = this.concat(result.error.errors) as NonEmpty<ParseError>
+			this.warnings = this.concat(result.error.warnings)
+			return Err(undefined as void)
+		}
+		this.warnings = this.warnings.concat(result.value.warnings)
+		return Ok(result.value.value)
+	}
+
+	subsume<T>(result: ParseResult<T>): Result<T, ParseErrPayload> {
 		if (result.is_err()) return Err(result.error)
 
 		const { value, warnings } = result.value
 		this.warnings = this.warnings.concat(warnings)
 		return Ok(value)
 	}
-	ret(err: ParseErrorPayload): ParseResult<T> {
+	ret(err: ParseErrPayload): ParseResult<T> {
 		const { errors: selfErrors, warnings: selfWarnings } = this.drop()
 		const errors = selfErrors.concat(err.errors) as NonEmpty<ParseError>
 		const warnings = selfWarnings.concat(err.warnings)
@@ -48,9 +67,9 @@ export class Parse<T> {
 		this.warnings.splice(0, this.warnings.length)
 		return { errors, warnings }
 	}
-	Err(error: ParseError): ParseResult<T> {
+	Err<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>): ParseResult<T> {
 		const { errors, warnings } = this.drop()
-		errors.push(error)
+		errors.push(Errors[errorName](...args))
 		return Err({ errors: errors as NonEmpty<ParseError>, warnings })
 	}
 	Ok(lazyValue: () => T): ParseResult<T> {
@@ -59,6 +78,14 @@ export class Parse<T> {
 			? Err({ errors: errors as NonEmpty<ParseError>, warnings })
 			: Ok({ value: lazyValue(), warnings })
 	}
+}
+
+function parseDie(errors: NonEmpty<ParseError>, warnings: ParseWarning[]): never {
+	const message = (errors as (ParseError | ParseWarning)[]).concat(warnings)
+		.sort((a, b) => a.span.start - b.span.start)
+		.map(d => formatDiagnostic(d, lineWidth))
+		.join('\n\n\n') + '\n'
+	throw new Error(message)
 }
 
 
@@ -71,6 +98,7 @@ export const Errors = {
 	invalidSelectMultiple: (span: Span) =>
 		ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
 }
+export type Errors = typeof Errors
 export const Warnings = {
 	checkExtraneousModifiers(parse: Parse<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
 		const m = Object.keys(modifiers)
@@ -79,18 +107,7 @@ export const Warnings = {
 	},
 	leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
 }
-
-
-export function parseExpect<T>(result: ParseResult<T>, lineWidth: number): ParseOkPayload<T> {
-	if (result.is_ok()) return result.value
-
-	const { errors, warnings } = result.error
-	const message = (errors as (ParseError | ParseWarning)[]).concat(warnings)
-		.sort((a, b) => a.span.start - b.span.start)
-		.map(d => formatDiagnostic(d, lineWidth))
-		.join('\n\n\n') + '\n'
-	throw new Error(message)
-}
+export type Warnings = typeof Warnings
 
 
 const chalk = require('chalk')

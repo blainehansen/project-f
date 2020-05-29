@@ -1,8 +1,9 @@
 import ts = require('typescript')
-import { Span } from 'kreia/dist/runtime/lexer'
+import { UniqueDict } from '@ts-std/collections'
+import { SourceFile, Span } from 'kreia/dist/runtime/lexer'
 import { Result, Ok, Err, Maybe, Some, None } from '@ts-std/monads'
 
-import { parseExpect } from './utils'
+import { Parse } from './utils'
 import { Dict, NonEmpty } from '../utils'
 import { reset, exit, wolf } from './wolf.grammar'
 import { ComponentDefinition, Entity } from './ast'
@@ -12,22 +13,73 @@ import { generateComponentDefinition } from './codegen'
 // if there's no script section at all, then we can backfill slots (which suddenly requires that useages are unique),
 // and we simply don't call
 
-export function processFile(source: string, filename = '') {
-	// TODO what to do with these? style, others
-	const { template, script, style, others } = cutSource(source)
-	const sourceFile = ts.createSourceFile(filename, script, ts.ScriptTarget.Latest, true)
-	const { props, syncs, events, slots, createFn } = inspect(sourceFile)
 
-	reset(template)
+// let scriptSection = None as Maybe<string>
+// let styleSection = None as Maybe<Section>
+// let templateSection = None as Maybe<Section>
+// const sections = {} as Dict<Section>
+
+// function placeSection(name: string, lang: string | undefined, text: string) {
+// 	switch (name) {
+// 		case 'script':
+// 			if (lang !== undefined) throw new Error("script section must be in typescript")
+// 			if (scriptSection !== undefined) throw new Error("duplicate script section")
+// 			scriptSection = text
+// 			break
+// 		case 'style':
+// 			if (styleSection !== undefined) throw new Error("duplicate style section")
+// 			styleSection = { name, lang: lang || 'css', text }
+// 			break
+// 		case 'template':
+// 			if (templateSection !== undefined) throw new Error("duplicate template section")
+// 			templateSection = { name, lang: lang || 'wolf', text }
+// 			break
+// 		default:
+// 			if (lang === undefined) throw new Error("custom sections must specify a lang")
+// 			if (sections[name] !== undefined) throw new Error(`duplicate section ${name}`)
+// 			sections[name] = { name, lang, text }
+// 	}
+// }
+// if (templateSection === undefined) throw new Error("component files have to have a template")
+// return {
+// 	template: templateSection,
+// 	script: scriptSection || '',
+// 	style: styleSection || '',
+// 	others: Object.values(sections),
+// }
+type AlmostComponentDefinition = Omit<ConstructorParameters<ComponentDefinition>, '5'>
+export function processFile(source: string, filename = '') {
+	const parse = new Parse<string>()
+	// TODO what to do with these? style, others
+	const { template, script, style, ...others } = parse.expect(cutSource(source))
+	for (const section of Object.values(others))
+		parse.warn('UNSUPPORTED_SECTION', section.span)
+	if (style !== undefined)
+		parse.warn('UNSUPPORTED_STYLE_SECTION', style.span)
+
+	if (template === undefined)
+		return parse.die('NO_TEMPLATE', filename)
+	if (template.lang && template.lang !== 'wolf')
+		return parse.die('UNSUPPORTED_TEMPLATE_LANG', template.span)
+
+	reset(template.text)
 	const entitiesResult = wolf()
 	exit()
-	const { value: entities, warnings } = parseExpect(entitiesResult)
+	const { value: entities, warnings } = parse.expect(entitiesResult)
+	if (entities.length === 0)
+		return parse.die('EMPTY_TEMPLATE', filename)
 
-	const definition = new ComponentDefinition(
-		props, syncs, events, slots, createFn,
-		NonEmpty.expect(entities, "a component definition's template shouldn't be empty"),
-	)
-	// warnings
+	const [props, syncs, events, slots, createFn] = script === undefined
+		// TODO here's where we'd add backfilled slots
+		? [[], [], [], {}, undefined]
+		: exec(() => {
+			if (script.lang && script.lang !== 'ts')
+				return parse.die('NON_TS_SCRIPT_LANG', script.span)
+			const sourceFile = ts.createSourceFile(filename, script, ts.ScriptTarget.Latest, true)
+			return parse.expect(inspect(sourceFile))
+		})
+
+	const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities as NonEmpty<Entity>)
 	return generateComponentDefinition(definition)
 }
 
@@ -35,89 +87,113 @@ export function processFile(source: string, filename = '') {
 const CTXFN: unique symbol = Symbol()
 type CTXFN = typeof CTXFN
 export function inspect(file: ts.SourceFile) {
-	let foundCreateFn = undefined as string[] | CTXFN | undefined
-	let foundNames = undefined as ReturnType<typeof processComponentType> | undefined
+	const parse = new Parse<AlmostComponentDefinition>()
+	let foundCreateFns = [] as [ReturnType<typeof processCreateFn> | CTXFN, Span][]
+	let foundComponents = [] as [ReturnType<typeof processComponentType>, Span][]
 
 	function visitor(node: ts.Node): undefined {
 		if (ts.isFunctionDeclaration(node)) {
 			if (!node.name || !['create', 'createCtx'].includes(node.name.text)) return undefined
-			if (foundCreateFn !== undefined) throw new Error("you can't have a create function and a createCtx function")
-			foundCreateFn = node.name.text === 'createCtx' ? CTXFN : processCreateFn(node)
+			foundCreateFns.push([node.name.text === 'createCtx' ? CTXFN : processCreateFn(node), getSpan(file, node)])
 		}
-		if (ts.isTypeAliasDeclaration(node)) {
+		else if (ts.isTypeAliasDeclaration(node)) {
 			if (node.name.text !== 'Component') return undefined
-			// not going to bother getting mad about foundNames !== undefined, typescript will give them an error soon
-			foundNames = processComponentType(node)
+			foundComponents.push([processComponentType(node), getSpan(file, node)])
 		}
 		return undefined
 	}
-
 	file.forEachChild(visitor)
 
-	if (foundCreateFn === undefined || foundNames === undefined)
-		throw new Error("mad")
+	const [foundCreateFn, ] = foundCreateFns.length > 1
+		? [undefined, parse.error('COMPONENT_CONFLICTING_CREATE', foundCreateFns[0][1], foundCreateFns[1][1])]
+		: [parse.take(foundCreateFn[0]).default(undefined)]
+	const [foundComponent, ] = foundComponents.length > 1
+		? [undefined, parse.error('COMPONENT_CONFLICTING_COMPONENT', foundComponents[0][1], foundComponents[1][1])]
+		: [parse.take(foundComponents[0]).default(undefined)]
 
-	const createFn = foundCreateFn === CTXFN ? undefined : foundCreateFn
-	const { bindings: { props, syncs, events }, slots } = foundNames
-	return { props, syncs, events, slots, createFn }
+	const createFn = !foundCreateFn || foundCreateFn === CTXFN ? undefined : foundCreateFn
+	const { bindings: { props = [], syncs = [], events = [] } = {}, slots = {} } = foundComponent || {}
+	return parse.Ok(() => [props, syncs, events, slots, createFn])
 }
 
 
-function processComponentType(componentType: ts.TypeAliasDeclaration) {
-	if (!isNodeExported(componentType)) throw new Error("your Component type isn't exported")
-	if (componentType.typeParameters !== undefined) throw new Error("your Component type shouldn't have generic parameters")
-	const definition = componentType.type
-	if (!ts.isTypeLiteralNode(definition)) throw new Error("your Component type must be an object literal type")
+type ComponentDefinitionTypes = {
+	bindings: { props: string[], events: string[], syncs: string[] },
+	slots: Dict<boolean>,
+}
+function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeAliasDeclaration) {
+	const parse = new Parse<ComponentDefinitionTypes>()
 
-	const bindings = { props: [] as string[], events: [] as string[], syncs: [] as string[] }
-	const slots = {} as Dict<boolean>
+	if (!isNodeExported(componentType))
+		parse.warn('COMPONENT_NOT_EXPORTED', getSpan(sourceFile, componentType))
+
+	if (componentType.typeParameters !== undefined)
+		return parse.Err('COMPONENT_GENERIC', getSpan(sourceFile, componentType))
+
+	const definition = componentType.type
+	if (!ts.isTypeLiteralNode(definition))
+		return parse.Err('COMPONENT_NOT_OBJECT', getSpan(sourceFile, definition))
+
+	const types: ComponentDefinitionTypes = { bindings: { props: [], events: [], syncs: [] }, slots: {} }
 	for (const definitionMember of definition.members) {
-		const [signature, variety, optional] = processMember(definitionMember)
+		const result = parse.subsume(processMember(definitionMember))
+		if (result.is_err()) return parse.ret(result.error)
+		const [signature, variety, optional] = result.value
+
 		if (optional)
-			throw new Error("doesn't make sense here")
+			return parse.Err('OPTIONAL_COMPONENT_BLOCK', getSpan(sourceFile, definitionMember))
 
 		const signatureType = signature.type
-		if (!signatureType || !ts.isTypeLiteralNode(signatureType)) throw new Error(`${variety} must be an object literal type`)
+		if (!signatureType || !ts.isTypeLiteralNode(signatureType))
+			return parse.Err('COMPONENT_BLOCK_NOT_OBJECT', getSpan(sourceFile, signatureType))
 
 		switch (variety) {
 			case 'props': case 'events': case 'syncs':
 				for (const bindingMember of signatureType.members) {
-					const [, binding, optional] = processMember(bindingMember)
+					const result = parse.subsume(processMember(bindingMember))
+					if (result.is_err()) return parse.ret(result.error)
+					const [, binding, optional] = result.value
 					if (optional)
-						throw new Error("doesn't make sense here")
-					bindings[variety].push(binding)
+						return parse.Err('OPTIONAL_NON_SLOT', getSpan(sourceFile, bindingMember))
+
+					types.bindings[variety].push(binding)
 				}
 				break
 
 			case 'slots':
 				for (const syncsMember of signatureType.members) {
-					const [, sync, optional] = processMember(syncsMember)
-					slots[sync] = optional
+					const result = parse.subsume(processMember(syncsMember))
+					if (result.is_err()) return parse.ret(result.error)
+					const [, sync, optional] = result.value
+					types.slots[sync] = optional
 				}
 				break
 
 			default:
-				throw new Error("doesn't make sense here")
+				return parse.Err('UNKNOWN_COMPONENT_BLOCK', getSpan(sourceFile, definitionMember))
 		}
 	}
 
-	return { bindings, slots }
+	return parse.Ok(types)
 }
 
-function processCreateFn(createFn: ts.FunctionDeclaration): string[] {
-	if (!isNodeExported(createFn)) throw new Error("your create function isn't exported")
+function processCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclaration) {
+	const parse = new Parse<string[]>()
+	if (!isNodeExported(createFn))
+		parse.warn('CREATE_NOT_EXPORTED', getSpan(sourceFile, createFn))
 
-	const block = createFn.body
-	if (!block) throw new Error("undefined FunctionDeclaration block??")
-	// in the future we should emit a warning that they don't have to have a create function if there's nothing for it to do
-	if (block.statements.length === 0) return []
+	const block = createFn.body!
+	if (block.statements.length === 0) {
+		parse.warn('EMPTY_CREATE', getSpan(sourceFile, createFn))
+		return []
+	}
 
 	const lastStatement = block.statements[block.statements.length - 1]
 	if (!lastStatement || !ts.isReturnStatement(lastStatement))
-		throw new Error("the last statement of a create function has to be a return")
+		return parse.Err('CREATE_FINAL_NON_RETURN', getSpan(sourceFile, lastStatement))
 	const returnExpression = lastStatement.expression
 	if (!returnExpression || !ts.isObjectLiteralExpression(returnExpression))
-		throw new Error("the return value of a create function has to be an object literal")
+		return parse.Err('CREATE_FINAL_NOT_OBJECT', getSpan(sourceFile, returnExpression))
 
 	const returnNames = [] as string[]
 	for (const property of returnExpression.properties) {
@@ -127,31 +203,31 @@ function processCreateFn(createFn: ts.FunctionDeclaration): string[] {
 		}
 		if (ts.isPropertyAssignment(property) || ts.isMethodDeclaration(property)) {
 			if (!ts.isIdentifier(property.name))
-				throw new Error("at this point we can only handle simple property assignments")
+				return parse.Err('CREATE_COMPLEX_NAME', getSpan(sourceFile, property))
 			returnNames.push(property.name.text)
 			continue
 		}
-		if (ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property)) {
-			throw new Error("get or set accessors don't really make any sense in a component create function")
-		}
+		if (ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property))
+			return parse.Err('CREATE_ACCESSOR_PROPERTY', getSpan(sourceFile, property))
 
-		throw new Error("at this point we can only handle simple property assignments")
+		return parse.Err('CREATE_UNSUPPORTED_PROPERTY', getSpan(sourceFile, property))
 	}
 
-	return returnNames
+	return parse.Ok(returnNames)
 }
 
-function processMember(member: ts.TypeElement): [ts.PropertySignature, string, boolean] {
+function processMember(sourceFile: ts.SourceFile, member: ts.TypeElement) {
+	const parse = new Parse<[ts.PropertySignature, string, boolean]>()
 	if (!ts.isPropertySignature(member))
-		throw new Error("doesn't make sense here")
+		return parse.Err('COMPONENT_PROPERTY_SIGNATURE', getSpan(sourceFile, member))
 	const optional = member.questionToken !== undefined
 	if (member.initializer !== undefined)
-		throw new Error("doesn't make sense here")
+		return parse.Err('COMPONENT_PROPERTY_INITIALIZED', getSpan(sourceFile, member.initializer))
 	const name = member.name
 	if (!ts.isIdentifier(name))
-		throw new Error("doesn't make sense here")
+		return parse.Err('COMPONENT_COMPLEX_NAME', getSpan(sourceFile, name))
 
-	return [member, name.text, optional]
+	return parse.Ok([member, name.text, optional])
 }
 
 function isNodeExported(node: ts.Node): boolean {
@@ -163,58 +239,51 @@ function isNodeExported(node: ts.Node): boolean {
 
 
 const sectionMarker = /^#! (\S+)(?: lang="(\S+)")?[ \t]*\n?/m
-type Section = { name: string, lang: string, text: string }
-export function cutSource(rawSource: string) {
-	let scriptSection = None as Maybe<string>
-	let styleSection = None as Maybe<Section>
-	let templateSection = None as Maybe<Section>
-	const sections = {} as Dict<Section>
+type Section = { lang: string, span: Span, text: string }
+export function cutSource(file: SourceFile) {
+	const parse = new Parse<Dict<Section>>()
+	const sections = new UniqueDict<Section>()
 
-	function placeSection(name: string, lang: string | undefined, text: string) {
-		switch (name) {
-			case 'script':
-				if (lang !== undefined) throw new Error("script section must be in typescript")
-				if (scriptSection !== undefined) throw new Error("duplicate script section")
-				scriptSection = text
-				break
-			case 'style':
-				if (styleSection !== undefined) throw new Error("duplicate style section")
-				styleSection = { name, lang: lang || 'css', text }
-				break
-			case 'template':
-				if (templateSection !== undefined) throw new Error("duplicate template section")
-				templateSection = { name, lang: lang || 'wolf', text }
-				break
-			default:
-				if (lang === undefined) throw new Error("custom sections must specify a lang")
-				if (sections[name] !== undefined) throw new Error(`duplicate section ${name}`)
-				sections[name] = { name, lang, text }
-		}
+	type AlmostSection = Omit<Section, 'lang' | 'text'> & { name: string, lang: string | undefined }
+	function setSection({ name, lang, span }: AlmostSection, text: string) {
+		const result = sections.set(name, { lang, span, text })
+		if (result.is_err())
+			parse.error('DUPLICATE_SECTIONS', span, result.error)
 	}
 
-	let source = rawSource
-	let last = undefined as { name: string, lang: string | undefined } | undefined
-	let result
-	while (result = source.match(sectionMarker)) {
-		const [entireMatch, sectionName, lang = undefined] = result
-		const index = result.index!
+	let source = file.source; let position = 0; let line = 1
+	let last = undefined as AlmostSection | undefined
+	let matchResult
+	while (matchResult = source.match(sectionMarker)) {
+		const [entireMatch, sectionName, lang = undefined] = matchResult
+		const sectionMarkerSpan = makeSpan(file, position, entireMatch, line, 0)
+
+		const index = matchResult.index!
 		const sectionIndex = index + entireMatch.length
+		position += entireMatch.length
+		line += entireMatch.split('\n').length - 1
 
 		if (last !== undefined)
-			placeSection(last.name, last.lang, source.slice(0, index))
+			setSection(last, source.slice(0, index))
 
 		source = source.slice(sectionIndex)
-		last = { name: sectionName, lang }
+		last = { name: sectionName, lang, span: sectionMarkerSpan }
 	}
 
-	if (last === undefined) throw new Error("no sections?")
-	placeSection(last.name, last.lang, source)
+	if (last === undefined)
+		return parse.Err('NO_SECTIONS', file)
+	setSection(last, source)
 
-	if (templateSection === undefined) throw new Error("component files have to have a template")
-	return {
-		template: templateSection,
-		script: scriptSection || '',
-		style: styleSection || '',
-		others: Object.values(sections),
-	}
+	return parse.Ok(sections.into_dict())
+}
+
+
+function getSpan(sourceFile: ts.SourceFile, { pos: start, end }: ts.TextRange): Span {
+	const { line: zeroLine, character: column } = sourceFile.getLineAndCharacterOfPosition(start)
+	const { text: source, fileName: filename } = sourceFile
+	return { file: { source, filename }, start, end, line: zeroLine + 1, column }
+}
+
+function makeSpan(file: SourceFile, start: number, text: string, line: number, column: number): Span {
+	return { file, start, end: start + text.length, line, column }
 }

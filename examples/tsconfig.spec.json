@@ -1,0 +1,10 @@
+{
+	"extends": "../tsconfig.json",
+	// this needs a path resolver to fake project-fs
+	"exclude": [
+		"node_modules"
+	],
+	"include": [
+		"**/*.iron.spec"
+	]
+}
