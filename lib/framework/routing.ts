@@ -113,3 +113,57 @@ split('/?<Query>')
 // // at the end of the day this will involve producing:
 // // - the implied decoders (the reasonable thing to do here is just stamp out a decoder directly and use the TypeOf helper to extract the type)
 // // - the regex that tests for each variant, and maybe a union regex to test if this route specifically is on deck
+
+
+
+
+
+// // there are several questions
+
+
+// // it seems it's never reasonable to infer a missing parameter,
+// // since we're being so strict with types
+// // there is however the situation of "overlapping with index"
+// // if someone does something like this:
+// // /user
+// // /user/:id?
+// // these two overlap, and an undefined id will require using the same component
+// // as with a defined id
+
+// // does this mean we shouldn't have undefined segments?
+// // should people just get that same behavior by having two different routes
+// // pass a different prop to the same component
+
+// // each component can have multiple strings that match it,
+// // there is only *one* of these mappings per page component
+// // and route segments *never* map to the empty string
+// // (we can ensure this by testing it against the empty string)
+
+// import { Ok, Err } from '@ts-std/monads'
+
+
+// function splitRoute(input: string) {
+// 	const route = input.endsWith('/')
+// 		? input.slice(0, input.length - 1)
+// 		: input
+
+// 	let last = 0
+// 	const give = []
+// 	for (let index = 0; index < route.length; index++) {
+// 		const char = route[index]
+// 		if (char === '/') {
+// 			if (last !== 0 && last === index)
+// 				return Err(`stuttering slash: ${input}`)
+
+// 			give.push(route.slice(last, index + 1))
+// 			last = index + 1
+// 		}
+// 	}
+// 	give.push(route.slice(last))
+
+// 	return Ok(give)
+// }
+
+// console.log(splitRoute('/user/:id'))
+// console.log(splitRoute('/user/:id/'))
+// console.log(splitRoute('user/:id/'))
