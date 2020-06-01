@@ -1,5 +1,9 @@
+import { Span } from 'kreia/dist/runtime/lexer'
 import { Parser, ParseArg, Decidable, path, branch, c } from 'kreia'
 import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
+
+import { Context } from './utils'
+import { NonEmpty } from '../utils'
 
 import {
 	Entity, Directive,
@@ -7,7 +11,7 @@ import {
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
-import { NonEmpty } from '../utils'
+import * as astParse from './ast.parse'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
 	space: / /,
@@ -462,10 +466,10 @@ export function meta(): Meta {
 	return meta_item
 }
 
-export function attributes(): Attribute[] {
+export function attributes(): ParseResult<Attribute>[] {
 	consume(tok.open_paren)
 	const result_attributes = or(
-		c((): Attribute[] => {
+		c((): ParseResult<Attribute>[] => {
 			consume(tok.indent)
 			const result_attributes = lines(() => {
 				const result = attribute_line()
@@ -473,10 +477,10 @@ export function attributes(): Attribute[] {
 				return result
 			}, _Z1F9dGs)
 			consume(tok.deindent, tok.indent_continue)
-			return ([] as Attribute[]).concat(...result_attributes)
+			return ([] as ParseResult<Attribute>[]).concat(...result_attributes)
 		}, _Z1owlnn),
 
-		c((): Attribute[] => {
+		c((): ParseResult<Attribute>[] => {
 			maybe(tok.large_space)
 			const result_attributes = attribute_line()
 			maybe(tok.large_space)
@@ -488,7 +492,7 @@ export function attributes(): Attribute[] {
 	return result_attributes
 }
 
-export function attribute_line(): Attribute[] {
+export function attribute_line(): ParseResult<Attribute>[] {
 	const results = [attribute()]
 	const rest_results = maybe_many(() => {
 		consume(tok.comma)
@@ -498,23 +502,23 @@ export function attribute_line(): Attribute[] {
 	return results.concat(rest_results || [])
 }
 
-export function attribute(): Attribute {
-	const name_token = consume(tok.attribute_name)
-	const value = maybe((): string | AttributeCode => {
+export function attribute() {
+	const [{ content: rawAttribute, span: rawAttributeSpan }] = consume(tok.attribute_name)
+	const [value = undefined, valueSpan = undefined] = maybe((): [string | AttributeCode, Span] => {
 		consume(tok.equals)
 		const value_item = or(c(tok.identifier), c(str, _uGx), c(code_segment, _J5AgF))
 
 		return Array.isArray(value_item)
-			? new AttributeCode(true, value_item[0].content)
+			? [new AttributeCode(true, value_item[0].content), value_item[0].span]
 			: value_item
-	}, _Z1wyrvk)
+	}, _Z1wyrvk) || []
 
-	return new Attribute(name_token[0].content, value)
+	return astParse.parseAttribute(rawAttribute, rawAttributeSpan, value, valueSpan)
 }
 
 export function str() {
-	const str_token = consume(tok.str)
-	return str_token[0].content
+	const [{ content, span }] = consume(tok.str)
+	return t(content, span)
 }
 
 export function code_segment(): AttributeCode {
@@ -522,7 +526,7 @@ export function code_segment(): AttributeCode {
 	const segments = maybe_many(code, _14hbOa) || []
 	consume(tok.close_bracket)
 
-	return new AttributeCode(false, segments.join(''))
+	return t(new AttributeCode(false, segments.join('')), )
 }
 
 export function code(): string {

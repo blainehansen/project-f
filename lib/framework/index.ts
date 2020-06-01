@@ -26,7 +26,17 @@ export type Slots<C> = C extends { slots: Dict<any> }
 	}
 	: {}
 
+// export type Refs<C> = C extends { refs: Dict<any> }
+// 	? {
+// 		[K in keyof C['refs']]: C['refs'][K] extends HTMLElementTagNameMap
+// 			? HTMLElementTagNameMap[C['refs'][K]]
+// 			: never
+// 	}
+// 	: {}
+
+// export type Args<C> = Props<C> & Syncs<C> & Events<C> & Refs<C>
 export type Args<C> = Props<C> & Syncs<C> & Events<C>
 
 export type Insertable<A extends any[]> = (realParent: Node, parent: DocumentFragment, ...args: A) => void
-export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C>]>
+// export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C>]>
+export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Refs<C>, Slots<C>]>

@@ -17,23 +17,21 @@ export type ParseOkPayload<T> = { value: T, warnings: ParseWarning[] }
 export type ParseErrPayload = { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }
 export type ParseResult<T> = Result<ParseOkPayload<T>, ParseErrPayload>
 
-export class Parse<T> {
+export abstract class ParseContext<T> {
 	private errors: ParseError[] = []
 	private warnings: ParseWarning[] = []
+	private drop() {
+		const errors = this.errors.slice()
+		const warnings = this.warnings.slice()
+		this.errors.splice(0, this.errors.length)
+		this.warnings.splice(0, this.warnings.length)
+		return { errors, warnings }
+	}
 	warn<K extends keyof Warnings>(warningName: K, ...args: Parameters<Warnings[K]>) {
 		this.warnings.push(Warnings[warningName](...args))
 	}
 	error<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
 		this.errors.push(Errors[errorName](...args))
-	}
-	expect<T>(result: ParseResult<T>, lineWidth: number): T {
-		const r = this.take(result)
-		if (r.is_ok()) return result.value
-		return parseDie(this.errors, this.warnings)
-	}
-	die<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
-		this.error(errorName, ...args)
-		return parseDie(this.errors, this.warnings)
 	}
 
 	take<T>(result: ParseResult<T>): Result<T, void> {
@@ -45,7 +43,28 @@ export class Parse<T> {
 		this.warnings = this.warnings.concat(result.value.warnings)
 		return Ok(result.value.value)
 	}
+}
 
+export class Parser extends ParseContext<void> {
+	constructor(readonly lineWidth: number) {}
+	expect<T>(result: ParseResult<T>): T {
+		const r = this.take(result)
+		if (r.is_ok()) return result.value
+		return parseDie(this.errors, this.warnings, this.lineWidth)
+	}
+	die<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
+		this.error(errorName, ...args)
+		return parseDie(this.errors, this.warnings, this.lineWidth)
+	}
+	finalize<T>(finalizer: () => T): T {
+		const { errors, warnings } = this.drop()
+		return errors.length > 0
+			? parseDie(errors, warnings, this.lineWidth)
+			: withWarnings(finalizer(), warnings, this.lineWidth)
+	}
+}
+
+export class Context<T> extends ParseContext<T> {
 	subsume<T>(result: ParseResult<T>): Result<T, ParseErrPayload> {
 		if (result.is_err()) return Err(result.error)
 
@@ -53,20 +72,13 @@ export class Parse<T> {
 		this.warnings = this.warnings.concat(warnings)
 		return Ok(value)
 	}
-	ret(err: ParseErrPayload): ParseResult<T> {
+	subsumeFail(err: ParseErrPayload): ParseResult<T> {
 		const { errors: selfErrors, warnings: selfWarnings } = this.drop()
 		const errors = selfErrors.concat(err.errors) as NonEmpty<ParseError>
 		const warnings = selfWarnings.concat(err.warnings)
 		return Err({ errors, warnings })
 	}
 
-	private drop() {
-		const errors = this.errors.slice()
-		const warnings = this.warnings.slice()
-		this.errors.splice(0, this.errors.length)
-		this.warnings.splice(0, this.warnings.length)
-		return { errors, warnings }
-	}
 	Err<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>): ParseResult<T> {
 		const { errors, warnings } = this.drop()
 		errors.push(Errors[errorName](...args))
@@ -80,34 +92,23 @@ export class Parse<T> {
 	}
 }
 
-function parseDie(errors: NonEmpty<ParseError>, warnings: ParseWarning[]): never {
-	const message = (errors as (ParseError | ParseWarning)[]).concat(warnings)
+function formatDiagnostics(diagnostics: (ParseError | ParseWarning)[], lineWidth: number) {
+	return diagnostics
 		.sort((a, b) => a.span.start - b.span.start)
 		.map(d => formatDiagnostic(d, lineWidth))
 		.join('\n\n\n') + '\n'
+}
+function parseDie(errors: NonEmpty<ParseError>, warnings: ParseWarning[], lineWidth: number): never {
+	const message = formatDiagnostics((errors as (ParseError | ParseWarning)[]).concat(warnings), lineWidth)
 	throw new Error(message)
 }
-
-
-export const Errors = {
-	requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
-	// noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
-	conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
-	invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
-	invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
-	invalidSelectMultiple: (span: Span) =>
-		ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
+function withWarnings<T>(value: T, warnings: ParseWarning[], lineWidth: number): T {
+	if (warnings.length > 0) {
+		const message = formatDiagnostics(warnings, lineWidth)
+		console.warn(message)
+	}
+	return value
 }
-export type Errors = typeof Errors
-export const Warnings = {
-	checkExtraneousModifiers(parse: Parse<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
-		const m = Object.keys(modifiers)
-		if (m.length > 0)
-			parse.warn(ParseWarning(span, 'extraneous modifiers', `these modifiers don't apply to ${variety}: ${m.join(', ')}`))
-	},
-	leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
-}
-export type Warnings = typeof Warnings
 
 
 const chalk = require('chalk')
@@ -185,3 +186,27 @@ function formatMessage(message: string, margin: string, lineWidth: number) {
 // 	formatDiagnostic(ParseWarning(span, 'big problem', "This is a very big problem"), process.stdout.columns),
 // ].join('\n\n\n') + '\n'
 // console.log(m)
+
+
+
+
+
+export const Errors = {
+	requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
+	// noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
+	conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
+	invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
+	invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
+	invalidSelectMultiple: (span: Span) =>
+		ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
+}
+export type Errors = typeof Errors
+export const Warnings = {
+	checkExtraneousModifiers(parse: Parse<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
+		const m = Object.keys(modifiers)
+		if (m.length > 0)
+			parse.warn(ParseWarning(span, 'extraneous modifiers', `these modifiers don't apply to ${variety}: ${m.join(', ')}`))
+	},
+	leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
+}
+export type Warnings = typeof Warnings

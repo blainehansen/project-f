@@ -1,16 +1,15 @@
 import 'mocha'
+import * as glob from 'glob'
+import * as path from 'path'
 import { expect } from 'chai'
 import { readFileSync } from 'fs'
 
 import { compileFile } from '../lib/'
 import { boilString } from '../lib/utils.spec'
 
-const cases = ['Rating']
-
-for (const name of cases) {
-	const sourceFilename = `./examples/${name}.iron`
+for (const sourceFilename of glob.sync('./examples/**/*.iron')) {
 	const expected = readFileSync(sourceFilename + '.spec.ts', 'utf-8')
-	describe(name, () => it('works', () => {
+	describe(path.basename(sourceFilename, '.iron'), () => it('works', () => {
 		expect(boilString(compileFile(sourceFilename))).equal(boilString(expected))
 	}))
 }

@@ -117,7 +117,6 @@ export class SyncedCheckboxInput {
 	readonly type = 'SyncedCheckboxInput' as const
 	constructor(
 		readonly mutable: AttributeCode,
-		// readonly value: ExistentBindingValue | undefined,
 		readonly value: InertBindingValue | undefined,
 		readonly attributes: TagAttributes,
 	) {}
@@ -126,7 +125,6 @@ export class SyncedRadioInput {
 	readonly type = 'SyncedRadioInput' as const
 	constructor(
 		readonly mutable: AttributeCode,
-		// readonly value: ExistentBindingValue,
 		readonly value: InertBindingValue,
 		readonly attributes: TagAttributes,
 	) {}
