@@ -8,7 +8,7 @@ import {
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 
-import { Span } from 'kreia/dist/runtime/lexer'
+import { Span, Spanned } from 'kreia/dist/runtime/lexer'
 import { UniqueDict, DefaultDict } from '@ts-std/collections'
 
 // const fnModifiers = [] as const
@@ -32,8 +32,8 @@ function isInertBindingValue(v: BindingValue): v is InertBindingValue {
 }
 
 export function parseAttribute(
-	rawAttribute: string, rawAttributeSpan: Span,
-	value: string | AttributeCode | undefined, valueSpan: Span | undefined,
+	{ item: rawAttribute, span: rawAttributeSpan }: Spanned<string>,
+	{ item: value = undefined, valueSpan = undefined }: Spanned<string | AttributeCode> | undefined = {},
 ) {
 	const ctx = new Context<Attribute>()
 	const [attribute, ...modifiersList] = rawAttribute.split('|')
@@ -216,7 +216,7 @@ export function parseTagAttributes(
 export function parseComponentInclusion(
 	name: string, nameSpan: Span,
 	attributes: Attribute[],
-	entities: (Entity | SlotInsertion)[],
+	entities: (Entity | SlotInsertion | SlotUsage)[],
 ) {
 	const ctx = new Context<ComponentInclusion>()
 
@@ -258,6 +258,10 @@ export function parseComponentInclusion(
 	const nonInsertEntities = []
 	const slotInsertions = new UniqueDict<SlotInsertion>()
 	for (const entity of entities) {
+		if (entity.type === 'SlotUsage') {
+			ctx.error('INVALID_SLOT_USAGE', entitySpan)
+			continue
+		}
 		if (entity.type !== 'SlotInsertion') {
 			nonInsertEntities.push(entity)
 			continue
@@ -281,4 +285,248 @@ export function parseComponentInclusion(
 		events.into_dict() as Dict<NonEmpty<EventAttribute>>,
 		slotInsertions.into_dict(),
 	))
+}
+
+
+function processInsertableCode(isSlot: boolean, code: string | undefined): ParseResult<[string | undefined, string | undefined]> {
+	if (code === undefined || code.trim() === '')
+		return Context.Ok([undefined, undefined])
+
+	const [nameSection, ...codeSections] = code.split(/; */)
+	if (isSlot && !/^&\S+$/.test(nameSection))
+		return Context.Err('INVALID_SLOT_NAME', span)
+
+	const argsExpression = codeSections.join('; ')
+	return Context.Ok([isSlot ? nameSection.slice(1) : nameSection, argsExpression])
+}
+
+
+export type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
+export type InProgressIf = {
+	type: 'if', expression: string, entities: NonEmpty<Entity>,
+	elseIfBranches: [string, NonEmpty<Entity>][], elseBranch: NonEmpty<Entity> | undefined,
+}
+export type InProgressMatch = {
+	type: 'match', matchExpression: string, span: Span,
+	patterns: [string, Entity[]][], defaultPattern: Entity[] | undefined,
+}
+export type InProgressSwitch = {
+	type: 'switch', switchExpression: string, span: Span,
+	cases: (SwitchCase | SwitchDefault)[],
+}
+
+export type TagDescriptor = { type: 'tag', ident: string, metas: Meta[], attributes: Attribute[] }
+export type InclusionDescriptor = { type: 'inclusion', name: string, params: Attribute[] }
+export type DirectiveDescriptor = { type: 'directive', command: string, code: string | undefined }
+export type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
+export type NotReadyEntity = Tag | ComponentInclusion | NonEmpty<TextItem> | DirectivePending
+
+export function parseEntities(items: (NotReadyEntity | undefined)[]) {
+	const ctx = new Context<Entity[]>()
+	const giveEntities: Entity[] = []
+	let inProgressTextSection = undefined as NonEmpty<Spanned<TextItem>> | undefined
+	let inProgressDirective = undefined as InProgressDirective | undefined
+	function finalizeInProgressDirective() {
+		if (inProgressDirective === undefined) return
+
+		switch (inProgressDirective.type) {
+			case 'if': {
+				const { expression, entities, elseIfBranches, elseBranch } = inProgressDirective
+				giveEntities.push(new IfBlock(expression, entities, elseIfBranches, elseBranch))
+				break
+			}
+			case 'match': {
+				const { matchExpression, span, patterns, defaultPattern } = inProgressDirective
+				if (patterns.length === 0)
+					return ctx.error('MATCH_NO_PATTERNS', span)
+				giveEntities.push(new MatchBlock(
+					matchExpression,
+					patterns as NonEmpty<[string, Entity[]]>,
+					defaultPattern,
+				))
+				break
+			}
+			case 'switch':
+				const { switchExpression, span, cases } = inProgressDirective
+				if (cases.length === 0)
+					return ctx.error('SWITCH_NO_CASES', span)
+				giveEntities.push(new SwitchBlock(
+					switchExpression,
+					cases as NonEmpty<(SwitchCase | SwitchDefault)>,
+				))
+				break
+		}
+	}
+
+	for (const item of items) {
+		if (item === undefined) {
+			finalizeInProgressDirective()
+			continue
+		}
+		if (Array.isArray(item)) {
+			finalizeInProgressDirective()
+			inProgressTextSection = (inProgressTextSection || [] as TextItem[]).concat(item) as NonEmpty<Spanned<TextItem>>
+			continue
+		}
+		// finalize inProgressTextSection
+		if (inProgressTextSection !== undefined) {
+			giveEntities.push(new TextSection(inProgressTextSection))
+			inProgressTextSection = undefined
+		}
+
+		if (item.type !== 'directive') {
+			finalizeInProgressDirective()
+			giveEntities.push(item)
+			continue
+		}
+
+		const { command, code, span, entities } = item
+		switch (command) {
+			case 'if':
+				finalizeInProgressDirective()
+				inProgressDirective = {
+					type: 'if', expression: validateCode(command, code),
+					entities, elseIfBranches: [], elseBranch: undefined,
+				} as InProgressIf
+				break
+			case 'elseif':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
+					return ctx.Err('IF_UNPRECEDED_ELSEIF', span)
+				if (code === undefined)
+					return ctx.Err('IF_EMPTY_CONDITION', span)
+				inProgressDirective.elseIfBranches.push([code, entities])
+				break
+			case 'else':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
+					return ctx.Err('IF_UNPRECEDED_ELSE', span)
+				if (code !== undefined)
+					// TODO would be great to specifically have code span here
+					return ctx.Err('IF_ELSE_CONDITION', span)
+				inProgressDirective.elseBranch = entities
+				finalizeInProgressDirective()
+				break
+
+			case 'each':
+				finalizeInProgressDirective()
+				function processEachBlockCode(code: string): [EachBlock['params'], string] {
+					const [paramsSection, ...remainingSections] = code.split(/ +of +/)
+					const paramsMatch = paramsSection.match(/\( *(\S+) *, *(\S+) *\)/)
+					const [variableCode, indexCode] = paramsMatch === null
+						? [paramsSection, undefined]
+						: [paramsMatch[1], paramsMatch[2]]
+
+					return [{ variableCode, indexCode }, remainingSections.join(' of ')]
+				}
+				const [paramsExpression, listExpression] = processEachBlockCode(validateCode(command, code))
+				giveEntities.push(new EachBlock(paramsExpression, listExpression, entities))
+				break
+
+			case 'match':
+				finalizeInProgressDirective()
+				if (entities.length > 0)
+					return ctx.Err('MATCH_UNPRECEDED_WHEN', span)
+				inProgressDirective = { type: 'match', matchExpression: validateCode(command, code), patterns: [], defaultPattern: undefined } as InProgressMatch
+				break
+			case 'when':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'match')
+					return ctx.Err('MATCH_UNPRECEDED_WHEN', span)
+				inProgressDirective.patterns.push([validateCode(command, code), entities])
+				break
+
+			case 'switch':
+				finalizeInProgressDirective()
+				if (entities.length > 0)
+					return ctx.Err('SWITCH_NESTED_ENTITIES', span)
+				inProgressDirective = { type: 'switch', switchExpression: validateCode(command, code), cases: [] } as InProgressSwitch
+				break
+			case 'case':
+			case 'fallcase':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
+					return ctx.Err('SWITCH_UNPRECEDED_CASE', span)
+				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', validateCode(command, code), entities))
+				break
+			case 'falldefault':
+				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
+					return ctx.Err('SWITCH_UNPRECEDED_CASE', span)
+				if (code !== undefined) {
+					// TODO would be great to specifically have code span here
+					ctx.error('SWITCH_DEFAULT_CONDITION', span)
+					break
+				}
+				inProgressDirective.cases.push(new SwitchDefault(true, entities))
+				break
+
+			// belongs to both switch and match
+			case 'default':
+				validateCodeEmpty(command, code)
+				if (inProgressDirective === undefined)
+					return ctx.Err('SWITCH_UNPRECEDED_DEFAULT', span)
+				switch (inProgressDirective.type) {
+					case 'if':
+						ctx.error('SWITCH_UNPRECEDED_DEFAULT', span)
+						break
+					case 'match':
+						if (inProgressDirective.defaultPattern !== undefined) {
+							ctx.error('MATCH_DUPLICATE_DEFAULT', span)
+							break
+						}
+						inProgressDirective.defaultPattern = entities
+						break
+					case 'switch':
+						inProgressDirective.cases.push(new SwitchDefault(false, entities))
+						break
+				}
+				break
+
+			case 'slot': {
+				finalizeInProgressDirective()
+				const [slotName, argsExpression] = processInsertableCode(true, code)
+				giveEntities.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
+				break
+			}
+			case 'insert': {
+				finalizeInProgressDirective()
+				if (entities.length === 0) {
+					ctx.error('SLOT_INSERTION_EMPTY', span)
+					break
+				}
+				const [slotName, paramsExpression] = processInsertableCode(true, code)
+				giveEntities.push(new SlotInsertion(slotName, paramsExpression, entities as NonEmpty<Entity>))
+				break
+			}
+
+			case 'template': {
+				finalizeInProgressDirective()
+				const [templateName, argsExpression] = processInsertableCode(false, code)
+				if (templateName === undefined) {
+					ctx.error('TEMPLATE_NAMELESS', span)
+					break
+				}
+				if (entities.length === 0) {
+					ctx.error('TEMPLATE_EMPTY', span)
+					break
+				}
+				giveEntities.push(new TemplateDefinition(
+					templateName, argsExpression,
+					entities as NonEmpty<Entity>,
+				))
+				break
+			}
+			case 'include': {
+				finalizeInProgressDirective()
+				const [templateName, argsExpression] = processInsertableCode(false, code)
+				if (templateName === undefined) {
+					ctx.error('INCLUDE_NAMELESS', span)
+					break
+				}
+				giveEntities.push(new TemplateInclusion(templateName, argsExpression))
+				break
+			}
+
+			default:
+				ctx.error('UNKNOWN_DIRECTIVE', span)
+		}
+	}
+
+	return ctx.Ok(() => giveEntities)
 }

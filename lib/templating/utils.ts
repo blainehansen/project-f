@@ -4,13 +4,13 @@ import { Result, Ok, Err } from '@ts-std/monads'
 import { NonEmpty, Dict } from '../utils'
 
 export type ParseError = Readonly<{ span: Span, title: string, message: string, error: true }>
-export function ParseError(span: Span, title: string, message: string) {
-	return { span, title, message, error: true } as ParseError
+export function ParseError(span: Span, title: string, ...paragraphs: string[]) {
+	return { span, title, message: paragraphs.join('\n'), error: true } as ParseError
 }
 
 export type ParseWarning = Readonly<{ span: Span, title: string, message: string, error: false }>
-export function ParseWarning(span: Span, title: string, message: string): ParseWarning {
-	return { span, title, message, error: false } as ParseWarning
+export function ParseWarning(span: Span, title: string, ...paragraphs: string[]): ParseWarning {
+	return { span, title, message: paragraphs.join('\n'), error: false } as ParseWarning
 }
 
 export type ParseOkPayload<T> = { value: T, warnings: ParseWarning[] }
@@ -89,6 +89,13 @@ export class Context<T> extends ParseContext<T> {
 		return errors.length > 0
 			? Err({ errors: errors as NonEmpty<ParseError>, warnings })
 			: Ok({ value: lazyValue(), warnings })
+	}
+
+	static Err<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>): ParseResult<T> {
+		return Err({ errors: [Errors[errorName](...args)], warnings: [] })
+	}
+	static Ok(value: T): ParseResult<T> {
+		return Ok({ value, warnings: [] })
 	}
 }
 
@@ -189,16 +196,76 @@ function formatMessage(message: string, margin: string, lineWidth: number) {
 
 
 
-
+function paragraphs(...p: string[]) {
+	return p.join('\n')
+}
 
 export const Errors = {
-	requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
-	// noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
-	conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
-	invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
-	invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
-	invalidSelectMultiple: (span: Span) =>
-		ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
+	// requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
+	// // noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
+	// conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
+	// invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
+	// invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
+	// invalidSelectMultiple: (span: Span) =>
+	// 	ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
+
+	UNSUPPORTED_TEMPLATE_LANG: (span: Span) => ParseError(span, 'UNSUPPORTED_TEMPLATE_LANG',
+		"At this time, only the `wolf` templating language is supported.",
+		"This is a restriction that will be lifted as soon as possible.",
+	),
+	NON_TS_SCRIPT_LANG: (span: Span) => ParseError(span, 'NON_TS_SCRIPT_LANG',
+		"At this time, only typescript is supported as a script language.",
+	),
+	COMPONENT_CONFLICTING_CREATE: (_first: Span, _second: Span) => ParseError(_second, 'COMPONENT_CONFLICTING_CREATE',
+		"Only one of either `create` or `createCtx` are allowed.",
+	),
+	COMPONENT_CONFLICTING_COMPONENT: (_first: Span, _second: Span) => ParseError(_second, 'COMPONENT_CONFLICTING_COMPONENT',
+		"Only one `Component` declaration is allowed.",
+	),
+	COMPONENT_NOT_OBJECT: (span: Span) => ParseError(span, 'COMPONENT_NOT_OBJECT',
+		"The `Component` declaration doesn't make sense as anything other than an object.",
+	),
+	COMPONENT_BLOCK_NOT_OBJECT: (span: Span) => ParseError(span, 'COMPONENT_BLOCK_NOT_OBJECT',
+		"Sections of the `Component` declaration doesn't make sense as anything other than an object.",
+	),
+	UNKNOWN_COMPONENT_BLOCK: (span: Span) => ParseError(span, 'UNKNOWN_COMPONENT_BLOCK',
+		"This property isn't a valid section of a `Component` declaration.",
+	),
+	CREATE_FINAL_NOT_RETURN: (span: Span) => ParseError(span, 'CREATE_FINAL_NOT_RETURN',
+		"In a `create` function, the final statement must be a simple return statement giving a plain object with known names.",
+		"If you need to do something more complex, consider using a `createCtx` function instead.",
+	),
+	CREATE_FINAL_NOT_OBJECT: (span: Span) => ParseError(span, 'CREATE_FINAL_NOT_OBJECT',
+		"In a `create` function, the final statement must be a simple return statement giving a plain object with known names.",
+		"If you need to do something more complex, consider using a `createCtx` function instead.",
+	),
+	CREATE_COMPLEX_NAME: (span: Span) => ParseError(span, 'CREATE_COMPLEX_NAME',
+		"The returned object of a `create` function can only have simple known names.",
+		"If you need to do something more complex, consider using a `createCtx` function instead.",
+	),
+	CREATE_ACCESSOR_PROPERTY: (span: Span) => ParseError(span, 'CREATE_ACCESSOR_PROPERTY',
+		"The returned object of a `create` function can only have simple known names.",
+		"If you need to do something more complex, consider using a `createCtx` function instead.",
+	),
+	CREATE_UNSUPPORTED_PROPERTY: (span: Span) => ParseError(span, 'CREATE_UNSUPPORTED_PROPERTY',
+		"The returned object of a `create` function can only have simple known names.",
+		"If you need to do something more complex, consider using a `createCtx` function instead.",
+	),
+	COMPONENT_PROPERTY_SIGNATURE: (span: Span) => ParseError(span, 'COMPONENT_PROPERTY_SIGNATURE',
+		"The properties of the `Component` type sections have to be simple property signatures.",
+	),
+	COMPONENT_PROPERTY_INITIALIZED: (span: Span) => ParseError(span, 'COMPONENT_PROPERTY_INITIALIZED',
+		"Initializers don't really make a lot of sense in a `Component` type declaration.",
+	),
+	COMPONENT_COMPLEX_NAME: (span: Span) => ParseError(span, 'COMPONENT_COMPLEX_NAME',
+		"The properties of the `Component` type sections have to be simple property signatures.",
+	),
+	DUPLICATE_SECTIONS: (_first: Span, _second) => ParseError(_second, 'DUPLICATE_SECTIONS',
+		"I don't know what to do with multiple copies of the same section.",
+	),
+	NO_SECTIONS: (span: Span) => ParseError(span, 'NO_SECTIONS',
+		"Somehow there are no sections.",
+	),
 }
 export type Errors = typeof Errors
 export const Warnings = {
@@ -207,6 +274,23 @@ export const Warnings = {
 		if (m.length > 0)
 			parse.warn(ParseWarning(span, 'extraneous modifiers', `these modifiers don't apply to ${variety}: ${m.join(', ')}`))
 	},
-	leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
+	// leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
+	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE', ""),
+	OPTIONAL_COMPONENT_BLOCK: (span: Span) => ParseWarning(span, 'OPTIONAL_COMPONENT_BLOCK',
+		"An optional section of the `Component` declaration doesn't really make any sense",
+	),
+	OPTIONAL_NON_SLOT: (span: Span) => ParseWarning(span, 'OPTIONAL_NON_SLOT',
+		"Only slots really make any sense to be optional.",
+		"Consider making the inner type undefinable instead `A | undefined`."
+	),
+	UNSUPPORTED_CUSTOM_SECTION: (span: Span) => ParseWarning(span, 'UNSUPPORTED_CUSTOM_SECTION',
+		"",
+	),
+	LANGLESS_CUSTOM_SECTION: (span: Span) => ParseWarning(span, 'LANGLESS_CUSTOM_SECTION',
+		"",
+	),
+	UNSUPPORTED_STYLE_SECTION: (span: Span) => ParseWarning(span, 'UNSUPPORTED_STYLE_SECTION',
+		"",
+	),
 }
 export type Warnings = typeof Warnings

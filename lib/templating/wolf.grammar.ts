@@ -1,4 +1,4 @@
-import { Span } from 'kreia/dist/runtime/lexer'
+import { Token, RawToken, Span, Spanned } from 'kreia/dist/runtime/lexer'
 import { Parser, ParseArg, Decidable, path, branch, c } from 'kreia'
 import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
 
@@ -11,7 +11,10 @@ import {
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
-import * as astParse from './ast.parse'
+import {
+	parseAttribute, parseHtml, parseTagAttributes, parseComponentInclusion,
+	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, NotReadyEntity, parseEntities,
+} from './ast.parse'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
 	space: / /,
@@ -86,7 +89,7 @@ const { _Z2nLjPg, _17D7Of, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ
 // export type PlusHandler = (name: string, code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 // export type AtHandler = (code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 
-export function wolf(): Entity[] {
+export function wolf() {
 	const items = lines(() => {
 		return or(
 			c(entity, _Z2nLjPg),
@@ -94,240 +97,9 @@ export function wolf(): Entity[] {
 		)
 	}, _Z1F9dGs)
 
-	return finalizeEntities(items)
+	return parseEntities(items)
 }
 
-function processInsertableCode(isSlot: boolean, code: string | undefined): [string | undefined, string | undefined] {
-	if (code === undefined || code.trim() === '')
-		return [undefined, undefined]
-
-	const [nameSection, ...codeSections] = code.split(/; */)
-	if (isSlot && !/^&\S+$/.test(nameSection))
-		throw new Error(`invalid slot usage ${code}`)
-
-	const argsExpression = codeSections.join('; ')
-	return [isSlot ? nameSection.slice(1) : nameSection, argsExpression]
-}
-
-type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
-type InProgressIf = {
-	type: 'if', expression: string, entities: NonEmpty<Entity>,
-	elseIfBranches: [string, NonEmpty<Entity>][], elseBranch: NonEmpty<Entity> | undefined,
-}
-type InProgressMatch = {
-	type: 'match', matchExpression: string,
-	patterns: [string, Entity[]][], defaultPattern: Entity[] | undefined,
-}
-type InProgressSwitch = {
-	type: 'switch', switchExpression: string,
-	cases: (SwitchCase | SwitchDefault)[],
-}
-function finalizeEntities(items: (NotReadyEntity | undefined)[]): Entity[] {
-	const giveEntities = []
-	let inProgressTextSection = undefined as NonEmpty<TextItem> | undefined
-	let inProgressDirective = undefined as InProgressDirective | undefined
-	function finalizeInProgressDirective() {
-		if (inProgressDirective === undefined) return
-
-		switch (inProgressDirective.type) {
-			case 'if':
-				const { expression, entities, elseIfBranches, elseBranch } = inProgressDirective
-				giveEntities.push(new IfBlock(expression, entities, elseIfBranches, elseBranch))
-				break
-			case 'match':
-				const { matchExpression, patterns, defaultPattern } = inProgressDirective
-				giveEntities.push(new MatchBlock(
-					matchExpression,
-					// TODO these should probably just be warnings
-					NonEmpty.expect(patterns, "no patterns given for @match"),
-					defaultPattern,
-				))
-				break
-			case 'switch':
-				const { switchExpression, cases } = inProgressDirective
-				giveEntities.push(new SwitchBlock(
-					switchExpression,
-					NonEmpty.expect(cases, "no cases given for @switch"),
-				))
-				break
-		}
-	}
-
-	for (const item of items) {
-		if (item === undefined) {
-			finalizeInProgressDirective()
-			continue
-		}
-		if (Array.isArray(item)) {
-			finalizeInProgressDirective()
-			inProgressTextSection = (inProgressTextSection || [] as TextItem[]).concat(item) as NonEmpty<TextItem>
-			continue
-		}
-		// finalize inProgressTextSection
-		if (inProgressTextSection !== undefined) {
-			giveEntities.push(new TextSection(inProgressTextSection))
-			inProgressTextSection = undefined
-		}
-
-		if (item.type !== 'directive') {
-			finalizeInProgressDirective()
-			giveEntities.push(item)
-			continue
-		}
-
-		function validateCodeEmpty(command: string, code: string | undefined): undefined {
-			if (code !== undefined)
-				throw new Error(`code arguments have no meaning on @${command}`)
-			return code
-		}
-		function validateCode(command: string, code: string | undefined): string {
-			if (code === undefined)
-				throw new Error(`@${command} must have some code expression`)
-			return code
-		}
-
-		const { command, code, entities } = item
-		switch (command) {
-			case 'if':
-				finalizeInProgressDirective()
-				inProgressDirective = {
-					type: 'if', expression: validateCode(command, code),
-					entities: NonEmpty.expect(entities, "@if without any nested entities doesn't make any sense"),
-					elseIfBranches: [], elseBranch: undefined,
-				} as InProgressIf
-				break
-			case 'elseif':
-				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
-					throw new Error("@elseif without a preceding @if")
-				inProgressDirective.elseIfBranches.push([
-					validateCode(command, code),
-					NonEmpty.expect(entities, "@elseif without any nested entities doesn't make any sense"),
-				])
-				break
-			case 'else':
-				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
-					throw new Error("@else without a preceding @if")
-				validateCodeEmpty(command, code)
-				inProgressDirective.elseBranch = NonEmpty.expect(entities, "@else without any nested entities doesn't make any sense")
-				finalizeInProgressDirective()
-				break
-
-			case 'each':
-				finalizeInProgressDirective()
-				function processEachBlockCode(code: string): [EachBlock['params'], string] {
-					const [paramsSection, ...remainingSections] = code.split(/ +of +/)
-					const paramsMatch = paramsSection.match(/\( *(\S+) *, *(\S+) *\)/)
-					const [variableCode, indexCode] = paramsMatch === null
-						? [paramsSection, undefined]
-						: [paramsMatch[1], paramsMatch[2]]
-
-					return [{ variableCode, indexCode }, remainingSections.join(' of ')]
-				}
-				const [paramsExpression, listExpression] = processEachBlockCode(validateCode(command, code))
-				giveEntities.push(new EachBlock(
-					paramsExpression, listExpression,
-					NonEmpty.expect(entities, "@each without any nested entities doesn't make any sense"),
-				))
-				break
-
-			case 'match':
-				finalizeInProgressDirective()
-				if (entities.length > 0)
-					throw new Error("@match with nested entities doesn't make any sense")
-				inProgressDirective = { type: 'match', matchExpression: validateCode(command, code), patterns: [], defaultPattern: undefined } as InProgressMatch
-				break
-			case 'when':
-				if (inProgressDirective === undefined || inProgressDirective.type !== 'match')
-					throw new Error("@when without a preceding @match")
-				inProgressDirective.patterns.push([validateCode(command, code), entities])
-				break
-
-			case 'switch':
-				finalizeInProgressDirective()
-				if (entities.length > 0)
-					throw new Error("@switch with nested entities doesn't make any sense")
-				inProgressDirective = { type: 'switch', switchExpression: validateCode(command, code), cases: [] } as InProgressSwitch
-				break
-			case 'case':
-			case 'fallcase':
-				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
-					throw new Error(`@${command} without a preceding @switch`)
-				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', validateCode(command, code), entities))
-				break
-			case 'falldefault':
-				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
-					throw new Error("@falldefault without a preceding @switch")
-				validateCodeEmpty(command, code)
-				inProgressDirective.cases.push(new SwitchDefault(true, entities))
-				break
-
-			// belongs to both switch and match
-			case 'default':
-				validateCodeEmpty(command, code)
-				if (inProgressDirective === undefined)
-					throw new Error("@default without a preceding @match or @switch")
-				switch (inProgressDirective.type) {
-					case 'if':
-						throw new Error("@default without a preceding @match or @switch")
-					case 'match':
-						if (inProgressDirective.defaultPattern !== undefined)
-							throw new Error("duplicate @default in @match")
-						inProgressDirective.defaultPattern = entities
-						break
-					case 'switch':
-						inProgressDirective.cases.push(new SwitchDefault(false, entities))
-						break
-				}
-				break
-
-			case 'slot': {
-				finalizeInProgressDirective()
-				const [slotName, argsExpression] = processInsertableCode(true, code)
-				giveEntities.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
-				break
-			}
-			case 'insert': {
-				finalizeInProgressDirective()
-				if (entities.length === 0)
-					throw new Error("@insert with no nested entities doesn't make any sense")
-				const [slotName, paramsExpression] = processInsertableCode(true, code)
-				giveEntities.push(new SlotInsertion(
-					slotName, paramsExpression,
-					NonEmpty.expect(entities, "@insert without any nested entities doesn't make any sense"),
-				))
-				break
-			}
-
-			case 'template': {
-				finalizeInProgressDirective()
-				const [templateName, argsExpression] = processInsertableCode(false, code)
-				if (templateName === undefined)
-					throw new Error("@template must provide template name")
-				giveEntities.push(new TemplateDefinition(
-					templateName, argsExpression,
-					NonEmpty.expect(entities, "@template without any nested entities doesn't make any sense"),
-				))
-				break
-			}
-			case 'include': {
-				finalizeInProgressDirective()
-				const [templateName, argsExpression] = processInsertableCode(false, code)
-				if (templateName === undefined)
-					throw new Error("@include must provide template name")
-				giveEntities.push(new TemplateInclusion(templateName, argsExpression))
-				break
-			}
-
-			default:
-				throw new Error(`unknown directive ${command}`)
-		}
-	}
-
-	return giveEntities
-}
-
-type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
-type NotReadyEntity = Tag | ComponentInclusion | NonEmpty<TextItem> | DirectivePending
 export function entity(): NotReadyEntity {
 	return or(
 		c((): NotReadyEntity => {
@@ -335,7 +107,7 @@ export function entity(): NotReadyEntity {
 			const entities = maybe_or(
 				c(() => {
 					consume(tok.colon, tok.large_space)
-					return finalizeEntities([entity()])
+					return parseEntities([entity()])
 				}, _6PPuF),
 
 				c(() => {
@@ -358,7 +130,7 @@ export function entity(): NotReadyEntity {
 					return new Tag(ident, metas, attributes, entities)
 				case 'inclusion':
 					const { name, params } = entity_item
-					return new ComponentInclusion(name, params, entities)
+					return parseComponentInclusion(name, params, entities)
 				case 'directive':
 					return { entities, ...entity_item }
 			}
@@ -387,9 +159,6 @@ export function entity(): NotReadyEntity {
 	)
 }
 
-type TagDescriptor = { type: 'tag', ident: string, metas: Meta[], attributes: Attribute[] }
-type InclusionDescriptor = { type: 'inclusion', name: string, params: Attribute[] }
-type DirectiveDescriptor = { type: 'directive', command: string, code: string | undefined }
 export function entity_descriptor(): TagDescriptor | InclusionDescriptor | DirectiveDescriptor {
 	return or(
 		c((): TagDescriptor => {
@@ -416,7 +185,7 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 				consume(tok.open_paren)
 				const segments = many(paren_code, _Z1O2lKj)
 				consume(tok.close_paren)
-				return segments.join('')
+				return segments.map(s => s.item).join('')
 			}, _2w47cC)
 
 			const command = ident[0].content.slice(1)
@@ -425,43 +194,43 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 	)
 }
 
-type TagItem = { tag_name: string, metas: Meta[] }
+type TagItem = { tag_name: Spanned<string> | undefined, metas: Spanned<Meta>[] }
 export function tag(): TagItem {
 	return or(
 		c((): TagItem => {
-			const tag_item = consume(tok.tag_identifier)
+			const tag_item = TokenSpanned(consume(tok.tag_identifier)[0])
 			const metas = maybe_many(meta, _1VQg9s) || []
-
-			return { tag_name: tag_item[0].content, metas }
+			return { tag_name: tag_item, metas }
 		}, _Z1yGH1N),
 
 		c((): TagItem => {
 			const metas = many(meta, _1VQg9s)
-			return { tag_name: 'div', metas }
+			return { tag_name: undefined, metas }
 		}, _1VQg9s),
 	)
 }
 
-export function meta(): Meta {
+export function meta() {
 	const meta_item = or(
 		c(tok.id_identifier), c(tok.class_identifier),
 
-		c((): Meta => {
-			consume(tok.dot)
-			const segment = code_segment()
-			return new Meta(true, true, segment.code)
+		c(() => {
+			const prefix = consume(tok.dot)
+			const { item: segment, span: segment_span } = code_segment()
+			return Spanned(new Meta(true, true, segment.code), Span.around(prefix, segment_span))
 		}, _qLI),
 
-		c((): Meta => {
-			consume(tok.pound)
-			const segment = code_segment()
-			return new Meta(false, true, segment.code)
+		c(() => {
+			const prefix = consume(tok.pound)
+			const { item: segment, span: segment_span } = code_segment()
+			return Spanned(new Meta(false, true, segment.code), Span.around(prefix, segment_span))
 		}, _7HLiJ),
 	)
 
 	if (Array.isArray(meta_item)) {
-		const content = meta_item[0].content
-		return new Meta(content.startsWith('.'), false, content)
+		const token = meta_item[0]
+		const content = token.content
+		return Spanned(new Meta(content.startsWith('.'), false, content), token.span)
 	}
 	return meta_item
 }
@@ -492,7 +261,7 @@ export function attributes(): ParseResult<Attribute>[] {
 	return result_attributes
 }
 
-export function attribute_line(): ParseResult<Attribute>[] {
+export function attribute_line() {
 	const results = [attribute()]
 	const rest_results = maybe_many(() => {
 		consume(tok.comma)
@@ -503,72 +272,71 @@ export function attribute_line(): ParseResult<Attribute>[] {
 }
 
 export function attribute() {
-	const [{ content: rawAttribute, span: rawAttributeSpan }] = consume(tok.attribute_name)
-	const [value = undefined, valueSpan = undefined] = maybe((): [string | AttributeCode, Span] => {
+	const rawAttribute = TokenSpanned(consume(tok.attribute_name))
+	const value = maybe((): Spanned<AttributeCode | string> => {
 		consume(tok.equals)
 		const value_item = or(c(tok.identifier), c(str, _uGx), c(code_segment, _J5AgF))
 
 		return Array.isArray(value_item)
-			? [new AttributeCode(true, value_item[0].content), value_item[0].span]
+			? Spanned(new AttributeCode(true, value_item[0].content), value_item[0].span)
 			: value_item
-	}, _Z1wyrvk) || []
+	}, _Z1wyrvk)
 
-	return astParse.parseAttribute(rawAttribute, rawAttributeSpan, value, valueSpan)
+	return parseAttribute(rawAttribute, value)
 }
 
 export function str() {
-	const [{ content, span }] = consume(tok.str)
-	return t(content, span)
+	return TokenSpanned(consume(tok.str)[0])
 }
 
-export function code_segment(): AttributeCode {
-	consume(tok.open_bracket)
+export function code_segment() {
+	const open = consume(tok.open_bracket)
 	const segments = maybe_many(code, _14hbOa) || []
-	consume(tok.close_bracket)
+	const close = consume(tok.close_bracket)
 
-	return t(new AttributeCode(false, segments.join('')), )
+	return Spanned(new AttributeCode(false, segments.map(s => s.item).join('')), Span.around(open, close))
 }
 
-export function code(): string {
+export function code(): Spanned<string> {
 	const item = or(
 		c(() => {
-			consume(tok.open_bracket)
+			const open = consume(tok.open_bracket)
 			const segments = maybe_many(code, _14hbOa) || []
-			consume(tok.close_bracket)
-			return `{${segments.join('')}}`
+			const close = consume(tok.close_bracket)
+			return Spanned(Span.around(open, close), `{${segments.map(s => s.item).join('')}}`)
 		}, _J5AgF),
 		c(tok.str), c(tok.not_bracket),
 	)
 	return flatten_string(item)
 }
 
-export function paren_code(): string {
+export function paren_code(): Spanned<string> {
 	const item = or(
 		c(() => {
-			consume(tok.open_paren)
+			const open = consume(tok.open_paren)
 			const segments = maybe_many(paren_code, _Z1O2lKj) || []
-			consume(tok.close_paren)
-			return `(${segments.join('')})`
+			const close = consume(tok.close_paren)
+			return Spanned(`(${segments.map(s => s.item).join('')})`, Span.around(open, close))
 		}, _NFQGh),
 		c(tok.not_paren),
 	)
 	return flatten_string(item)
 }
 
-export function text(): TextItem {
+export function text() {
 	const item = or(
 		c(() => {
-			consume(tok.open_double_bracket)
+			const open = consume(tok.open_double_bracket)
 			const segments = maybe_many(code, _14hbOa) || []
-			consume(tok.close_double_bracket)
+			const close = consume(tok.close_double_bracket)
 
-			return new TextItem(true, segments.join(''))
+			return Spanned(new TextItem(true, segments.map(s => s.item).join('')), Span.around(open, close))
 		}, _Z2cNPgr),
 		c(tok.not_double_bracket),
 	)
 
 	return Array.isArray(item)
-		? new TextItem(false, item[0].content)
+		? Spanned(new TextItem(false, item[0].content), item[0].span)
 		: item
 }
 
@@ -587,9 +355,8 @@ function lines<CONTENT extends ParseArg>(content: CONTENT, _d1: Decidable) {
 }
 
 
-interface TokenLike { content: string }
-function flatten_string(item: string | [TokenLike]) {
+function flatten_string(item: Spanned<string> | [RawToken]): Spanned<string> {
 	return Array.isArray(item)
-		? item[0].content
+		? TokenSpanned(item[0])
 		: item
 }

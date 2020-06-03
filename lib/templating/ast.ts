@@ -1,4 +1,3 @@
-import { Span } from 'kreia/dist/runtime/lexer'
 import { Dict, NonEmpty, OmitVariants } from '../utils'
 
 export enum LivenessType { static, dynamic, reactive }
@@ -10,7 +9,7 @@ export class ComponentDefinition {
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
 		readonly createFn: string[] | undefined,
-		readonly entities: NonEmpty<(Entity | SlotUsage)>,
+		readonly entities: (Entity | SlotUsage)[],
 	) {}
 }
 
@@ -192,9 +191,9 @@ export class IfBlock {
 	readonly type = 'IfBlock' as const
 	constructor(
 		readonly expression: string,
-		readonly entities: NonEmpty<Entity>,
-		readonly elseIfBranches: [string, NonEmpty<Entity>][],
-		readonly elseBranch: NonEmpty<Entity> | undefined,
+		readonly entities: Entity[],
+		readonly elseIfBranches: [string, Entity[]][],
+		readonly elseBranch: Entity[] | undefined,
 	) {}
 }
 
@@ -215,7 +214,7 @@ export class EachBlock {
 	constructor(
 		readonly params: { variableCode: string, indexCode: string | undefined },
 		readonly listExpression: string,
-		readonly entities: NonEmpty<Entity>,
+		readonly entities: Entity,
 		// readonly keyExpression: string | undefined,
 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
 	) {}

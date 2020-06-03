@@ -14,40 +14,43 @@ import { generateComponentDefinition } from './codegen'
 
 type AlmostComponentDefinition = [string[], string[], string[], Dict<boolean>, string[] | undefined]
 export function processFile(source: string, lineWidth: number, filename: string): string {
-	const expecter = new Parser(lineWidth)
-	const { template, script, style, ...others } = expecter.expect(cutSource({ source, filename }))
+	const parser = new Parser(lineWidth)
+	const { template, script, style, ...others } = parser.expect(cutSource({ source, filename }))
 	for (const section of Object.values(others)) {
-		expecter.warn('UNSUPPORTED_CUSTOM_SECTION', section.span)
+		parser.warn('UNSUPPORTED_CUSTOM_SECTION', section.span)
 		if (section.lang === undefined)
-			expecter.warn('LANGLESS_CUSTOM_SECTION', section.span)
+			parser.warn('LANGLESS_CUSTOM_SECTION', section.span)
 	}
 	if (style !== undefined)
-		expecter.warn('UNSUPPORTED_STYLE_SECTION', style.span)
+		parser.warn('UNSUPPORTED_STYLE_SECTION', style.span)
 
-	if (template === undefined)
-		return expecter.die('NO_TEMPLATE', filename)
-	if (template.lang && template.lang !== 'wolf')
-		return expecter.die('UNSUPPORTED_TEMPLATE_LANG', template.span)
+	const entities = exec(() => {
+		if (template === undefined)
+			return []
+		if (template.lang && template.lang !== 'wolf')
+			return parser.die('UNSUPPORTED_TEMPLATE_LANG', template.span)
 
-	reset(template.text)
-	const entitiesResult = wolf()
-	exit()
-	const { value: entities, warnings } = expecter.expect(entitiesResult)
-	if (entities.length === 0)
-		return expecter.die('EMPTY_TEMPLATE', filename)
+		reset(template.text)
+		const entitiesResult = wolf()
+		exit()
+		const { value: entities, warnings } = parser.expect(entitiesResult)
+		if (entities.length === 0)
+			parser.warn('EMPTY_TEMPLATE', template.span)
+		return entities
+	})
 
 	const [props, syncs, events, slots, createFn] = script === undefined
 		// TODO here's where we'd add backfilled slots
 		? [[], [], [], {}, undefined]
 		: exec(() => {
 			if (script.lang && script.lang !== 'ts')
-				return expecter.die('NON_TS_SCRIPT_LANG', script.span)
+				return parser.die('NON_TS_SCRIPT_LANG', script.span)
 			const sourceFile = ts.createSourceFile(filename, script.text, ts.ScriptTarget.Latest, true)
-			return expecter.expect(inspect(sourceFile))
+			return parser.expect(inspect(sourceFile))
 		})
 
-	return expecter.finalize(() => {
-		const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities as NonEmpty<Entity>)
+	return parser.finalize(() => {
+		const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities)
 		return generateComponentDefinition(definition)
 	})
 }
@@ -107,7 +110,9 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 		ctx.warn('COMPONENT_NOT_EXPORTED', getSpan(sourceFile, componentType))
 
 	if (componentType.typeParameters !== undefined)
-		return ctx.Err('COMPONENT_GENERIC', getSpan(sourceFile, componentType))
+		// TODO
+		throw new Error("We actually can AND SHOULD handle generic components properly")
+		// return ctx.Err('COMPONENT_GENERIC', getSpan(sourceFile, componentType))
 
 	const definition = componentType.type
 	if (!ts.isTypeLiteralNode(definition))
@@ -120,7 +125,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 		const [signature, variety, optional] = result.value
 
 		if (optional)
-			return ctx.Err('OPTIONAL_COMPONENT_BLOCK', getSpan(sourceFile, definitionMember))
+			ctx.warn('OPTIONAL_COMPONENT_BLOCK', getSpan(sourceFile, definitionMember))
 
 		const signatureType = signature.type
 		if (!signatureType || !ts.isTypeLiteralNode(signatureType))
@@ -133,7 +138,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 					if (result.is_err()) return ctx.subsumeFail(result.error)
 					const [, binding, optional] = result.value
 					if (optional)
-						return ctx.Err('OPTIONAL_NON_SLOT', getSpan(sourceFile, bindingMember))
+						ctx.warn('OPTIONAL_NON_SLOT', getSpan(sourceFile, bindingMember))
 
 					types.bindings[variety].push(binding)
 				}
@@ -169,7 +174,7 @@ function processCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclara
 
 	const lastStatement = block.statements[block.statements.length - 1]
 	if (!lastStatement || !ts.isReturnStatement(lastStatement))
-		return ctx.Err('CREATE_FINAL_NON_RETURN', getSpan(sourceFile, lastStatement))
+		return ctx.Err('CREATE_FINAL_NOT_RETURN', getSpan(sourceFile, lastStatement))
 	const returnExpression = lastStatement.expression
 	if (!returnExpression || !ts.isObjectLiteralExpression(returnExpression))
 		return ctx.Err('CREATE_FINAL_NOT_OBJECT', getSpan(sourceFile, lastStatement))
