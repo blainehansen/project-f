@@ -1,43 +1,49 @@
 import { Span } from 'kreia/dist/runtime/lexer'
 import { Result, Ok, Err } from '@ts-std/monads'
 
-import { NonEmpty, Dict } from '../utils'
+import { NonEmpty, Dict, KeysOfType } from '../utils'
 
-export type ParseError = Readonly<{ span: Span, title: string, message: string, error: true }>
-export function ParseError(span: Span, title: string, ...paragraphs: string[]) {
-	return { span, title, message: paragraphs.join('\n'), error: true } as ParseError
+export type ParseError = Readonly<{ region: Span | string, title: string, message: string, error: true }>
+export function ParseError(region: Span | string, title: string, ...paragraphs: string[]) {
+	return { region, title, message: paragraphs.join('\n'), error: true } as ParseError
 }
 
-export type ParseWarning = Readonly<{ span: Span, title: string, message: string, error: false }>
-export function ParseWarning(span: Span, title: string, ...paragraphs: string[]): ParseWarning {
-	return { span, title, message: paragraphs.join('\n'), error: false } as ParseWarning
+export type ParseWarning = Readonly<{ region: Span | string, title: string, message: string, error: false }>
+export function ParseWarning(region: Span | string, title: string, ...paragraphs: string[]): ParseWarning {
+	return { region, title, message: paragraphs.join('\n'), error: false } as ParseWarning
 }
 
 export type ParseOkPayload<T> = { value: T, warnings: ParseWarning[] }
 export type ParseErrPayload = { errors: NonEmpty<ParseError>, warnings: ParseWarning[] }
 export type ParseResult<T> = Result<ParseOkPayload<T>, ParseErrPayload>
 
+export type KeysOTypeReturners<T, U> = { [K in keyof T]: T[K] extends (...args: any[]) => U ? K : never }[keyof T]
+export type ArgsOfTypeReturner<T, U, K extends KeysOTypeReturners<T, U>> = T[K] extends (...args: infer A) => U ? A : never
+function unsafePass<T, U, K extends KeysOTypeReturners<T, U>>(t: T, k: K, args: ArgsOfTypeReturner<T, U, K>): U {
+	return (t[k] as ((...args: any[]) => U))(...args)
+}
+
 export abstract class ParseContext<T> {
-	private errors: ParseError[] = []
-	private warnings: ParseWarning[] = []
-	private drop() {
+	protected errors: ParseError[] = []
+	protected warnings: ParseWarning[] = []
+	protected drop() {
 		const errors = this.errors.slice()
 		const warnings = this.warnings.slice()
 		this.errors.splice(0, this.errors.length)
 		this.warnings.splice(0, this.warnings.length)
 		return { errors, warnings }
 	}
-	warn<K extends keyof Warnings>(warningName: K, ...args: Parameters<Warnings[K]>) {
-		this.warnings.push(Warnings[warningName](...args))
+	warn<K extends KeysOTypeReturners<Warnings, ParseWarning>>(warningName: K, ...args: ArgsOfTypeReturner<Warnings, ParseWarning, K>) {
+		this.warnings.push(unsafePass(Warnings, warningName, args))
 	}
-	error<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
-		this.errors.push(Errors[errorName](...args))
+	error<K extends KeysOTypeReturners<Errors, ParseError>>(errorName: K, ...args: ArgsOfTypeReturner<Errors, ParseError, K>) {
+		this.errors.push(unsafePass(Errors, errorName, args))
 	}
 
 	take<T>(result: ParseResult<T>): Result<T, void> {
 		if (result.is_err()) {
-			this.errors = this.concat(result.error.errors) as NonEmpty<ParseError>
-			this.warnings = this.concat(result.error.warnings)
+			this.errors = this.errors.concat(result.error.errors) as NonEmpty<ParseError>
+			this.warnings = this.warnings.concat(result.error.warnings)
 			return Err(undefined as void)
 		}
 		this.warnings = this.warnings.concat(result.value.warnings)
@@ -46,20 +52,20 @@ export abstract class ParseContext<T> {
 }
 
 export class Parser extends ParseContext<void> {
-	constructor(readonly lineWidth: number) {}
+	constructor(readonly lineWidth: number) { super() }
 	expect<T>(result: ParseResult<T>): T {
 		const r = this.take(result)
-		if (r.is_ok()) return result.value
-		return parseDie(this.errors, this.warnings, this.lineWidth)
+		if (r.is_ok()) return r.value
+		return parseDie(this.errors as NonEmpty<ParseError>, this.warnings, this.lineWidth)
 	}
-	die<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>) {
+	die<K extends KeysOTypeReturners<Errors, ParseError>>(errorName: K, ...args: ArgsOfTypeReturner<Errors, ParseError, K>) {
 		this.error(errorName, ...args)
-		return parseDie(this.errors, this.warnings, this.lineWidth)
+		return parseDie(this.errors as NonEmpty<ParseError>, this.warnings, this.lineWidth)
 	}
 	finalize<T>(finalizer: () => T): T {
 		const { errors, warnings } = this.drop()
 		return errors.length > 0
-			? parseDie(errors, warnings, this.lineWidth)
+			? parseDie(errors as NonEmpty<ParseError>, warnings, this.lineWidth)
 			: withWarnings(finalizer(), warnings, this.lineWidth)
 	}
 }
@@ -79,9 +85,9 @@ export class Context<T> extends ParseContext<T> {
 		return Err({ errors, warnings })
 	}
 
-	Err<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>): ParseResult<T> {
+	Err<K extends KeysOTypeReturners<Errors, ParseError>>(errorName: K, ...args: ArgsOfTypeReturner<Errors, ParseError, K>): ParseResult<T> {
 		const { errors, warnings } = this.drop()
-		errors.push(Errors[errorName](...args))
+		errors.push(unsafePass(Errors, errorName, args))
 		return Err({ errors: errors as NonEmpty<ParseError>, warnings })
 	}
 	Ok(lazyValue: () => T): ParseResult<T> {
@@ -91,17 +97,23 @@ export class Context<T> extends ParseContext<T> {
 			: Ok({ value: lazyValue(), warnings })
 	}
 
-	static Err<K extends keyof Errors>(errorName: K, ...args: Parameters<Errors[K]>): ParseResult<T> {
-		return Err({ errors: [Errors[errorName](...args)], warnings: [] })
+	static Err<T, K extends KeysOTypeReturners<Errors, ParseError>>(errorName: K, ...args: ArgsOfTypeReturner<Errors, ParseError, K>): ParseResult<T> {
+		return Err({ errors: [unsafePass(Errors, errorName, args)], warnings: [] })
 	}
-	static Ok(value: T): ParseResult<T> {
+	static Ok<T>(value: T): ParseResult<T> {
 		return Ok({ value, warnings: [] })
 	}
 }
 
 function formatDiagnostics(diagnostics: (ParseError | ParseWarning)[], lineWidth: number) {
 	return diagnostics
-		.sort((a, b) => a.span.start - b.span.start)
+		.sort((a, b) => {
+			if (typeof a.region === 'string' && typeof b.region === 'string')
+				return a.region < b.region ? -1 : 1
+			if (typeof a.region === 'string') return -1
+			if (typeof b.region === 'string') return 1
+			return a.region.start - b.region.start
+		})
 		.map(d => formatDiagnostic(d, lineWidth))
 		.join('\n\n\n') + '\n'
 }
@@ -123,14 +135,16 @@ const info = chalk.blue.bold
 const file = chalk.magentaBright.bold
 
 export function formatDiagnostic(
-	{ span: { file: { source, filename }, start, end, line, column }, title, message, error }: ParseError | ParseWarning,
+	{ region, title, message, error }: ParseError | ParseWarning,
 	lineWidth: number,
 ): string {
-	const headerPrefix = info(`-- ${title.toUpperCase()} `)
-	const header = headerPrefix + info('-'.repeat(lineWidth - (title.length + 4)))
-	const fileHeader = (filename ? file(filename) + '\n' : '')
+	const header = `-- ${title} ` + '-'.repeat(lineWidth - (title.length + 4))
 
-	const pointerWidth = end - start
+	if (typeof region === 'string')
+		return header + '\n' + file(region) + formatMessage(message, '\n  ', lineWidth)
+
+	const { file: { source, filename }, start, end, line, column } = region
+	const fileHeader = (filename ? file(filename) + '\n' : '')
 	const lineNumberWidth = line.toString().length
 	function makeGutter(lineNumber?: number) {
 		const insert = lineNumber !== undefined
@@ -151,6 +165,7 @@ export function formatDiagnostic(
 	const printSourceLine = sourceLine.replace('\t', '  ')
 	const pointerPrefix = sourceLine.slice(0, column).replace('\t', '  ')
 	const highlight = error ? chalk.red.bold : chalk.yellow.bold
+	const pointerWidth = end - start
 	const pointer = pointerPrefix + highlight('^'.repeat(pointerWidth))
 
 	return header
@@ -196,9 +211,6 @@ function formatMessage(message: string, margin: string, lineWidth: number) {
 
 
 
-function paragraphs(...p: string[]) {
-	return p.join('\n')
-}
 
 export const Errors = {
 	// requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
@@ -260,22 +272,20 @@ export const Errors = {
 	COMPONENT_COMPLEX_NAME: (span: Span) => ParseError(span, 'COMPONENT_COMPLEX_NAME',
 		"The properties of the `Component` type sections have to be simple property signatures.",
 	),
-	DUPLICATE_SECTIONS: (_first: Span, _second) => ParseError(_second, 'DUPLICATE_SECTIONS',
+	DUPLICATE_SECTIONS: (_first: Span, _second: Span) => ParseError(_second, 'DUPLICATE_SECTIONS',
 		"I don't know what to do with multiple copies of the same section.",
-	),
-	NO_SECTIONS: (span: Span) => ParseError(span, 'NO_SECTIONS',
-		"Somehow there are no sections.",
 	),
 }
 export type Errors = typeof Errors
 export const Warnings = {
-	checkExtraneousModifiers(parse: Parse<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
+	checkExtraneousModifiers(ctx: ParseContext<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
 		const m = Object.keys(modifiers)
 		if (m.length > 0)
-			parse.warn(ParseWarning(span, 'extraneous modifiers', `these modifiers don't apply to ${variety}: ${m.join(', ')}`))
+			ctx.warn('EXTRANEOUS_MODIFIERS', span, `these modifiers don't apply to ${variety}: ${m.join(', ')}`)
 	},
-	// leafChildren: (span: Span, tagIdent: string) => ParseWarning(span, 'invalid children', `${tagIdent} tags don't have children`)
-	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE', ""),
+	EXTRANEOUS_MODIFIERS: (span: Span, message: string) => ParseWarning(span, 'EXTRANEOUS_MODIFIERS', message),
+
+	LEAF_CHILDREN: (span: Span, tagIdent: string) => ParseWarning(span, 'LEAF_CHILDREN', `${tagIdent} tags don't have children`),
 	OPTIONAL_COMPONENT_BLOCK: (span: Span) => ParseWarning(span, 'OPTIONAL_COMPONENT_BLOCK',
 		"An optional section of the `Component` declaration doesn't really make any sense",
 	),
@@ -291,6 +301,21 @@ export const Warnings = {
 	),
 	UNSUPPORTED_STYLE_SECTION: (span: Span) => ParseWarning(span, 'UNSUPPORTED_STYLE_SECTION',
 		"",
+	),
+	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE',
+		"",
+	),
+
+	COMPONENT_NOT_EXPORTED: (span: Span) => ParseWarning(span, 'COMPONENT_NOT_EXPORTED',
+		"It's a good idea to export `Component` type declarations.",
+	),
+	CREATE_NOT_EXPORTED: (span: Span) => ParseWarning(span, 'CREATE_NOT_EXPORTED',
+		"It's a good idea to export `create` and `createCtx` functions.",
+	),
+	NO_SECTIONS: (filename: string) => ParseWarning(filename, 'NO_SECTIONS',
+		"No sections were specified in this iron file.",
+		"This is fine, and the entire file will be interpreted as typescript, but this is probably a mistake.",
+		"If this file really is just typescript, then consider changing the extension from `.iron` to `.ts`",
 	),
 }
 export type Warnings = typeof Warnings

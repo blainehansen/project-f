@@ -33,7 +33,7 @@ export function processFile(source: string, lineWidth: number, filename: string)
 		reset(template.text)
 		const entitiesResult = wolf()
 		exit()
-		const { value: entities, warnings } = parser.expect(entitiesResult)
+		const entities = parser.expect(entitiesResult)
 		if (entities.length === 0)
 			parser.warn('EMPTY_TEMPLATE', template.span)
 		return entities
@@ -81,6 +81,7 @@ export function inspect(file: ts.SourceFile) {
 			ctx.error('COMPONENT_CONFLICTING_CREATE', foundCreateFns[0][1], foundCreateFns[1][1])
 			return undefined
 		}
+		if (foundCreateFns.length === 0) return undefined
 		const foundCreateFn = foundCreateFns[0][0]
 		if (foundCreateFn === CTXFN) return foundCreateFn
 		return ctx.take(foundCreateFn).ok_undef()
@@ -90,6 +91,7 @@ export function inspect(file: ts.SourceFile) {
 			ctx.error('COMPONENT_CONFLICTING_COMPONENT', foundComponents[0][1], foundComponents[1][1])
 			return undefined
 		}
+		if (foundComponents.length === 0) return undefined
 		return ctx.take(foundComponents[0][0]).ok_undef()
 	})
 
@@ -167,10 +169,8 @@ function processCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclara
 		ctx.warn('CREATE_NOT_EXPORTED', getSpan(sourceFile, createFn))
 
 	const block = createFn.body!
-	if (block.statements.length === 0) {
-		ctx.warn('EMPTY_CREATE', getSpan(sourceFile, createFn))
+	if (block.statements.length === 0)
 		return ctx.Ok(() => [])
-	}
 
 	const lastStatement = block.statements[block.statements.length - 1]
 	if (!lastStatement || !ts.isReturnStatement(lastStatement))
@@ -232,7 +232,7 @@ export function cutSource(file: SourceFile) {
 	function setSection({ name, lang, span }: AlmostSection, text: string) {
 		const result = sections.set(name, { lang, span, text })
 		if (result.is_err())
-			ctx.error('DUPLICATE_SECTIONS', span, result.error)
+			ctx.error('DUPLICATE_SECTIONS', span, result.error[2].span)
 	}
 
 	let source = file.source; let position = 0; let line = 1
@@ -254,8 +254,10 @@ export function cutSource(file: SourceFile) {
 		last = { name: sectionName, lang, span: sectionMarkerSpan }
 	}
 
-	if (last === undefined)
-		return ctx.Err('NO_SECTIONS', file)
+	if (last === undefined) {
+		ctx.warn('NO_SECTIONS', file.filename || 'unknown file')
+		return ctx.Ok(() => ({ script: { lang: undefined, text: file.source, span: makeSpan(file, 0, file.source, 1, 0) } }))
+	}
 	setSection(last, source)
 
 	return ctx.Ok(() => sections.into_dict())
