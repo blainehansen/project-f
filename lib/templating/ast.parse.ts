@@ -1,4 +1,8 @@
-import { Context, Warnings } from './utils'
+import '@ts-std/extensions/dist/array'
+import { Span, Spanned } from 'kreia/dist/runtime/lexer'
+import { UniqueDict, DefaultDict } from '@ts-std/collections'
+
+import { Context, Warnings, ParseResult } from './utils'
 import { splitGuard, Dict, NonEmpty, OmitVariants } from '../utils'
 import {
 	LivenessType, ComponentDefinition, Entity, Html, Tag, TagAttributes, Meta, AttributeCode, TextSection, TextItem,
@@ -8,8 +12,6 @@ import {
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 
-import { Span, Spanned } from 'kreia/dist/runtime/lexer'
-import { UniqueDict, DefaultDict } from '@ts-std/collections'
 
 // const fnModifiers = [] as const
 // const emptyModifiers = [] as const
@@ -33,8 +35,11 @@ function isInertBindingValue(v: BindingValue): v is InertBindingValue {
 
 export function parseAttribute(
 	{ item: rawAttribute, span: rawAttributeSpan }: Spanned<string>,
-	{ item: value = undefined, valueSpan = undefined }: Spanned<string | AttributeCode> | undefined = {},
+	valueSpanned: Spanned<string | AttributeCode> | undefined,
 ) {
+	const [value, valueSpan] = valueSpanned
+		? [valueSpanned.item, valueSpanned.span]
+		: [undefined, undefined]
 	const ctx = new Context<Attribute>()
 	const [attribute, ...modifiersList] = rawAttribute.split('|')
 	const modifiersUnique = new UniqueDict<true>()
@@ -61,7 +66,7 @@ export function parseAttribute(
 	// case '&': /* check errors */ return new RefAttribute(sliced, 'ref')
 	case '@':
 		if (!isAttributeCode(value))
-			return ctx.Err('REQUIRES_CODE', valueSpan, 'events')
+			return ctx.Err('REQUIRES_CODE', valueSpan || rawAttributeSpan, 'events')
 
 		const { isBare, code } = value
 		const variety = isBare ? 'bare'
@@ -76,7 +81,7 @@ export function parseAttribute(
 
 	case '!': {
 		if (!isAttributeCode(value))
-			return ctx.Err('REQUIRES_CODE', valueSpan, 'syncs')
+			return ctx.Err('REQUIRES_CODE', valueSpan || rawAttributeSpan, 'syncs')
 		if (modifiers.fake && modifiers.setter)
 			return ctx.Err('CONFLICTING_MODIFIERS_FAKE_SETTER', rawAttributeSpan)
 
@@ -91,7 +96,7 @@ export function parseAttribute(
 
 	case ':': {
 		if (!isAttributeCode(value))
-			return ctx.Err('REQUIRES_CODE', valueSpan, 'reactive bindings')
+			return ctx.Err('REQUIRES_CODE', valueSpan || rawAttributeSpan, 'reactive bindings')
 		Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'reactive bindings')
 		return ctx.Ok(() => new BindingAttribute(sliced, { type: 'reactive', reactiveCode: value }))
 	}
@@ -113,17 +118,18 @@ export function parseAttribute(
 
 
 const leafTags = ['br', 'input']
-export function parseHtml(
-	ident: string, metas: Meta[], tagSpan: Span,
-	attributes: Attribute[], entities: Entity[],
-) {
+export type TagDescriptor = { type: 'tag', ident: string, span: Span, metas: Spanned<Meta>[], attributes: Spanned<Attribute>[] }
+export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescriptor, entities: Entity[]) {
 	const ctx = new Context<Html>()
 
 	if (entities.length > 0 && leafTags.includes(ident))
 		ctx.warn('LEAF_CHILDREN', tagSpan, ident)
 
-	const [syncs, nonSyncs] = splitGuard(attributes, (a): a is SyncAttribute => a.type === 'SyncAttribute')
-	const tagAttributesResult = ctx.subsume(ctxTagAttributes(metas, tagSpan, nonSyncs))
+	const [syncs, nonSyncs] = splitGuard(attributes, (a): a is Spanned<SyncAttribute> => a.item.type === 'SyncAttribute')
+	const tagAttributesResult = ctx.subsume(parseTagAttributes(
+		metas, tagSpan,
+		nonSyncs as unknown as Spanned<BindingAttribute | EventAttribute | ReceiverAttribute>[],
+	))
 	if (tagAttributesResult.is_err()) return ctx.subsumeFail(tagAttributesResult.error)
 	const tagAttributes = tagAttributesResult.value
 
@@ -131,16 +137,16 @@ export function parseHtml(
 		return ctx.Ok(() => new Tag(ident, tagAttributes, entities))
 
 	if (syncs.length !== 1) return ctx.Err('INVALID_TAG_SYNC_MULTIPLE', tagSpan)
-	const [sync] = syncs
+	const [{ item: sync, span: syncSpan }] = syncs
 	if (sync.attribute !== 'sync')
-		return ctx.Err('INVALID_TAG_SYNC_INVALID', tagSpan)
+		return ctx.Err('INVALID_TAG_SYNC_INVALID', syncSpan)
 	if (sync.modifier !== undefined)
-		return ctx.Err('INVALID_TAG_SYNC_MODIFIER', tagSpan)
+		return ctx.Err('INVALID_TAG_SYNC_MODIFIER', syncSpan)
 
 	switch (ident) {
 	case 'input':
-		const typeBindingAttribute = nonSyncs.find((a): a is BindingAttribute => a.type === 'BindingAttribute' && a.attribute === 'type')
-		const typeBinding = typeBindingAttribute ? typeBindingAttribute.value : undefined
+		const typeBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'type')
+		const typeBinding = typeBindingAttribute ? typeBindingAttribute.item.value : undefined
 
 		if (typeBinding && typeBinding.type !== 'static')
 			return ctx.Err('INPUT_TAG_SYNC_NOT_KNOWN_TYPE', tagSpan)
@@ -149,54 +155,54 @@ export function parseHtml(
 			return ctx.Ok(() => new SyncedTextInput(false, sync.code, tagAttributes))
 
 		if (typeBinding.value === 'checkbox') {
-			const valueBindingAttribute = nonSyncs.find((a): a is BindingAttribute => a.type === 'BindingAttribute' && a.attribute === 'value')
-			const valueBinding = valueBindingAttribute ? valueBindingAttribute.value : undefined
+			const valueBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'value')
+			const valueBinding = valueBindingAttribute ? valueBindingAttribute.item.value : undefined
 			if (!valueBinding || isInertBindingValue(valueBinding))
 				return ctx.Ok(() => new SyncedCheckboxInput(sync.code, valueBinding, tagAttributes))
-			return ctx.Err('INPUT_TAG_SYNC_CHECKBOX_NOT_KNOWN_VALUE', tagSpan)
+			return ctx.Err('INPUT_TAG_SYNC_CHECKBOX_NOT_KNOWN_VALUE', valueBindingAttribute ? valueBindingAttribute.span : tagSpan)
 		}
 
 		if (typeBinding.value === 'radio') {
-			const valueBindingAttribute = nonSyncs.find((a): a is BindingAttribute => a.type === 'BindingAttribute' && a.attribute === 'value')
-			const valueBinding = valueBindingAttribute ? valueBindingAttribute.value : undefined
+			const valueBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'value')
+			const valueBinding = valueBindingAttribute ? valueBindingAttribute.item.value : undefined
 			if (valueBinding && isInertBindingValue(valueBinding))
 				return ctx.Ok(() => new SyncedRadioInput(sync.code, valueBinding, tagAttributes))
 
-			return ctx.Err('INPUT_TAG_SYNC_RADIO_NOT_KNOWN_VALUE', tagSpan)
+			return ctx.Err('INPUT_TAG_SYNC_RADIO_NOT_KNOWN_VALUE', valueBindingAttribute ? valueBindingAttribute.span : syncSpan)
 		}
 
-		return ctx.Err('INPUT_TAG_SYNC_UNSUPPORTED_TYPE', tagSpan)
+		return ctx.Err('INPUT_TAG_SYNC_UNSUPPORTED_TYPE', typeBindingAttribute!.span)
 
 	case 'textarea':
 		return ctx.Ok(() => new SyncedTextInput(true, sync.code, tagAttributes))
 
 	case 'select':
-		const multipleBindingAttribute = nonSyncs.find((a): a is BindingAttribute => a.type === 'BindingAttribute' && a.attribute === 'multiple')
-		const multipleBinding = multipleBindingAttribute ? multipleBindingAttribute.value : undefined
+		const multipleBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'multiple')
+		const multipleBinding = multipleBindingAttribute ? multipleBindingAttribute.item.value : undefined
 		if (!multipleBinding || multipleBinding.type === 'empty')
 			return ctx.Ok(() => new SyncedSelect(sync.code, !!multipleBinding, tagAttributes))
-		return ctx.Err('INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE', tagSpan)
+		return ctx.Err('INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE', multipleBindingAttribute ? multipleBindingAttribute.span : syncSpan)
 
 	default:
-		return ctx.Err('INVALID_SYNCED_TAG', tagSpan)
+		return ctx.Err('INVALID_SYNCED_TAG', syncSpan)
 	}
 }
 
 export function parseTagAttributes(
-	metas: Meta[], identSpan: Span,
-	attributes: Exclude<Attribute, SyncAttribute>[],
+	metas: Spanned<Meta>[], identSpan: Span,
+	attributes: Spanned<Exclude<Attribute, SyncAttribute>>[],
 ) {
 	const ctx = new Context<TagAttributes>()
 
-	const bindings = new UniqueDict<BindingAttribute>()
+	const bindings = new UniqueDict<[BindingAttribute, Span]>()
 	const events = new DefaultDict(() => [] as EventAttribute[])
 	const receivers: ReceiverAttribute[] = []
 
-	for (const attribute of attributes) switch (attribute.type) {
+	for (const { item: attribute, span } of attributes) switch (attribute.type) {
 	case 'BindingAttribute': {
-		const result = bindings.set(attribute.attribute, attribute)
+		const result = bindings.set(attribute.attribute, [attribute, span])
 		if (result.is_err())
-			ctx.error('TAG_DUPLICATE_BINDING', identSpan, result.error[0])
+			ctx.error('TAG_DUPLICATE_BINDING', span, result.error[2][1])
 		break
 	}
 	case 'EventAttribute':
@@ -210,56 +216,57 @@ export function parseTagAttributes(
 		break
 	}
 
-	return ctx.Ok(() => new TagAttributes(metas, bindings.into_dict(), events.into_dict() as Dict<NonEmpty<EventAttribute>>, receivers))
+	const bindingsDict = bindings.entries().map(([k, [v, ]]) => [k, v] as [string, BindingAttribute]).entries_to_dict()
+	return ctx.Ok(() => new TagAttributes(metas.map(s => s.item), bindingsDict, events.into_dict() as Dict<NonEmpty<EventAttribute>>, receivers))
 }
 
+export type InclusionDescriptor = { type: 'inclusion', name: string, span: Span, params: Spanned<Attribute>[] }
 export function parseComponentInclusion(
-	name: string, nameSpan: Span,
-	attributes: Attribute[],
-	entities: (Entity | SlotInsertion | SlotUsage)[],
+	{ name, span: nameSpan, params: attributes }: InclusionDescriptor,
+	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
 ) {
 	const ctx = new Context<ComponentInclusion>()
 
-	const componentArguments = new UniqueDict<boolean>()
+	const componentArguments = new UniqueDict<[boolean, Span]>()
 	const props = {} as Dict<BindingAttribute>
 	const syncs = {} as Dict<SyncAttribute>
 	const events = new DefaultDict(() => [] as EventAttribute[])
 	const receivers: ReceiverAttribute[] = []
 
-	for (const attribute of attributes) switch (attribute.type) {
+	for (const { item: attribute, span } of attributes) switch (attribute.type) {
 	case 'BindingAttribute': {
 		props[attribute.attribute] = attribute
-		const result = componentArguments.set(attribute.attribute, true)
-		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', nameSpan, result.error[0])
+		const result = componentArguments.set(attribute.attribute, [true, span])
+		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
 		break
 	}
 	case 'SyncAttribute': {
 		syncs[attribute.attribute] = attribute
-		const result = componentArguments.set(attribute.attribute, true)
-		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', nameSpan, result.error[0])
+		const result = componentArguments.set(attribute.attribute, [true, span])
+		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
 		break
 	}
 	case 'EventAttribute':
 		const { event, variety, code: rawCode } = attribute
 
-		const presentFromOthers = componentArguments.get(event).default(false)
-		if (presentFromOthers) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', event)
-		else componentArguments.set(event, false)
+		const previous = componentArguments.get(event)
+		if (previous.is_some() && previous.value[0]) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, previous.value[1])
+		else componentArguments.set(event, [false, span])
 
 		const code = variety === 'inline' ? `() => ${rawCode}` : rawCode
 		events.get(event).push(new EventAttribute(event, variety, code))
 		break
 	case 'ReceiverAttribute':
-		ctx.error('COMPONENT_INCLUSION_RECEIVER', nameSpan)
+		ctx.error('COMPONENT_INCLUSION_RECEIVER', span)
 		break
 	}
 
 
-	const nonInsertEntities = []
-	const slotInsertions = new UniqueDict<SlotInsertion>()
-	for (const entity of entities) {
+	const nonInsertEntities = [] as Entity[]
+	const slotInsertions = new UniqueDict<[SlotInsertion, Span]>()
+	for (const { item: entity, span } of entities) {
 		if (entity.type === 'SlotUsage') {
-			ctx.error('INVALID_SLOT_USAGE', entitySpan)
+			ctx.error('INVALID_SLOT_USAGE', span)
 			continue
 		}
 		if (entity.type !== 'SlotInsertion') {
@@ -268,27 +275,32 @@ export function parseComponentInclusion(
 		}
 
 		const name = entity.name || 'def'
-		const result = slotInsertions.set(name, entity)
+		const result = slotInsertions.set(name, [entity, span])
 		if (result.is_err())
-			ctx.error('COMPONENT_INCLUSION_DUPLICATE_SLOT_INSERTION', nameSpan, result.error[0])
+			ctx.error('COMPONENT_INCLUSION_DUPLICATE_SLOT_INSERTION', span, result.error[2][1])
 	}
 
+	const slotInsertionsDict = slotInsertions.into_dict()
 	if (nonInsertEntities.length > 0) {
-		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
-		const result = slotInsertions.set('def', defaultInsertion)
-		if (result.is_err())
-			ctx.error('COMPONENT_INCLUSION_CONFLICTING_DEF_SLOT_INSERTION', nameSpan, result.error[0])
+		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as Entity[])
+		const previous = slotInsertionsDict['def']
+		if (previous !== undefined)
+			return ctx.Err('COMPONENT_INCLUSION_CONFLICTING_DEF_SLOT_INSERTION', previous[1])
+
+		slotInsertionsDict['def'] = [defaultInsertion, undefined as unknown as Span]
 	}
 
 	return ctx.Ok(() => new ComponentInclusion(
 		name, props, syncs,
 		events.into_dict() as Dict<NonEmpty<EventAttribute>>,
-		slotInsertions.into_dict(),
+		slotInsertions.entries().reduce((acc, [k, [v, ]]) => { acc[k] = v; return acc }, {} as Dict<SlotInsertion>),
 	))
 }
 
 
-function processInsertableCode(isSlot: boolean, code: string | undefined): ParseResult<[string | undefined, string | undefined]> {
+function processInsertableCode(
+	isSlot: boolean, code: string | undefined, span: Span,
+): ParseResult<[string | undefined, string | undefined]> {
 	if (code === undefined || code.trim() === '')
 		return Context.Ok([undefined, undefined])
 
@@ -303,8 +315,8 @@ function processInsertableCode(isSlot: boolean, code: string | undefined): Parse
 
 export type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
 export type InProgressIf = {
-	type: 'if', expression: string, entities: NonEmpty<Entity>,
-	elseIfBranches: [string, NonEmpty<Entity>][], elseBranch: NonEmpty<Entity> | undefined,
+	type: 'if', expression: string, entities: Entity[],
+	elseIfBranches: [string, Entity[]][], elseBranch: Entity[] | undefined,
 }
 export type InProgressMatch = {
 	type: 'match', matchExpression: string, span: Span,
@@ -315,15 +327,15 @@ export type InProgressSwitch = {
 	cases: (SwitchCase | SwitchDefault)[],
 }
 
-export type TagDescriptor = { type: 'tag', ident: string, metas: Meta[], attributes: Attribute[] }
-export type InclusionDescriptor = { type: 'inclusion', name: string, params: Attribute[] }
-export type DirectiveDescriptor = { type: 'directive', command: string, code: string | undefined }
+export type DirectiveDescriptor = { type: 'directive', command: string, span: Span, code: string | undefined }
 export type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
-export type NotReadyEntity = Tag | ComponentInclusion | NonEmpty<TextItem> | DirectivePending
+export type NotReadyEntity = Tag | ComponentInclusion | NonEmpty<Spanned<TextItem>> | DirectivePending
 
-export function parseEntities(items: (NotReadyEntity | undefined)[]) {
-	const ctx = new Context<Entity[]>()
+export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]) {
+	const ctx = new Context<{ entities: Entity[], slotInsertions: SlotInsertion[], slotUsages: SlotUsage[] }>()
 	const giveEntities: Entity[] = []
+	const giveSlotInsertions: SlotInsertion[] = []
+	const giveSlotUsages: SlotUsage[] = []
 	let inProgressTextSection = undefined as NonEmpty<Spanned<TextItem>> | undefined
 	let inProgressDirective = undefined as InProgressDirective | undefined
 	function finalizeInProgressDirective() {
@@ -337,40 +349,37 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 			}
 			case 'match': {
 				const { matchExpression, span, patterns, defaultPattern } = inProgressDirective
-				if (patterns.length === 0)
-					return ctx.error('MATCH_NO_PATTERNS', span)
-				giveEntities.push(new MatchBlock(
-					matchExpression,
-					patterns as NonEmpty<[string, Entity[]]>,
-					defaultPattern,
-				))
+				giveEntities.push(new MatchBlock(matchExpression, patterns, defaultPattern))
 				break
 			}
 			case 'switch':
 				const { switchExpression, span, cases } = inProgressDirective
 				if (cases.length === 0)
 					return ctx.error('SWITCH_NO_CASES', span)
-				giveEntities.push(new SwitchBlock(
-					switchExpression,
-					cases as NonEmpty<(SwitchCase | SwitchDefault)>,
-				))
+				giveEntities.push(new SwitchBlock(switchExpression, cases))
 				break
 		}
 	}
 
-	for (const item of items) {
-		if (item === undefined) {
+	for (const mixedItem of items) {
+		// comment
+		if (mixedItem === undefined) {
 			finalizeInProgressDirective()
 			continue
 		}
+		const itemResult = ctx.take(mixedItem)
+		if (itemResult.is_err())
+			continue
+		const item = itemResult.value
+		// TextItem
 		if (Array.isArray(item)) {
 			finalizeInProgressDirective()
-			inProgressTextSection = (inProgressTextSection || [] as TextItem[]).concat(item) as NonEmpty<Spanned<TextItem>>
+			inProgressTextSection = (inProgressTextSection || [] as Spanned<TextItem>[]).concat(item) as NonEmpty<Spanned<TextItem>>
 			continue
 		}
 		// finalize inProgressTextSection
 		if (inProgressTextSection !== undefined) {
-			giveEntities.push(new TextSection(inProgressTextSection))
+			giveEntities.push(new TextSection(inProgressTextSection.map(s => s.item) as NonEmpty<TextItem>))
 			inProgressTextSection = undefined
 		}
 
@@ -384,8 +393,10 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 		switch (command) {
 			case 'if':
 				finalizeInProgressDirective()
+				if (code === undefined)
+					return ctx.Err('IF_NO_EXPRESSION', span)
 				inProgressDirective = {
-					type: 'if', expression: validateCode(command, code),
+					type: 'if', expression: code,
 					entities, elseIfBranches: [], elseBranch: undefined,
 				} as InProgressIf
 				break
@@ -393,7 +404,7 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
 					return ctx.Err('IF_UNPRECEDED_ELSEIF', span)
 				if (code === undefined)
-					return ctx.Err('IF_EMPTY_CONDITION', span)
+					return ctx.Err('IF_NO_EXPRESSION', span)
 				inProgressDirective.elseIfBranches.push([code, entities])
 				break
 			case 'else':
@@ -417,33 +428,43 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 
 					return [{ variableCode, indexCode }, remainingSections.join(' of ')]
 				}
-				const [paramsExpression, listExpression] = processEachBlockCode(validateCode(command, code))
+				if (code === undefined)
+					return ctx.Err('EACH_NO_EXPRESSION', span)
+				const [paramsExpression, listExpression] = processEachBlockCode(code)
 				giveEntities.push(new EachBlock(paramsExpression, listExpression, entities))
 				break
 
 			case 'match':
 				finalizeInProgressDirective()
 				if (entities.length > 0)
-					return ctx.Err('MATCH_UNPRECEDED_WHEN', span)
-				inProgressDirective = { type: 'match', matchExpression: validateCode(command, code), patterns: [], defaultPattern: undefined } as InProgressMatch
+					return ctx.Err('MATCH_NESTED_ENTITIES', span)
+				if (code === undefined)
+					return ctx.Err('MATCH_NO_EXPRESSION', span)
+				inProgressDirective = { type: 'match', span, matchExpression: code, patterns: [], defaultPattern: undefined } as InProgressMatch
 				break
 			case 'when':
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'match')
 					return ctx.Err('MATCH_UNPRECEDED_WHEN', span)
-				inProgressDirective.patterns.push([validateCode(command, code), entities])
+				if (code === undefined)
+					return ctx.Err('WHEN_NO_EXPRESSION', span)
+				inProgressDirective.patterns.push([code, entities])
 				break
 
 			case 'switch':
 				finalizeInProgressDirective()
 				if (entities.length > 0)
 					return ctx.Err('SWITCH_NESTED_ENTITIES', span)
-				inProgressDirective = { type: 'switch', switchExpression: validateCode(command, code), cases: [] } as InProgressSwitch
+				if (code === undefined)
+					return ctx.Err('SWITCH_NO_EXPRESSION', span)
+				inProgressDirective = { type: 'switch', span, switchExpression: code, cases: [] } as InProgressSwitch
 				break
 			case 'case':
 			case 'fallcase':
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
 					return ctx.Err('SWITCH_UNPRECEDED_CASE', span)
-				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', validateCode(command, code), entities))
+				if (code === undefined)
+					return ctx.Err('CASE_NO_EXPRESSION', span)
+				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', code, entities))
 				break
 			case 'falldefault':
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')
@@ -458,7 +479,11 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 
 			// belongs to both switch and match
 			case 'default':
-				validateCodeEmpty(command, code)
+				if (code !== undefined) {
+					// TODO would be great to specifically have code span here
+					ctx.error('SWITCH_DEFAULT_CONDITION', span)
+					break
+				}
 				if (inProgressDirective === undefined)
 					return ctx.Err('SWITCH_UNPRECEDED_DEFAULT', span)
 				switch (inProgressDirective.type) {
@@ -480,41 +505,38 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 
 			case 'slot': {
 				finalizeInProgressDirective()
-				const [slotName, argsExpression] = processInsertableCode(true, code)
-				giveEntities.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
+				const result = ctx.subsume(processInsertableCode(true, code, span))
+				if (result.is_err()) return ctx.subsumeFail(result.error)
+				const [slotName, argsExpression] = result.value
+				giveSlotUsages.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
 				break
 			}
 			case 'insert': {
 				finalizeInProgressDirective()
-				if (entities.length === 0) {
-					ctx.error('SLOT_INSERTION_EMPTY', span)
-					break
-				}
-				const [slotName, paramsExpression] = processInsertableCode(true, code)
-				giveEntities.push(new SlotInsertion(slotName, paramsExpression, entities as NonEmpty<Entity>))
+				const result = ctx.subsume(processInsertableCode(true, code, span))
+				if (result.is_err()) return ctx.subsumeFail(result.error)
+				const [slotName, paramsExpression] = result.value
+				giveSlotInsertions.push(new SlotInsertion(slotName, paramsExpression, entities))
 				break
 			}
 
 			case 'template': {
 				finalizeInProgressDirective()
-				const [templateName, argsExpression] = processInsertableCode(false, code)
+				const result = ctx.subsume(processInsertableCode(false, code, span))
+				if (result.is_err()) return ctx.subsumeFail(result.error)
+				const [templateName, argsExpression] = result.value
 				if (templateName === undefined) {
 					ctx.error('TEMPLATE_NAMELESS', span)
 					break
 				}
-				if (entities.length === 0) {
-					ctx.error('TEMPLATE_EMPTY', span)
-					break
-				}
-				giveEntities.push(new TemplateDefinition(
-					templateName, argsExpression,
-					entities as NonEmpty<Entity>,
-				))
+				giveEntities.push(new TemplateDefinition(templateName, argsExpression, entities))
 				break
 			}
 			case 'include': {
 				finalizeInProgressDirective()
-				const [templateName, argsExpression] = processInsertableCode(false, code)
+				const result = ctx.subsume(processInsertableCode(false, code, span))
+				if (result.is_err()) return ctx.subsumeFail(result.error)
+				const [templateName, argsExpression] = result.value
 				if (templateName === undefined) {
 					ctx.error('INCLUDE_NAMELESS', span)
 					break
@@ -528,5 +550,5 @@ export function parseEntities(items: (NotReadyEntity | undefined)[]) {
 		}
 	}
 
-	return ctx.Ok(() => giveEntities)
+	return ctx.Ok(() => ({ entities: giveEntities, slotUsages: giveSlotUsages, slotInsertions: giveSlotInsertions }))
 }

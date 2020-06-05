@@ -1,9 +1,10 @@
-import { Token, RawToken, Span, Spanned } from 'kreia/dist/runtime/lexer'
+import { Ok } from '@ts-std/monads'
 import { Parser, ParseArg, Decidable, path, branch, c } from 'kreia'
 import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
+import { Token, RawToken, Span, Spanned, TokenSpanned } from 'kreia/dist/runtime/lexer'
 
-import { Context } from './utils'
 import { NonEmpty } from '../utils'
+import { Context, ParseResult } from './utils'
 
 import {
 	Entity, Directive,
@@ -100,11 +101,12 @@ export function wolf() {
 	return parseEntities(items)
 }
 
-export function entity(): NotReadyEntity {
+export function entity(): ParseResult<NotReadyEntity> {
 	return or(
-		c((): NotReadyEntity => {
+		c(() => {
+			const ctx = new Context<NotReadyEntity>()
 			const entity_item = entity_descriptor()
-			const entities = maybe_or(
+			const entitiesResult = ctx.subsume(maybe_or(
 				c(() => {
 					consume(tok.colon, tok.large_space)
 					return parseEntities([entity()])
@@ -112,34 +114,34 @@ export function entity(): NotReadyEntity {
 
 				c(() => {
 					consume(tok.indent)
-					const entities = wolf()
+					const entitiesResult = wolf()
 					consume(tok.deindent)
-					return entities
+					return entitiesResult
 				}, _Z1owlnn),
 
 				c(() => {
 					consume(tok.space)
 					const children = many(text, _Z2evaAJ)
-					return [new TextSection(children)] as Entity[]
+					return Context.Ok([new TextSection(children) as Entity])
 				}, _7U1Cw),
-			) || []
+			) || Ok({ value: [], warnings: [] }))
+			if (entitiesResult.is_err()) return ctx.subsumeFail(entitiesResult.error)
+			const entities = entitiesResult.value
 
 			switch (entity_item.type) {
 				case 'tag':
-					const { ident, metas, attributes } = entity_item
-					return new Tag(ident, metas, attributes, entities)
+				return parseHtml(entity_item, entities)
 				case 'inclusion':
-					const { name, params } = entity_item
-					return parseComponentInclusion(name, params, entities)
+					return parseComponentInclusion(entity_item, entities)
 				case 'directive':
-					return { entities, ...entity_item }
+					return ctx.Ok(() => ({ entities, ...entity_item }))
 			}
 		}, _ZCgW0s),
 
-		c((): NonEmpty<TextItem> => {
+		c((): ParseResult<NotReadyEntity> => {
 			consume(tok.text_bar)
 			const text_items = or(
-				c((): NonEmpty<TextItem> => {
+				c(() => {
 					consume(tok.indent)
 					const text_items = lines(() => {
 						return many(text, _Z2evaAJ)
@@ -148,13 +150,13 @@ export function entity(): NotReadyEntity {
 					return ([] as TextItem[]).concat(...text_items) as NonEmpty<TextItem>
 				}, _Z1owlnn),
 
-				c((): NonEmpty<TextItem> => {
+				c(() => {
 					consume(tok.space)
 					return many(text, _Z2evaAJ)
 				}, _7U1Cw),
 			)
 
-			return text_items
+			return Context.Ok(text_items)
 		}, _Z1bsgQT),
 	)
 }
@@ -162,50 +164,52 @@ export function entity(): NotReadyEntity {
 export function entity_descriptor(): TagDescriptor | InclusionDescriptor | DirectiveDescriptor {
 	return or(
 		c((): TagDescriptor => {
-			const { tag_name, metas } = tag()
+			const { tag_name, span, metas } = tag()
 			const attributes_list = maybe(attributes, _NFQGh) || []
 			// TODO this would allow children of a self-closing tag
 			// maybe(tok.slash)
 
-			return { type: 'tag', ident: tag_name, metas, attributes: attributes_list }
+			return { type: 'tag', ident: tag_name, span, metas, attributes: attributes_list }
 		}, _Z1s8tjH),
 
 		c((): InclusionDescriptor => {
-			const ident = consume(tok.plus_identifier)
+			const ident = consume(tok.plus_identifier)[0]
 			const attributes_list = maybe(attributes, _NFQGh) || []
 
-			const name = ident[0].content.slice(1)
-			return { type: 'inclusion', name, params: attributes_list }
+			const name = ident.content.slice(1)
+			return { type: 'inclusion', name, span: ident.span, params: attributes_list }
 		}, _ZiAKh1),
 
 		c((): DirectiveDescriptor => {
-			const ident = consume(tok.at_identifier)
+			const ident = consume(tok.at_identifier)[0]
 			const code = maybe(() => {
 				maybe(tok.large_space)
 				consume(tok.open_paren)
-				const segments = many(paren_code, _Z1O2lKj)
+				const segments = many(paren_code, _Z1O2lKj) as Spanned<string>[]
 				consume(tok.close_paren)
 				return segments.map(s => s.item).join('')
 			}, _2w47cC)
 
-			const command = ident[0].content.slice(1)
-			return { type: 'directive', command, code }
+			const command = ident.content.slice(1)
+			return { type: 'directive', command, span: ident.span, code }
 		}, _Z1kIVyP),
 	)
 }
 
-type TagItem = { tag_name: Spanned<string> | undefined, metas: Spanned<Meta>[] }
+type TagItem = { tag_name: string, span: Span, metas: Spanned<Meta>[] }
 export function tag(): TagItem {
 	return or(
 		c((): TagItem => {
-			const tag_item = TokenSpanned(consume(tok.tag_identifier)[0])
-			const metas = maybe_many(meta, _1VQg9s) || []
-			return { tag_name: tag_item, metas }
+			const tag_item = consume(tok.tag_identifier)[0]
+			const metas = maybe_many(meta, _1VQg9s) || [] as Spanned<Meta>[]
+			const span = metas.length > 0 ? Span.around(tag_item, metas[metas.length - 1].span) : tag_item.span
+			return { tag_name: tag_item.content, span, metas }
 		}, _Z1yGH1N),
 
 		c((): TagItem => {
-			const metas = many(meta, _1VQg9s)
-			return { tag_name: undefined, metas }
+			const metas = many(meta, _1VQg9s) as Spanned<Meta>[]
+			const span = metas.length > 1 ? Span.around(metas[0].span, metas[metas.length - 1].span) : metas[0].span
+			return { tag_name: 'div', span, metas }
 		}, _1VQg9s),
 	)
 }
@@ -215,13 +219,13 @@ export function meta() {
 		c(tok.id_identifier), c(tok.class_identifier),
 
 		c(() => {
-			const prefix = consume(tok.dot)
+			const prefix = consume(tok.dot)[0]
 			const { item: segment, span: segment_span } = code_segment()
 			return Spanned(new Meta(true, true, segment.code), Span.around(prefix, segment_span))
 		}, _qLI),
 
 		c(() => {
-			const prefix = consume(tok.pound)
+			const prefix = consume(tok.pound)[0]
 			const { item: segment, span: segment_span } = code_segment()
 			return Spanned(new Meta(false, true, segment.code), Span.around(prefix, segment_span))
 		}, _7HLiJ),
@@ -272,7 +276,7 @@ export function attribute_line() {
 }
 
 export function attribute() {
-	const rawAttribute = TokenSpanned(consume(tok.attribute_name))
+	const rawAttribute = TokenSpanned(consume(tok.attribute_name)[0])
 	const value = maybe((): Spanned<AttributeCode | string> => {
 		consume(tok.equals)
 		const value_item = or(c(tok.identifier), c(str, _uGx), c(code_segment, _J5AgF))
@@ -290,9 +294,9 @@ export function str() {
 }
 
 export function code_segment() {
-	const open = consume(tok.open_bracket)
-	const segments = maybe_many(code, _14hbOa) || []
-	const close = consume(tok.close_bracket)
+	const open = consume(tok.open_bracket)[0]
+	const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
+	const close = consume(tok.close_bracket)[0]
 
 	return Spanned(new AttributeCode(false, segments.map(s => s.item).join('')), Span.around(open, close))
 }
@@ -300,10 +304,10 @@ export function code_segment() {
 export function code(): Spanned<string> {
 	const item = or(
 		c(() => {
-			const open = consume(tok.open_bracket)
-			const segments = maybe_many(code, _14hbOa) || []
-			const close = consume(tok.close_bracket)
-			return Spanned(Span.around(open, close), `{${segments.map(s => s.item).join('')}}`)
+			const open = consume(tok.open_bracket)[0]
+			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
+			const close = consume(tok.close_bracket)[0]
+			return Spanned(`{${segments.map(s => s.item).join('')}}`, Span.around(open, close))
 		}, _J5AgF),
 		c(tok.str), c(tok.not_bracket),
 	)
@@ -313,9 +317,9 @@ export function code(): Spanned<string> {
 export function paren_code(): Spanned<string> {
 	const item = or(
 		c(() => {
-			const open = consume(tok.open_paren)
-			const segments = maybe_many(paren_code, _Z1O2lKj) || []
-			const close = consume(tok.close_paren)
+			const open = consume(tok.open_paren)[0]
+			const segments = maybe_many(paren_code, _Z1O2lKj) || [] as Spanned<string>[]
+			const close = consume(tok.close_paren)[0]
 			return Spanned(`(${segments.map(s => s.item).join('')})`, Span.around(open, close))
 		}, _NFQGh),
 		c(tok.not_paren),
@@ -326,17 +330,17 @@ export function paren_code(): Spanned<string> {
 export function text() {
 	const item = or(
 		c(() => {
-			const open = consume(tok.open_double_bracket)
-			const segments = maybe_many(code, _14hbOa) || []
-			const close = consume(tok.close_double_bracket)
+			consume(tok.open_double_bracket)
+			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
+			consume(tok.close_double_bracket)
 
-			return Spanned(new TextItem(true, segments.map(s => s.item).join('')), Span.around(open, close))
+			return new TextItem(true, segments.map(s => s.item).join(''))
 		}, _Z2cNPgr),
 		c(tok.not_double_bracket),
 	)
 
 	return Array.isArray(item)
-		? Spanned(new TextItem(false, item[0].content), item[0].span)
+		? new TextItem(false, item[0].content)
 		: item
 }
 

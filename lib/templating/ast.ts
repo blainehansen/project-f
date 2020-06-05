@@ -203,7 +203,7 @@ export class IfBlock {
 // 	constructor(
 // 		readonly paramsExpression: string,
 // 		readonly listExpression: string,
-// 		readonly entities: NonEmpty<Entity>,
+// 		readonly entities: Entity[],
 // 		// readonly keyExpression: string | undefined,
 // 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
 // 	) {}
@@ -214,7 +214,7 @@ export class EachBlock {
 	constructor(
 		readonly params: { variableCode: string, indexCode: string | undefined },
 		readonly listExpression: string,
-		readonly entities: Entity,
+		readonly entities: Entity[],
 		// readonly keyExpression: string | undefined,
 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
 	) {}
@@ -225,7 +225,7 @@ export class MatchBlock {
 	constructor(
 		readonly matchExpression: string,
 		// readonly patterns: [string, Entity[]][],
-		readonly patterns: NonEmpty<[string, Entity[]]>,
+		readonly patterns: [string, Entity[]][],
 		readonly defaultPattern: Entity[] | undefined,
 	) {}
 }
@@ -234,7 +234,7 @@ export class SwitchBlock {
 	readonly type = 'SwitchBlock' as const
 	constructor(
 		readonly switchExpression: string,
-		readonly cases: NonEmpty<SwitchCase | SwitchDefault>,
+		readonly cases: (SwitchCase | SwitchDefault)[],
 	) {}
 }
 export class SwitchCase {
@@ -267,7 +267,7 @@ export class SlotInsertion {
 	constructor(
 		readonly name: string | undefined,
 		readonly paramsExpression: string | undefined,
-		readonly entities: NonEmpty<Entity>,
+		readonly entities: Entity[],
 	) {}
 }
 
@@ -277,7 +277,7 @@ export class TemplateDefinition {
 	constructor(
 		readonly name: string,
 		readonly paramsExpression: string | undefined,
-		readonly entities: NonEmpty<Entity>,
+		readonly entities: Entity[],
 	) {}
 }
 
