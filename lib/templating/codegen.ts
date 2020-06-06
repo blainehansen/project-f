@@ -3,9 +3,10 @@ import { DefaultDict, UniqueDict } from '@ts-std/collections'
 
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
-	Entity, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
-	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
+	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
+	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
+	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 
@@ -34,12 +35,10 @@ export class CodegenContext {
 	finalize(nodes: ts.Node[]) {
 		const generatedCode = printNodesArray(nodes)
 
-		const runtimeImports = [...this.requiredFunctions].map(fnName => {
-			return ts.createImportSpecifier(
-				ts.createIdentifier(fnName),
-				ts.createIdentifier(safePrefix(fnName)),
-			)
-		})
+		const runtimeImports = [...this.requiredFunctions].map(fnName => ts.createImportSpecifier(
+			ts.createIdentifier(fnName),
+			ts.createIdentifier(safePrefix(fnName)),
+		))
 		const runtimeImportDeclaration = ts.createImportDeclaration(
 			undefined, undefined,
 			ts.createImportClause(undefined, ts.createNamedImports(runtimeImports)),
@@ -81,55 +80,45 @@ export function generateComponentDefinition({
 		}
 
 		const { name: slotName = 'def', argsExpression, fallback } = entity
-		const slotOptional = slotMap[slotName]
-		// TODO if you want to get really fancy, this function can augment the type definition to include slots that are only defined in the template. The `ComponentDefinition` type can look something like this
-		// type ComponentDefinition<C, Backfill = {}> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C> & Slots<Backfill>]>
-		// and then this file can simply insert all extra slots found here
-		// this would make the job of scriptless components easier
-		// HOWEVER, these slots couldn't take any parameters
-		if (slotOptional === undefined) throw new Error(`slot ${slotName} doesn't exist`)
-
-		if (!slotOptional && fallback !== undefined)
-			// required, has fallback: pointless, and typescript won't throw an error so we will
-			throw new Error(`fallback provided for slot ${slotName} even though it's required`)
-
-		const usageTarget = !slotOptional
-			? slotName
-			: ts.createParen(ts.createBinary(
-				ts.createIdentifier(slotName),
-				ts.createToken(ts.SyntaxKind.BarBarToken),
-				fallback === undefined
-					// optional, no fallback: default to noop, thereby outputing nothing
-					? ctx.requireRuntime('noop')
-					// optional, has fallback: default to their fallback, which takes no arguments because it captures its environment
-					: ts.createParen(createArrowFunction(
-						...generateGenericInsertableDefinition(ctx, undefined, fallback, false),
-					)),
-			))
+		// we've already checked for existence and redundance in the parsing stages
+		const slotOptional = slotMap[slotName] || false
+		const usageTarget = !slotOptional ? slotName : ts.createParen(ts.createBinary(
+			ts.createIdentifier(slotName),
+			ts.createToken(ts.SyntaxKind.BarBarToken),
+			fallback === undefined
+				// no fallback: default to noop, thereby outputing nothing
+				? ctx.requireRuntime('noop')
+				// has fallback: default to their fallback, which takes no arguments because it captures its environment
+				: ts.createParen(createArrowFunction(
+					...generateGenericInsertableDefinition(ctx, undefined, fallback, false),
+				)),
+		))
 
 		const slotUsageStatement = generateGenericInsertableCall(usageTarget, argsExpression, realParentIdent, parentIdent)
 		entitiesStatements.push(slotUsageStatement)
 	}
 
 
-	const args = props.concat(syncs).concat(events)
-	const createFnTarget = createFn === undefined ? 'ctx' : createFn
-	const createFnInvocation = createFn && createFn.length === 0 ? [] : [createConst(
-		createFnTarget,
-		createCall('create', [ts.createAsExpression(
-			ts.createObjectLiteral(
-				args.map(arg => {
-					return ts.createShorthandPropertyAssignment(ts.createIdentifier(arg), undefined)
-				}),
-				false,
-			),
-			ts.createTypeReferenceNode(ctx.requireRuntime('Args'), [
-				ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined),
-			]),
-		)]),
-	) as ts.Statement]
+	const createFnStatements = createFn === undefined ? [] : exec(() => {
+		const args = props.concat(syncs).concat(events)
+		const [createFnTarget, createFnCall] =  ? ['ctx', 'createCtx'] : [createFn, 'create']
+		return [createConst(
+			createFnTarget,
+			createCall(createFnCall, [ts.createAsExpression(
+				ts.createObjectLiteral(
+					args.map(arg => {
+						return ts.createShorthandPropertyAssignment(ts.createIdentifier(arg), undefined)
+					}),
+					false,
+				),
+				ts.createTypeReferenceNode(ctx.requireRuntime('Args'), [
+					ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined),
+				]),
+			)]),
+		) as ts.Statement]
+	})
 
-	const statements = createFnInvocation.concat(entitiesStatements)
+	const statements = createFnStatements.concat(entitiesStatements)
 	const slotNames = Object.keys(slotMap)
 	const params = [realParentText, parentText, props, syncs, events, slotNames].map(n => createParameter(n))
 	const componentArrow = createArrowFunction(params, ts.createBlock(statements, true))
@@ -139,6 +128,7 @@ export function generateComponentDefinition({
 		componentDefinitionSymbol, componentArrow,
 		ts.createTypeReferenceNode(
 			ctx.requireRuntime('ComponentDefinition'),
+			// TODO if slots were backfilled, this is where we'd discover so
 			[ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined)],
 		),
 	)
@@ -171,6 +161,15 @@ export function generateEntity(
 	case 'Tag':
 		return generateTag(entity, offset, ctx, realParent, parent)
 
+	case 'SyncedTextInput':
+		return generateSyncedTextInput(entity, offset, ctx, realParent, parent)
+	case 'SyncedCheckboxInput':
+		return generateSyncedCheckboxInput(entity, offset, ctx, realParent, parent)
+	case 'SyncedRadioInput':
+		return generateSyncedRadioInput(entity, offset, ctx, realParent, parent)
+	case 'SyncedSelect':
+		return generateSyncedSelect(entity, offset, ctx, realParent, parent)
+
 	case 'TextSection':
 		return generateText(entity, offset, isRealLone, ctx, realParent, parent)
 
@@ -186,11 +185,6 @@ export function generateEntity(
 	case 'SwitchBlock':
 		return generateSwitchBlock(entity, offset, isRealLone, ctx, realParent, parent)
 
-	case 'SlotUsage':
-		throw new Error("@slot isn't valid in this context")
-	case 'SlotInsertion':
-		throw new Error("@insert isn't valid in this context")
-
 	case 'TemplateDefinition':
 		return generateTemplateDefinition(entity, ctx)
 	case 'TemplateInclusion':
@@ -199,80 +193,6 @@ export function generateEntity(
 	// case 'VariableBinding':
 	// 	throw new Error('unimplemented')
 		// return generateVariableBinding(entity, offset, isRealLone, parent)
-	}
-}
-
-function handleInput(
-	ctx: CodegenContext, statements: ts.Statement[],
-	tagIdent: ts.Identifier, code: string,
-	bindings: [string, [BindingType, Dict<true>, string]][],
-) {
-	const foundType = bindings.find(([binding, ]) => binding === 'type')
-	const [, [typeType = BindingType.static, typeModifiers = {}, typeCode = 'text'] = []] = foundType || []
-	switch (typeType) {
-		case BindingType.dynamic:
-		case BindingType.reactive:
-			throw new Error('unimplemented')
-		case BindingType.empty:
-			throw new Error("input type cannot be assigned to true")
-		case BindingType.sync:
-			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-
-		case BindingType.static: switch (typeCode) {
-			default:
-				throw new Error('unimplemented')
-			case 'radio':
-				const foundValue = bindings.find(([binding, ]) => binding === 'value')
-				if (foundValue === undefined) throw new Error("radio inputs need a value")
-				const [, [valueType, valueModifiers, valueCode]] = foundValue
-				switch (valueType) {
-					case BindingType.sync:
-						throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-					case BindingType.reactive: {
-						const statement = createCall(
-							ctx.requireRuntime('syncRadioElementReactive'),
-							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
-						)
-						statements.push(ts.createExpressionStatement(statement))
-						break
-					}
-					case BindingType.static: {
-						const statement = createCall(
-							ctx.requireRuntime('syncRadioElement'),
-							[tagIdent, createRawCodeSegment(code), ts.createStringLiteral(valueCode)],
-						)
-						statements.push(ts.createExpressionStatement(statement))
-						break
-					}
-					case BindingType.empty: {
-						const statement = createCall(
-							ctx.requireRuntime('syncRadioElement'),
-							[tagIdent, createRawCodeSegment(code), ts.createTrue()],
-						)
-						statements.push(ts.createExpressionStatement(statement))
-						break
-					}
-					case BindingType.dynamic:
-						const statement = createCall(
-							ctx.requireRuntime('syncRadioElement'),
-							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
-						)
-						statements.push(ts.createExpressionStatement(statement))
-						break
-				}
-				break
-			// case 'file':
-			// case 'image':
-			case 'checkbox': {
-				const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
-				statements.push(ts.createExpressionStatement(statement))
-				break
-			}
-			case 'text': case 'password': case 'search':
-				const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
-				statements.push(ts.createExpressionStatement(statement))
-				break
-		}
 	}
 }
 
@@ -309,7 +229,7 @@ export function generateTag(
 	if (idMeta !== '') {
 		needTagIdent = true
 		const idAssignment = idDynamic
-			? createEffectBind(ctx, tagIdent, 'id', createRawCodeSegment(idMeta))
+			? createBind(ctx, tagIdent, 'id', createRawCodeSegment(idMeta))
 			: createFieldAssignment(tagIdent, 'id', ts.createStringLiteral(idMeta))
 		statements.push(idAssignment)
 	}
@@ -318,7 +238,7 @@ export function generateTag(
 	if (className !== '') {
 		needTagIdent = true
 		const classNameAssignment = classDynamic
-			? createEffectBind(ctx, tagIdent, 'className', createRawCodeSegment('`' + className + '`'))
+			? createBind(ctx, tagIdent, 'className', createRawCodeSegment('`' + className + '`'))
 			: createFieldAssignment(tagIdent, 'className', ts.createStringLiteral(className))
 		statements.push(classNameAssignment)
 	}
@@ -346,7 +266,7 @@ export function generateTag(
 			break
 		case BindingType.reactive:
 			// intentionally ignore modifiers
-			statements.push(createEffectBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
+			statements.push(createBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
 			break
 		case BindingType.sync:
 			if (binding !== 'sync')
@@ -415,13 +335,121 @@ export function generateTag(
 	return statements
 }
 
+// function handleInput(
+// 	ctx: CodegenContext, statements: ts.Statement[],
+// 	tagIdent: ts.Identifier, code: string,
+// 	bindings: [string, [BindingType, Dict<true>, string]][],
+// ) {
+// 	const foundType = bindings.find(([binding, ]) => binding === 'type')
+// 	const [, [typeType = BindingType.static, typeModifiers = {}, typeCode = 'text'] = []] = foundType || []
+// 	switch (typeType) {
+// 		case BindingType.dynamic:
+// 		case BindingType.reactive:
+// 			throw new Error('unimplemented')
+// 		case BindingType.empty:
+// 			throw new Error("input type cannot be assigned to true")
+// 		case BindingType.sync:
+// 			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+
+// 		case BindingType.static: switch (typeCode) {
+// 			default:
+// 				throw new Error('unimplemented')
+// 			case 'radio':
+// 				const foundValue = bindings.find(([binding, ]) => binding === 'value')
+// 				if (foundValue === undefined) throw new Error("radio inputs need a value")
+// 				const [, [valueType, valueModifiers, valueCode]] = foundValue
+// 				switch (valueType) {
+// 					case BindingType.sync:
+// 						throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+// 					case BindingType.reactive: {
+// 						const statement = createCall(
+// 							ctx.requireRuntime('syncRadioElementReactive'),
+// 							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
+// 						)
+// 						statements.push(ts.createExpressionStatement(statement))
+// 						break
+// 					}
+// 					case BindingType.static: {
+// 						const statement = createCall(
+// 							ctx.requireRuntime('syncRadioElement'),
+// 							[tagIdent, createRawCodeSegment(code), ts.createStringLiteral(valueCode)],
+// 						)
+// 						statements.push(ts.createExpressionStatement(statement))
+// 						break
+// 					}
+// 					case BindingType.empty: {
+// 						const statement = createCall(
+// 							ctx.requireRuntime('syncRadioElement'),
+// 							[tagIdent, createRawCodeSegment(code), ts.createTrue()],
+// 						)
+// 						statements.push(ts.createExpressionStatement(statement))
+// 						break
+// 					}
+// 					case BindingType.dynamic:
+// 						const statement = createCall(
+// 							ctx.requireRuntime('syncRadioElement'),
+// 							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
+// 						)
+// 						statements.push(ts.createExpressionStatement(statement))
+// 						break
+// 				}
+// 				break
+// 			// case 'file':
+// 			// case 'image':
+// 			case 'checkbox': {
+// 				const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
+// 				statements.push(ts.createExpressionStatement(statement))
+// 				break
+// 			}
+// 			case 'text': case 'password': case 'search':
+// 				const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
+// 				statements.push(ts.createExpressionStatement(statement))
+// 				break
+// 		}
+// 	}
+// }
+
+export function generateSyncedTextInput(
+	{ isTextarea, mutable: { code }, attributes }: SyncedTextInput, offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const tagIdent = generateTagFromAttributes(isTextarea ? 'textarea' : 'input', attributes, offset, ctx, realParent, parent)
+	const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
+	return [ts.createExpressionStatement(statement)]
+}
+export function generateSyncedCheckboxInput(
+	{ mutable: { code }, /*value,*/ attributes }: SyncedCheckboxInput, offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const tagIdent = generateTagFromAttributes('input', attributes, offset, ctx, realParent, parent)
+	// const s = value.type === 'static' ? :
+	// static: value
+	// dynamic: code, initialModifier
+	const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
+	return [ts.createExpressionStatement(statement)]
+}
+export function generateSyncedRadioInput(
+	entity: SyncedRadioInput, offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	//
+}
+export function generateSyncedSelect(
+	entity: SyncedSelect, offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	//
+}
+
+
+
 function strongerLiveness(a: LivenessType, b: LivenessType) {
 	switch (a) {
-	case BindingType.static:
+	case LivenessType.static:
 		return b
-	case BindingType.dynamic:
-		return b === BindingType.reactive ? b : a
-	case BindingType.reactive:
+	case LivenessType.dynamic:
+		return b === LivenessType.reactive ? b : a
+	case LivenessType.reactive:
 		return a
 	}
 }
@@ -452,7 +480,7 @@ export function generateText(
 
 	if (isRealLone) switch (liveness) {
 		case BindingType.reactive:
-			return [createEffectBind(ctx, realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
+			return [createBind(ctx, realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
 		case BindingType.dynamic:
 			return [createFieldAssignment(realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
 		case BindingType.static:
@@ -467,7 +495,7 @@ export function generateText(
 				textIdent,
 				createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral('')])
 			),
-			createEffectBind(ctx, textIdent, 'data', createRawCodeSegment(wrapCode(totalContent))),
+			createBind(ctx, textIdent, 'data', createRawCodeSegment(wrapCode(totalContent))),
 		]
 	case BindingType.dynamic:
 		return [ts.createExpressionStatement(
@@ -913,19 +941,20 @@ function createFieldAssignment(
 	)
 }
 
-function createEffectBind(
-	ctx: CodegenContext,
-	target: ts.Expression,
-	field: string,
-	expression: ts.Expression,
+function createBind(
+	ctx: CodegenContext, target: ts.Expression,
+	field: string, expression: ts.Expression,
 ) {
 	return ts.createExpressionStatement(
-		createCall(ctx.requireRuntime('effect'), [
-			createArrowFunction([], ts.createBlock([
-				createFieldAssignment(target, field, expression),
-			], true)),
-		]),
+		createCall(ctx.requireRuntime('bindProperty'), [target, ts.createStringLiteral(field), expression])
 	)
+	// return ts.createExpressionStatement(
+	// 	createCall(ctx.requireRuntime('effect'), [
+	// 		createArrowFunction([], ts.createBlock([
+	// 			createFieldAssignment(target, field, expression),
+	// 		], true)),
+	// 	]),
+	// )
 }
 
 

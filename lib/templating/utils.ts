@@ -276,6 +276,9 @@ export const Errors = {
 		"I don't know what to do with multiple copies of the same section.",
 	),
 
+	COMPONENT_USAGE_NONEXISTENT_SLOT: (span: Span) => ParseError(span, 'COMPONENT_USAGE_NONEXISTENT_SLOT', ""),
+	COMPONENT_INVALID_SLOT_INSERTION: (span: Span) => ParseError(span, 'COMPONENT_INVALID_SLOT_INSERTION', ""),
+
 	REQUIRES_CODE: (span: Span, variety: string) => ParseError(span, 'REQUIRES_CODE',
 		`${variety} don't make any sense if passed a static value.`,
 	),
@@ -346,6 +349,9 @@ export const Warnings = {
 	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE',
 		"",
 	),
+
+	COMPONENT_USAGE_REDUNDANT_FALLBACK: (span: Span) => ParseWarning(span, 'COMPONENT_USAGE_REDUNDANT_FALLBACK', ""),
+	TAG_DUPLICATE_ID: (_first: Span, _second: Span) => ParseWarning(_second, 'TAG_DUPLICATE_ID', ""),
 
 	COMPONENT_NOT_EXPORTED: (span: Span) => ParseWarning(span, 'COMPONENT_NOT_EXPORTED',
 		"It's a good idea to export `Component` type declarations.",

@@ -1,11 +1,11 @@
 import '@ts-std/extensions/dist/array'
 import { Span, Spanned } from 'kreia/dist/runtime/lexer'
-import { UniqueDict, DefaultDict } from '@ts-std/collections'
+import { UniqueDict, UniqueValue, DefaultDict } from '@ts-std/collections'
 
 import { Context, Warnings, ParseResult } from './utils'
 import { splitGuard, Dict, NonEmpty, OmitVariants } from '../utils'
 import {
-	LivenessType, ComponentDefinition, Entity, Html, Tag, TagAttributes, Meta, AttributeCode, TextSection, TextItem,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
 	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
 	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
@@ -26,11 +26,148 @@ import {
 // // const keyModifiers = [] as const
 // // const mouseModifiers = ['left', 'right', 'middle'] as const
 
+export type ComponentDefinitionTypes = { props: string[], events: string[], syncs: string[], slots: Dict<boolean> }
+export function parseComponentDefinition(
+	component: ComponentDefinitionTypes | undefined,
+	createFn: NonEmpty<string> | CTXFN | undefined,
+	rawEntities: (Spanned<Entity | SlotUsage | SlotInsertion>)[],
+) {
+	const ctx = new Context<ComponentDefinition>()
+
+	const entities = [] as (Entity | SlotUsage)[]
+	// TODO here's where we'd add backfilled slots
+	// const foundSlots = new UniqueDict<[boolean, string | undefined]>()
+	for (const { item: entity, span } of rawEntities) {
+		if (entity.type === 'SlotUsage') {
+			const slotName = entity.name || 'def'
+			// foundSlots.set(slotName, [entity.fallback !== undefined, entity.argsExpression])
+
+			const optional = component && component.slots[slotName]
+			// if (!component && optional === undefined) {
+			if (optional === undefined) {
+				ctx.error('COMPONENT_USAGE_NONEXISTENT_SLOT', span)
+				continue
+			}
+
+			if (!optional && entity.fallback !== undefined)
+				ctx.warn('COMPONENT_USAGE_REDUNDANT_FALLBACK', span)
+		}
+
+		if (entity.type !== 'SlotInsertion')
+			entities.push(entity)
+		else
+			ctx.error('COMPONENT_INVALID_SLOT_INSERTION', span)
+	}
+
+	const { props = [], syncs = [], events = [], slots = {} } = component || {}
+	// slots = foundSlots.into_dict()
+	return ctx.Ok(() => new ComponentDefinition(props, syncs, events, slots, createFn, entities))
+}
+
+export type InclusionDescriptor = { type: 'inclusion', name: string, span: Span, params: Spanned<Attribute>[] }
+export function parseComponentInclusion(
+	{ name, span: nameSpan, params: attributes }: InclusionDescriptor,
+	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
+) {
+	const ctx = new Context<ComponentInclusion>()
+
+	const componentArguments = new UniqueDict<[boolean, Span]>()
+	const props = {} as Dict<BindingAttribute>
+	const syncs = {} as Dict<SyncAttribute>
+	const events = new DefaultDict(() => [] as EventAttribute[])
+	const receivers: ReceiverAttribute[] = []
+
+	for (const { item: attribute, span } of attributes) switch (attribute.type) {
+	case 'BindingAttribute': {
+		props[attribute.attribute] = attribute
+		const result = componentArguments.set(attribute.attribute, [true, span])
+		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
+		break
+	}
+	case 'SyncAttribute': {
+		syncs[attribute.attribute] = attribute
+		const result = componentArguments.set(attribute.attribute, [true, span])
+		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
+		break
+	}
+	case 'EventAttribute':
+		const { event, variety, code: rawCode } = attribute
+
+		const previous = componentArguments.get(event)
+		if (previous.is_some() && previous.value[0]) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, previous.value[1])
+		else componentArguments.set(event, [false, span])
+
+		const code = variety === 'inline' ? `() => ${rawCode}` : rawCode
+		events.get(event).push(new EventAttribute(event, variety, code))
+		break
+	case 'ReceiverAttribute':
+		ctx.error('COMPONENT_INCLUSION_RECEIVER', span)
+		break
+	}
+
+
+	const nonInsertEntities = [] as Entity[]
+	const slotInsertions = new UniqueDict<[SlotInsertion, Span]>()
+	for (const { item: entity, span } of entities) {
+		if (entity.type === 'SlotUsage') {
+			ctx.error('INVALID_SLOT_USAGE', span)
+			continue
+		}
+		if (entity.type !== 'SlotInsertion') {
+			nonInsertEntities.push(entity)
+			continue
+		}
+
+		const name = entity.name || 'def'
+		const result = slotInsertions.set(name, [entity, span])
+		if (result.is_err())
+			ctx.error('COMPONENT_INCLUSION_DUPLICATE_SLOT_INSERTION', span, result.error[2][1])
+	}
+
+	const slotInsertionsDict = slotInsertions.into_dict()
+	if (nonInsertEntities.length > 0) {
+		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as Entity[])
+		const previous = slotInsertionsDict['def']
+		if (previous !== undefined)
+			return ctx.Err('COMPONENT_INCLUSION_CONFLICTING_DEF_SLOT_INSERTION', previous[1])
+
+		slotInsertionsDict['def'] = [defaultInsertion, undefined as unknown as Span]
+	}
+
+	return ctx.Ok(() => new ComponentInclusion(
+		name, props, syncs,
+		events.into_dict() as Dict<NonEmpty<EventAttribute>>,
+		slotInsertions.entries().reduce((acc, [k, [v, ]]) => { acc[k] = v; return acc }, {} as Dict<SlotInsertion>),
+	))
+}
+
+
 function isAttributeCode(v: string | AttributeCode | undefined): v is AttributeCode {
 	return !!v && v instanceof AttributeCode
 }
 function isInertBindingValue(v: BindingValue): v is InertBindingValue {
 	return v.type !== 'empty' && v.type !== 'reactive'
+}
+
+export function parseLiveness(content: string): [Exclude<LivenessType, LivenessType.static>, string] {
+	return content.startsWith(':') ? [LivenessType.reactive, content.slice(1)] : [LivenessType.dynamic, content]
+}
+
+export function parseDynamicMeta(isClass: true, rawContent: string): ClassMeta
+export function parseDynamicMeta(isClass: false, rawContent: string): IdMeta
+export function parseDynamicMeta(isClass: boolean, rawContent: string) {
+	const [liveness, content] = parseLiveness(rawContent)
+	return new (isClass ? ClassMeta : IdMeta)(liveness, content)
+}
+export function parseMeta(rawContent: string) {
+	return new (rawContent.startsWith('.') ? ClassMeta : IdMeta)(LivenessType.static, rawContent.slice(1))
+}
+export function parseDynamicTextSection(rawContent: string) {
+	const [liveness, content] = parseLiveness(rawContent)
+	return new TextItem(liveness, content)
+}
+export function parseTextSection(content: string) {
+	return new TextItem(LivenessType.static, content)
 }
 
 export function parseAttribute(
@@ -118,7 +255,7 @@ export function parseAttribute(
 
 
 const leafTags = ['br', 'input']
-export type TagDescriptor = { type: 'tag', ident: string, span: Span, metas: Spanned<Meta>[], attributes: Spanned<Attribute>[] }
+export type TagDescriptor = { type: 'tag', ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[], attributes: Spanned<Attribute>[] }
 export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescriptor, entities: Entity[]) {
 	const ctx = new Context<Html>()
 
@@ -151,7 +288,7 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 		if (typeBinding && typeBinding.type !== 'static')
 			return ctx.Err('INPUT_TAG_SYNC_NOT_KNOWN_TYPE', tagSpan)
 
-		if (typeBinding === undefined || typeBinding.value === 'text')
+		if (typeBinding === undefined || ['text', 'password', 'search'].includes(typeBinding.value))
 			return ctx.Ok(() => new SyncedTextInput(false, sync.code, tagAttributes))
 
 		if (typeBinding.value === 'checkbox') {
@@ -189,15 +326,25 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 }
 
 export function parseTagAttributes(
-	metas: Spanned<Meta>[], identSpan: Span,
+	metas: Spanned<IdMeta | ClassMeta>[], identSpan: Span,
 	attributes: Spanned<Exclude<Attribute, SyncAttribute>>[],
 ) {
 	const ctx = new Context<TagAttributes>()
 
+	const idMeta = new UniqueValue<[IdMeta, Span]>()
+	const classMetas = [] as ClassMeta[]
+	for (const { item: meta, span } of metas) switch (meta.type) {
+	case 'IdMeta':
+		const result = idMeta.set([meta, span])
+		if (result.is_err())
+			ctx.warn('TAG_DUPLICATE_ID', span, result.error[1][1])
+	case 'ClassMeta':
+		classMetas.push()
+	}
+
 	const bindings = new UniqueDict<[BindingAttribute, Span]>()
 	const events = new DefaultDict(() => [] as EventAttribute[])
 	const receivers: ReceiverAttribute[] = []
-
 	for (const { item: attribute, span } of attributes) switch (attribute.type) {
 	case 'BindingAttribute': {
 		const result = bindings.set(attribute.attribute, [attribute, span])
@@ -217,83 +364,9 @@ export function parseTagAttributes(
 	}
 
 	const bindingsDict = bindings.entries().map(([k, [v, ]]) => [k, v] as [string, BindingAttribute]).entries_to_dict()
-	return ctx.Ok(() => new TagAttributes(metas.map(s => s.item), bindingsDict, events.into_dict() as Dict<NonEmpty<EventAttribute>>, receivers))
-}
-
-export type InclusionDescriptor = { type: 'inclusion', name: string, span: Span, params: Spanned<Attribute>[] }
-export function parseComponentInclusion(
-	{ name, span: nameSpan, params: attributes }: InclusionDescriptor,
-	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
-) {
-	const ctx = new Context<ComponentInclusion>()
-
-	const componentArguments = new UniqueDict<[boolean, Span]>()
-	const props = {} as Dict<BindingAttribute>
-	const syncs = {} as Dict<SyncAttribute>
-	const events = new DefaultDict(() => [] as EventAttribute[])
-	const receivers: ReceiverAttribute[] = []
-
-	for (const { item: attribute, span } of attributes) switch (attribute.type) {
-	case 'BindingAttribute': {
-		props[attribute.attribute] = attribute
-		const result = componentArguments.set(attribute.attribute, [true, span])
-		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
-		break
-	}
-	case 'SyncAttribute': {
-		syncs[attribute.attribute] = attribute
-		const result = componentArguments.set(attribute.attribute, [true, span])
-		if (result.is_err()) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, result.error[2][1])
-		break
-	}
-	case 'EventAttribute':
-		const { event, variety, code: rawCode } = attribute
-
-		const previous = componentArguments.get(event)
-		if (previous.is_some() && previous.value[0]) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, previous.value[1])
-		else componentArguments.set(event, [false, span])
-
-		const code = variety === 'inline' ? `() => ${rawCode}` : rawCode
-		events.get(event).push(new EventAttribute(event, variety, code))
-		break
-	case 'ReceiverAttribute':
-		ctx.error('COMPONENT_INCLUSION_RECEIVER', span)
-		break
-	}
-
-
-	const nonInsertEntities = [] as Entity[]
-	const slotInsertions = new UniqueDict<[SlotInsertion, Span]>()
-	for (const { item: entity, span } of entities) {
-		if (entity.type === 'SlotUsage') {
-			ctx.error('INVALID_SLOT_USAGE', span)
-			continue
-		}
-		if (entity.type !== 'SlotInsertion') {
-			nonInsertEntities.push(entity)
-			continue
-		}
-
-		const name = entity.name || 'def'
-		const result = slotInsertions.set(name, [entity, span])
-		if (result.is_err())
-			ctx.error('COMPONENT_INCLUSION_DUPLICATE_SLOT_INSERTION', span, result.error[2][1])
-	}
-
-	const slotInsertionsDict = slotInsertions.into_dict()
-	if (nonInsertEntities.length > 0) {
-		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as Entity[])
-		const previous = slotInsertionsDict['def']
-		if (previous !== undefined)
-			return ctx.Err('COMPONENT_INCLUSION_CONFLICTING_DEF_SLOT_INSERTION', previous[1])
-
-		slotInsertionsDict['def'] = [defaultInsertion, undefined as unknown as Span]
-	}
-
-	return ctx.Ok(() => new ComponentInclusion(
-		name, props, syncs,
-		events.into_dict() as Dict<NonEmpty<EventAttribute>>,
-		slotInsertions.entries().reduce((acc, [k, [v, ]]) => { acc[k] = v; return acc }, {} as Dict<SlotInsertion>),
+	return ctx.Ok(() => new TagAttributes(
+		idMeta.get().change(([id, ]) => id).to_undef(), classMetas, bindingsDict,
+		events.into_dict() as Dict<NonEmpty<EventAttribute>>, receivers,
 	))
 }
 
@@ -315,27 +388,25 @@ function processInsertableCode(
 
 export type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
 export type InProgressIf = {
-	type: 'if', expression: string, entities: Entity[],
+	type: 'if', span: Span, expression: string, entities: Entity[],
 	elseIfBranches: [string, Entity[]][], elseBranch: Entity[] | undefined,
 }
 export type InProgressMatch = {
-	type: 'match', matchExpression: string, span: Span,
+	type: 'match', span: Span, matchExpression: string,
 	patterns: [string, Entity[]][], defaultPattern: Entity[] | undefined,
 }
 export type InProgressSwitch = {
-	type: 'switch', switchExpression: string, span: Span,
+	type: 'switch', span: Span, switchExpression: string,
 	cases: (SwitchCase | SwitchDefault)[],
 }
 
 export type DirectiveDescriptor = { type: 'directive', command: string, span: Span, code: string | undefined }
 export type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
-export type NotReadyEntity = Tag | ComponentInclusion | NonEmpty<Spanned<TextItem>> | DirectivePending
+export type NotReadyEntity = Spanned<Html | ComponentInclusion> | NonEmpty<Spanned<TextItem>> | DirectivePending
 
 export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]) {
-	const ctx = new Context<{ entities: Entity[], slotInsertions: SlotInsertion[], slotUsages: SlotUsage[] }>()
-	const giveEntities: Entity[] = []
-	const giveSlotInsertions: SlotInsertion[] = []
-	const giveSlotUsages: SlotUsage[] = []
+	const ctx = new Context<(Spanned<Entity | SlotInsertion | SlotUsage>)[]>()
+	const giveEntities = [] as (Spanned<Entity | SlotInsertion | SlotUsage>)[]
 	let inProgressTextSection = undefined as NonEmpty<Spanned<TextItem>> | undefined
 	let inProgressDirective = undefined as InProgressDirective | undefined
 	function finalizeInProgressDirective() {
@@ -343,34 +414,34 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 
 		switch (inProgressDirective.type) {
 			case 'if': {
-				const { expression, entities, elseIfBranches, elseBranch } = inProgressDirective
-				giveEntities.push(new IfBlock(expression, entities, elseIfBranches, elseBranch))
+				const { expression, span, entities, elseIfBranches, elseBranch } = inProgressDirective
+				giveEntities.push(Spanned(new IfBlock(expression, entities, elseIfBranches, elseBranch), span))
 				break
 			}
 			case 'match': {
 				const { matchExpression, span, patterns, defaultPattern } = inProgressDirective
-				giveEntities.push(new MatchBlock(matchExpression, patterns, defaultPattern))
+				giveEntities.push(Spanned(new MatchBlock(matchExpression, patterns, defaultPattern), span))
 				break
 			}
 			case 'switch':
 				const { switchExpression, span, cases } = inProgressDirective
 				if (cases.length === 0)
 					return ctx.error('SWITCH_NO_CASES', span)
-				giveEntities.push(new SwitchBlock(switchExpression, cases))
+				giveEntities.push(Spanned(new SwitchBlock(switchExpression, cases), span))
 				break
 		}
 	}
 
-	for (const mixedItem of items) {
+	for (const mixedItemResult of items) {
 		// comment
-		if (mixedItem === undefined) {
+		if (mixedItemResult === undefined) {
 			finalizeInProgressDirective()
 			continue
 		}
-		const itemResult = ctx.take(mixedItem)
-		if (itemResult.is_err())
+		const result = ctx.take(mixedItemResult)
+		if (result.is_err())
 			continue
-		const item = itemResult.value
+		const item = result.value
 		// TextItem
 		if (Array.isArray(item)) {
 			finalizeInProgressDirective()
@@ -379,11 +450,15 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 		}
 		// finalize inProgressTextSection
 		if (inProgressTextSection !== undefined) {
-			giveEntities.push(new TextSection(inProgressTextSection.map(s => s.item) as NonEmpty<TextItem>))
+			const span = inProgressTextSection.length === 1
+				? inProgressTextSection[0].span
+				: Span.around(inProgressTextSection[0].span, inProgressTextSection[inProgressTextSection.length - 1].span)
+			giveEntities.push(Spanned(new TextSection(inProgressTextSection.map(s => s.item) as NonEmpty<TextItem>), span))
 			inProgressTextSection = undefined
 		}
 
-		if (item.type !== 'directive') {
+		// if ('span' in item) {
+		if (!('type' in item)) {
 			finalizeInProgressDirective()
 			giveEntities.push(item)
 			continue
@@ -396,7 +471,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 				if (code === undefined)
 					return ctx.Err('IF_NO_EXPRESSION', span)
 				inProgressDirective = {
-					type: 'if', expression: code,
+					type: 'if', span, expression: code,
 					entities, elseIfBranches: [], elseBranch: undefined,
 				} as InProgressIf
 				break
@@ -431,7 +506,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 				if (code === undefined)
 					return ctx.Err('EACH_NO_EXPRESSION', span)
 				const [paramsExpression, listExpression] = processEachBlockCode(code)
-				giveEntities.push(new EachBlock(paramsExpression, listExpression, entities))
+				giveEntities.push(Spanned(new EachBlock(paramsExpression, listExpression, entities), span))
 				break
 
 			case 'match':
@@ -508,7 +583,8 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 				const result = ctx.subsume(processInsertableCode(true, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [slotName, argsExpression] = result.value
-				giveSlotUsages.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
+				// giveSlotUsages.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
+				giveEntities.push(Spanned(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)), span))
 				break
 			}
 			case 'insert': {
@@ -516,7 +592,8 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 				const result = ctx.subsume(processInsertableCode(true, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [slotName, paramsExpression] = result.value
-				giveSlotInsertions.push(new SlotInsertion(slotName, paramsExpression, entities))
+				// giveSlotInsertions.push(new SlotInsertion(slotName, paramsExpression, entities))
+				giveEntities.push(Spanned(new SlotInsertion(slotName, paramsExpression, entities), span))
 				break
 			}
 
@@ -529,7 +606,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 					ctx.error('TEMPLATE_NAMELESS', span)
 					break
 				}
-				giveEntities.push(new TemplateDefinition(templateName, argsExpression, entities))
+				giveEntities.push(Spanned(new TemplateDefinition(templateName, argsExpression, entities), span))
 				break
 			}
 			case 'include': {
@@ -541,7 +618,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 					ctx.error('INCLUDE_NAMELESS', span)
 					break
 				}
-				giveEntities.push(new TemplateInclusion(templateName, argsExpression))
+				giveEntities.push(Spanned(new TemplateInclusion(templateName, argsExpression), span))
 				break
 			}
 
@@ -550,5 +627,5 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 		}
 	}
 
-	return ctx.Ok(() => ({ entities: giveEntities, slotUsages: giveSlotUsages, slotInsertions: giveSlotInsertions }))
+	return ctx.Ok(() => giveEntities)
 }

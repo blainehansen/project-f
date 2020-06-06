@@ -6,13 +6,13 @@ import { Result, Ok, Err, Maybe, Some, None } from '@ts-std/monads'
 import { Parser, Context } from './utils'
 import { Dict, NonEmpty, exec } from '../utils'
 import { reset, exit, wolf } from './wolf.grammar'
-import { ComponentDefinition, Entity } from './ast'
 import { generateComponentDefinition } from './codegen'
+import { ComponentDefinition, Entity, CTXFN } from './ast'
+import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
 
 // we generally want to allow people to have scriptless component files
 // if there's no script section at all, then we can backfill slots (which suddenly requires that useages are unique)
 
-type AlmostComponentDefinition = [string[], string[], string[], Dict<boolean>, string[] | undefined]
 export function processFile(source: string, lineWidth: number, filename: string): string {
 	const parser = new Parser(lineWidth)
 	const { template, script, style, ...others } = parser.expect(cutSource({ source, filename }))
@@ -39,27 +39,20 @@ export function processFile(source: string, lineWidth: number, filename: string)
 		return entities
 	})
 
-	const [props, syncs, events, slots, createFn] = script === undefined
-		// TODO here's where we'd add backfilled slots
-		? [[], [], [], {}, undefined]
-		: exec(() => {
-			if (script.lang && script.lang !== 'ts')
-				return parser.die('NON_TS_SCRIPT_LANG', script.span)
-			const sourceFile = ts.createSourceFile(filename, script.text, ts.ScriptTarget.Latest, true)
-			return parser.expect(inspect(sourceFile))
-		})
-
-	return parser.finalize(() => {
-		const definition = new ComponentDefinition(props, syncs, events, slots, createFn, entities)
-		return generateComponentDefinition(definition)
+	const [definitionArgs, createFn] = script === undefined ? [undefined, undefined] : exec(() => {
+		if (script.lang && script.lang !== 'ts')
+			return parser.die('NON_TS_SCRIPT_LANG', script.span)
+		const sourceFile = ts.createSourceFile(filename, script.text, ts.ScriptTarget.Latest, true)
+		return parser.expect(inspect(sourceFile))
 	})
+
+	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
+	return parser.finalize(() => generateComponentDefinition(definition))
 }
 
 
-const CTXFN: unique symbol = Symbol()
-type CTXFN = typeof CTXFN
 export function inspect(file: ts.SourceFile) {
-	const ctx = new Context<AlmostComponentDefinition>()
+	const ctx = new Context<[ComponentDefinitionTypes | undefined, NonEmpty<string> | CTXFN | undefined]>()
 	let foundCreateFns = [] as [ReturnType<typeof processCreateFn> | CTXFN, Span][]
 	let foundComponents = [] as [ReturnType<typeof processComponentType>, Span][]
 
@@ -76,7 +69,7 @@ export function inspect(file: ts.SourceFile) {
 	}
 	file.forEachChild(visitor)
 
-	const foundCreateFn = exec(() => {
+	const createFn = exec(() => {
 		if (foundCreateFns.length > 1) {
 			ctx.error('COMPONENT_CONFLICTING_CREATE', foundCreateFns[0][1], foundCreateFns[1][1])
 			return undefined
@@ -84,9 +77,9 @@ export function inspect(file: ts.SourceFile) {
 		if (foundCreateFns.length === 0) return undefined
 		const foundCreateFn = foundCreateFns[0][0]
 		if (foundCreateFn === CTXFN) return foundCreateFn
-		return ctx.take(foundCreateFn).ok_undef()
+		return ctx.take(foundCreateFn).change(NonEmpty.undef).ok_undef()
 	})
-	const foundComponent = exec(() => {
+	const component = exec(() => {
 		if (foundComponents.length > 1) {
 			ctx.error('COMPONENT_CONFLICTING_COMPONENT', foundComponents[0][1], foundComponents[1][1])
 			return undefined
@@ -95,16 +88,10 @@ export function inspect(file: ts.SourceFile) {
 		return ctx.take(foundComponents[0][0]).ok_undef()
 	})
 
-	const createFn = !foundCreateFn || foundCreateFn === CTXFN ? undefined : foundCreateFn
-	const { bindings: { props = [], syncs = [], events = [] } = {}, slots = {} } = foundComponent || {}
-	return ctx.Ok(() => [props, syncs, events, slots, createFn])
+	return ctx.Ok(() => [component, createFn])
 }
 
 
-type ComponentDefinitionTypes = {
-	bindings: { props: string[], events: string[], syncs: string[] },
-	slots: Dict<boolean>,
-}
 function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeAliasDeclaration) {
 	const ctx = new Context<ComponentDefinitionTypes>()
 
@@ -120,7 +107,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 	if (!ts.isTypeLiteralNode(definition))
 		return ctx.Err('COMPONENT_NOT_OBJECT', getSpan(sourceFile, definition))
 
-	const types: ComponentDefinitionTypes = { bindings: { props: [], events: [], syncs: [] }, slots: {} }
+	const types: ComponentDefinitionTypes = { props: [], events: [], syncs: [], slots: {} }
 	for (const definitionMember of definition.members) {
 		const result = ctx.subsume(processMember(sourceFile, definitionMember))
 		if (result.is_err()) return ctx.subsumeFail(result.error)
@@ -142,7 +129,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 					if (optional)
 						ctx.warn('OPTIONAL_NON_SLOT', getSpan(sourceFile, bindingMember))
 
-					types.bindings[variety].push(binding)
+					types[variety].push(binding)
 				}
 				break
 

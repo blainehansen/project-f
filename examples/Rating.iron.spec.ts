@@ -8,9 +8,17 @@ import {
 } from "project-f/runtime"
 
 const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, { maxStars, hasCounter }, { stars }, {}, {}) => {
+	const { starItems } = create({ maxStars, hasCounter, stars })
+
 	const ___div0 = ___createElementClass(___parent, "div", "rating")
 
 	const ___ul0_0 = ___createElementClass(___div0, "ul", "list")
+	// ___forContentEffect((___real, ___parent, star) => {
+	// 	const ___li0 = ___createElementClass(___parent, "li", ___joinClass("star", star.active && 'active'))
+	// 	___li0.onclick = $event => stars(star.amount)
+
+	// 	___createElementClass(___li0, "i", star.active ? 'fas fa-star' : 'far fa-star')
+	// }, ___ul0_0, starItems)
 	___contentEffect((___real, ___parent) => {
 		const ___eachBlockCollection = starItems.r()
 		const ___eachBlockCollectionLength = ___eachBlockCollection.length

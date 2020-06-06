@@ -7,6 +7,10 @@ export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
 	fn(node)
 }
 
+export function joinClass(...classes: NonEmpty<string | undefined | null | false>) {
+	return classes.filter(c => !!c).join(' ')
+}
+
 export function createElement<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
 	tagName: K,

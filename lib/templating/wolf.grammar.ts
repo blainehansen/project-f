@@ -7,13 +7,14 @@ import { NonEmpty } from '../utils'
 import { Context, ParseResult } from './utils'
 
 import {
-	Entity, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
+	Entity, Directive, LivenessType,
+	ComponentDefinition, Tag, IdMeta, ClassMeta, Attribute, AttributeCode, TextSection, TextItem,
 	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 import {
 	parseAttribute, parseHtml, parseTagAttributes, parseComponentInclusion,
+	parseDynamicMeta, parseMeta, parseDynamicTextSection, parseTextSection,
 	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, NotReadyEntity, parseEntities,
 } from './ast.parse'
 
@@ -196,18 +197,18 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 	)
 }
 
-type TagItem = { tag_name: string, span: Span, metas: Spanned<Meta>[] }
+type TagItem = { tag_name: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[] }
 export function tag(): TagItem {
 	return or(
 		c((): TagItem => {
 			const tag_item = consume(tok.tag_identifier)[0]
-			const metas = maybe_many(meta, _1VQg9s) || [] as Spanned<Meta>[]
+			const metas = maybe_many(meta, _1VQg9s) || [] as Spanned<IdMeta | ClassMeta>[]
 			const span = metas.length > 0 ? Span.around(tag_item, metas[metas.length - 1].span) : tag_item.span
 			return { tag_name: tag_item.content, span, metas }
 		}, _Z1yGH1N),
 
 		c((): TagItem => {
-			const metas = many(meta, _1VQg9s) as Spanned<Meta>[]
+			const metas = many(meta, _1VQg9s) as Spanned<IdMeta | ClassMeta>[]
 			const span = metas.length > 1 ? Span.around(metas[0].span, metas[metas.length - 1].span) : metas[0].span
 			return { tag_name: 'div', span, metas }
 		}, _1VQg9s),
@@ -221,48 +222,48 @@ export function meta() {
 		c(() => {
 			const prefix = consume(tok.dot)[0]
 			const { item: segment, span: segment_span } = code_segment()
-			return Spanned(new Meta(true, true, segment.code), Span.around(prefix, segment_span))
+			return Spanned(parseDynamicMeta(true, segment.code), Span.around(prefix, segment_span))
 		}, _qLI),
 
 		c(() => {
 			const prefix = consume(tok.pound)[0]
 			const { item: segment, span: segment_span } = code_segment()
-			return Spanned(new Meta(false, true, segment.code), Span.around(prefix, segment_span))
+			return Spanned(parseDynamicMeta(false, segment.code), Span.around(prefix, segment_span))
 		}, _7HLiJ),
 	)
 
 	if (Array.isArray(meta_item)) {
 		const token = meta_item[0]
 		const content = token.content
-		return Spanned(new Meta(content.startsWith('.'), false, content), token.span)
+		return Spanned(parseMeta(content), token.span)
 	}
 	return meta_item
 }
 
 export function attributes(): ParseResult<Attribute>[] {
 	consume(tok.open_paren)
-	const result_attributes = or(
+	const attribute_results = or(
 		c((): ParseResult<Attribute>[] => {
 			consume(tok.indent)
-			const result_attributes = lines(() => {
+			const attribute_results = lines(() => {
 				const result = attribute_line()
 				consume(tok.comma)
 				return result
 			}, _Z1F9dGs)
 			consume(tok.deindent, tok.indent_continue)
-			return ([] as ParseResult<Attribute>[]).concat(...result_attributes)
+			return ([] as ParseResult<Attribute>[]).concat(...attribute_results)
 		}, _Z1owlnn),
 
 		c((): ParseResult<Attribute>[] => {
 			maybe(tok.large_space)
-			const result_attributes = attribute_line()
+			const attribute_results = attribute_line()
 			maybe(tok.large_space)
-			return result_attributes
+			return attribute_results
 		}, _Z1KbEOG),
 	)
 	consume(tok.close_paren)
 
-	return result_attributes
+	return attribute_results
 }
 
 export function attribute_line() {
@@ -334,13 +335,13 @@ export function text() {
 			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
 			consume(tok.close_double_bracket)
 
-			return new TextItem(true, segments.map(s => s.item).join(''))
+			return parseDynamicTextSection(segments.map(s => s.item).join(''))
 		}, _Z2cNPgr),
 		c(tok.not_double_bracket),
 	)
 
 	return Array.isArray(item)
-		? new TextItem(false, item[0].content)
+		? parseTextSection(item[0].content)
 		: item
 }
 

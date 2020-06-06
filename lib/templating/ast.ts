@@ -1,14 +1,14 @@
 import { Dict, NonEmpty, OmitVariants } from '../utils'
 
-export enum LivenessType { static, dynamic, reactive }
-
+export const CTXFN: unique symbol = Symbol()
+export type CTXFN = typeof CTXFN
 export class ComponentDefinition {
 	constructor(
 		readonly props: string[],
 		readonly syncs: string[],
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
-		readonly createFn: string[] | undefined,
+		readonly createFn: NonEmpty<string> | CTXFN | undefined,
 		readonly entities: (Entity | SlotUsage)[],
 	) {}
 }
@@ -37,7 +37,8 @@ export class Tag {
 
 export class TagAttributes {
 	constructor(
-		readonly metas: Meta[],
+		readonly idMeta: IdMeta | undefined,
+		readonly classMetas: ClassMeta[],
 		readonly bindings: Dict<BindingAttribute>,
 		readonly events: Dict<NonEmpty<EventAttribute>>,
 		readonly receivers: ReceiverAttribute[],
@@ -45,20 +46,28 @@ export class TagAttributes {
 	) {}
 }
 
-export class Meta {
+export enum LivenessType { static, dynamic, reactive }
+export class IdMeta {
+	readonly type = 'IdMeta' as const
 	constructor(
-		readonly isClass: boolean,
-		readonly isDynamic: boolean,
+		readonly liveness: LivenessType,
 		readonly value: string,
 	) {}
 }
+export class ClassMeta {
+	readonly type = 'ClassMeta' as const
+	constructor(
+		readonly liveness: LivenessType,
+		readonly value: string,
+	) {}
+}
+
 export class AttributeCode {
 	constructor(
 		readonly isBare: boolean,
 		readonly code: string,
 	) {}
 }
-
 export class BindingAttribute {
 	readonly type = 'BindingAttribute' as const
 	constructor(
@@ -147,14 +156,10 @@ export class TextSection {
 export class TextItem {
 	readonly type = 'TextItem' as const
 	constructor(
-		readonly isCode: boolean,
+		readonly liveness: LivenessType,
 		readonly content: string,
 	) {}
 }
-
-// export function mutJoinTextSections(entities: ) {
-// 	//
-// }
 
 export type Directive =
 	| ComponentInclusion
