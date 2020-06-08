@@ -1,9 +1,10 @@
 import ts = require('typescript')
 import { DefaultDict, UniqueDict } from '@ts-std/collections'
 
-import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
+import { Dict, tuple as t, NonEmpty, NonLone, PickVariants, exec } from '../utils'
 import {
-	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
 	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
 	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
@@ -20,8 +21,30 @@ function safePrefixIdent(...segments: NonLone<string>) {
 	return ts.createIdentifier(safePrefix(segments.join('')))
 }
 
+function createReactiveCode(code: string) {
+	// return code + '.r()'
+	return code + '()'
+}
 function createRawCodeSegment(code: string) {
 	return ts.createIdentifier(code)
+}
+function createReactiveCodeSegment(code: string) {
+	return ts.createIdentifier(createReactiveCode(code))
+}
+function createAnonCall(fnCode: string, args: ts.Expression[]) {
+	return createCall(createRawCodeSegment(`(${fnCode})`), args)
+}
+
+function createDynamicBinding({ code, initialModifier }: PickVariants<BindingValue, 'type', 'dynamic'>, ctx: CodegenContext) {
+	const codeExpression = createRawCodeSegment(code.code)
+	return initialModifier
+		? createCall(ctx.requireRuntime('fakeInitial'), [codeExpression])
+		: codeExpression
+}
+// as an optimization for the call sites to avoid a bunch of empty object allocations,
+// you can pass a reference to the same global empty object for all the groups that haven't provided anything
+function efficientObject(assignments: readonly ts.ObjectLiteralElementLike[], ctx: CodegenContext) {
+	return assignments.length !== 0 ? ts.createObjectLiteral(assignments, false) : ctx.requireRuntime('EMPTYOBJECT')
 }
 
 export class CodegenContext {
@@ -101,7 +124,7 @@ export function generateComponentDefinition({
 
 	const createFnStatements = createFn === undefined ? [] : exec(() => {
 		const args = props.concat(syncs).concat(events)
-		const [createFnTarget, createFnCall] =  ? ['ctx', 'createCtx'] : [createFn, 'create']
+		const [createFnTarget, createFnCall] = createFn === CTXFN ? ['ctx', 'createCtx'] : [createFn, 'create']
 		return [createConst(
 			createFnTarget,
 			createCall(createFnCall, [ts.createAsExpression(
@@ -197,115 +220,76 @@ export function generateEntity(
 }
 
 
-export function generateTag(
-	{ ident, metas, attributes, entities }: Tag, offset: string,
-	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
-): ts.Statement[] {
+export function generateTagFromAttributes(
+	ident: string, { idMeta, classMetas, bindings, events, receivers }: TagAttributes, entities: Entity[],
+	offset: string, ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+): [ts.Identifier, boolean, ts.VariableStatement, ts.Statement[]] {
 	// we only have to assign this thing a name if we interact with it afterwards
 	const tagIdent = safePrefixIdent(ident, offset)
+	const identLiteral = ts.createStringLiteral(ident)
+
 	let needTagIdent = false
-	const tagCreator = createCall(ctx.requireRuntime('createElement'), [parent, ts.createStringLiteral(ident)])
-	const statements = [createConst(tagIdent, tagCreator) as ts.Statement]
-
-	let idMeta = ''
-	let idDynamic = false
-	let classMeta = ''
-	let classDynamic = false
-	for (const { isClass, isDynamic, value } of metas) {
-		const meta = { isDynamic, value }
-		if (isClass) {
-			if (isDynamic) classDynamic = true
-			classMeta += isDynamic
-				? ' ${' + value + '}'
-				: ` ${value}`
-			continue
-		}
-
-		if (idMeta !== '') throw new Error("multiple id metas")
-		idMeta = value
-		idDynamic = isDynamic
+	let classLiveness: LivenessType | undefined = undefined
+	for (const { liveness, value } of classMetas) {
+		needTagIdent = true
+		classLiveness = classLiveness !== undefined ? LivenessType.max(classLiveness, liveness) : classLiveness
 	}
 
-	if (idMeta !== '') {
+	function literalOrCode({ liveness, value }: ClassMeta) {
+		return liveness === LivenessType.static
+			? ts.createStringLiteral(value)
+			: createRawCodeSegment(value)
+	}
+
+	const tagCreator =
+		classLiveness === undefined ? createCall(ctx.requireRuntime('createElement'), [parent, identLiteral])
+		: classLiveness === LivenessType.static
+			? createCall(ctx.requireRuntime('createElementClass'), [
+				parent, identLiteral, ts.createStringLiteral(classMetas.map(m => m.value).join(' ')),
+			])
+		: classLiveness === LivenessType.dynamic
+			? createCall(ctx.requireRuntime('createElementClasses'), [parent, identLiteral, ...classMetas.map(literalOrCode)])
+		: createCall(ctx.requireRuntime('createElementReactiveClasses'), [parent, identLiteral, ...classMetas.map(literalOrCode)])
+
+	const statements = [ts.createExpressionStatement(tagCreator) as ts.Statement]
+
+	if (idMeta) {
 		needTagIdent = true
-		const idAssignment = idDynamic
-			? createBind(ctx, tagIdent, 'id', createRawCodeSegment(idMeta))
-			: createFieldAssignment(tagIdent, 'id', ts.createStringLiteral(idMeta))
+		const idAssignment = idMeta.liveness === LivenessType.reactive
+			? createBind(ctx, tagIdent, 'id', createRawCodeSegment(idMeta.value))
+			: createFieldAssignment(tagIdent, 'id', ts.createStringLiteral(idMeta.value))
 		statements.push(idAssignment)
 	}
 
-	const className = classMeta.trim()
-	if (className !== '') {
-		needTagIdent = true
-		const classNameAssignment = classDynamic
-			? createBind(ctx, tagIdent, 'className', createRawCodeSegment('`' + className + '`'))
-			: createFieldAssignment(tagIdent, 'className', ts.createStringLiteral(className))
-		statements.push(classNameAssignment)
-	}
-	// TODO in the future I might get rid of the dynamic metas
-	// in this situation we'd just do the same thing the metas loop is doing above
-	// and then continue out of this loop iteration
-	// if (attribute === 'id') if not dynamic throw new Error("don't use the `id` attribute, use `#id-name` syntax instead")
-	// if (attribute === 'class') if not dynamic throw new Error("don't use the `class` attribute, use `.class-name` syntax instead")
+	const bindingsValues = Object.values(bindings)
+	const eventsEntries = Object.entries(events)
+	needTagIdent = needTagIdent || bindingsValues.length > 0 || eventsEntries.length > 0 || receivers.length > 0
 
-	needTagIdent = needTagIdent || attributes.length > 0
-	const [bindings, events, fns] = processAttributes(attributes)
-
-	for (const [binding, [type, modifiers, code]] of bindings) switch (type) {
-		case BindingType.empty:
-			// intentionally ignore modifiers
-			statements.push(createFieldAssignment(tagIdent, binding, ts.createTrue()))
+	for (const { attribute, value } of bindingsValues) switch (value.type) {
+		case 'empty':
+			statements.push(createFieldAssignment(tagIdent, attribute, ts.createTrue()))
 			break
-		case BindingType.static:
-			// intentionally ignore modifiers
-			statements.push(createFieldAssignment(tagIdent, binding, ts.createStringLiteral(code)))
+		case 'static':
+			statements.push(createFieldAssignment(tagIdent, attribute, ts.createStringLiteral(value.value)))
 			break
-		case BindingType.dynamic:
-			const bindingCode = processDynamicModifiers(ctx, modifiers, code, false)
-			statements.push(createFieldAssignment(tagIdent, binding, bindingCode))
+		case 'dynamic':
+			const dynamicBinding = createDynamicBinding(value, ctx)
+			statements.push(createFieldAssignment(tagIdent, attribute, dynamicBinding))
 			break
-		case BindingType.reactive:
-			// intentionally ignore modifiers
-			statements.push(createBind(ctx, tagIdent, binding, createRawCodeSegment(`${code}()`)))
+		case 'reactive':
+			const reactiveCode = createReactiveCodeSegment(value.reactiveCode.code)
+			statements.push(createBind(ctx, tagIdent, attribute, reactiveCode))
 			break
-		case BindingType.sync:
-			if (binding !== 'sync')
-				throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-
-			switch (ident) {
-				case 'input':
-					handleInput(ctx, statements, tagIdent, code, bindings)
-					break
-				case 'textarea':
-					const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
-					statements.push(ts.createExpressionStatement(statement))
-					break
-				case 'select':
-					throw new Error('unimplemented')
-				default:
-					throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-			}
 	}
 
-	for (const [event, handlers] of events) {
-		if (handlers.length === 0) continue
-
+	for (const [event, handlers] of eventsEntries) {
 		// TODO lots to think about here, since we aren't properly handling basically any modifiers
-		const finalHandler = handlers.length === 1
-			? createRawCodeSegment(makeNativeHandler(handlers[0][1], handlers[0][2], handlers[0][0].handler || false))
-			: createArrowFunction([createParameter('$event')], ts.createBlock(
-				handlers.map(([modifiers, code, isBare]) => {
-					const handler = makeNativeHandler(code, isBare, modifiers.handler || false)
-					return ts.createExpressionStatement(createCall(createRawCodeSegment(`(${handler})`), [ts.createIdentifier('$event')]))
-				}),
-				true,
-			))
-
-		statements.push(createFieldAssignment(tagIdent, `on${event}`, finalHandler))
+		const handler = generateHandler(handlers, false)
+		statements.push(createFieldAssignment(tagIdent, `on${event}`, handler))
 	}
 
-	for (const code of fns) {
-		const statement = createCall(ctx.requireRuntime('nodeReceiver'), [tagIdent, createRawCodeSegment(code)])
+	for (const { code } of receivers) {
+		const statement = createAnonCall(code.code, [tagIdent])
 		statements.push(ts.createExpressionStatement(statement))
 	}
 
@@ -329,166 +313,104 @@ export function generateTag(
 	Array.prototype.push.apply(statements, childStatements)
 	Array.prototype.push.apply(statements, postChildrenStatements)
 
-	if (!needTagIdent)
-		statements[0] = ts.createExpressionStatement(tagCreator)
+	const assigner = createConst(tagIdent, tagCreator)
+	if (needTagIdent)
+		statements[0] = assigner
 
-	return statements
+	return [tagIdent, needTagIdent, assigner, statements]
 }
 
-// function handleInput(
-// 	ctx: CodegenContext, statements: ts.Statement[],
-// 	tagIdent: ts.Identifier, code: string,
-// 	bindings: [string, [BindingType, Dict<true>, string]][],
-// ) {
-// 	const foundType = bindings.find(([binding, ]) => binding === 'type')
-// 	const [, [typeType = BindingType.static, typeModifiers = {}, typeCode = 'text'] = []] = foundType || []
-// 	switch (typeType) {
-// 		case BindingType.dynamic:
-// 		case BindingType.reactive:
-// 			throw new Error('unimplemented')
-// 		case BindingType.empty:
-// 			throw new Error("input type cannot be assigned to true")
-// 		case BindingType.sync:
-// 			throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
+function generateHandler(handlers: NonEmpty<EventAttribute>, isComponent: boolean): ts.Expression {
+	if (handlers.length === 1)
+		return createRawCodeSegment(handlers[0].code)
 
-// 		case BindingType.static: switch (typeCode) {
-// 			default:
-// 				throw new Error('unimplemented')
-// 			case 'radio':
-// 				const foundValue = bindings.find(([binding, ]) => binding === 'value')
-// 				if (foundValue === undefined) throw new Error("radio inputs need a value")
-// 				const [, [valueType, valueModifiers, valueCode]] = foundValue
-// 				switch (valueType) {
-// 					case BindingType.sync:
-// 						throw new Error(`syncs on primitive tags are only allowed on input, textarea, and select, with !sync`)
-// 					case BindingType.reactive: {
-// 						const statement = createCall(
-// 							ctx.requireRuntime('syncRadioElementReactive'),
-// 							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
-// 						)
-// 						statements.push(ts.createExpressionStatement(statement))
-// 						break
-// 					}
-// 					case BindingType.static: {
-// 						const statement = createCall(
-// 							ctx.requireRuntime('syncRadioElement'),
-// 							[tagIdent, createRawCodeSegment(code), ts.createStringLiteral(valueCode)],
-// 						)
-// 						statements.push(ts.createExpressionStatement(statement))
-// 						break
-// 					}
-// 					case BindingType.empty: {
-// 						const statement = createCall(
-// 							ctx.requireRuntime('syncRadioElement'),
-// 							[tagIdent, createRawCodeSegment(code), ts.createTrue()],
-// 						)
-// 						statements.push(ts.createExpressionStatement(statement))
-// 						break
-// 					}
-// 					case BindingType.dynamic:
-// 						const statement = createCall(
-// 							ctx.requireRuntime('syncRadioElement'),
-// 							[tagIdent, createRawCodeSegment(code), createRawCodeSegment(valueCode)],
-// 						)
-// 						statements.push(ts.createExpressionStatement(statement))
-// 						break
-// 				}
-// 				break
-// 			// case 'file':
-// 			// case 'image':
-// 			case 'checkbox': {
-// 				const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
-// 				statements.push(ts.createExpressionStatement(statement))
-// 				break
-// 			}
-// 			case 'text': case 'password': case 'search':
-// 				const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
-// 				statements.push(ts.createExpressionStatement(statement))
-// 				break
-// 		}
-// 	}
-// }
+	const param = isComponent ? '...$args' : '$event'
+	return createArrowFunction([createParameter(param)], ts.createBlock(
+		handlers.map(({ code }) => {
+			return ts.createExpressionStatement(createAnonCall(code, [ts.createIdentifier(param)]))
+		})
+	))
+}
+
+export function generateTag(
+	{ ident, attributes, entities }: Tag, offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const [, , , tagStatements] = generateTagFromAttributes(ident, attributes, entities, offset, ctx, realParent, parent)
+	return tagStatements
+}
 
 export function generateSyncedTextInput(
 	{ isTextarea, mutable: { code }, attributes }: SyncedTextInput, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ) {
-	const tagIdent = generateTagFromAttributes(isTextarea ? 'textarea' : 'input', attributes, offset, ctx, realParent, parent)
-	const statement = createCall(ctx.requireRuntime('syncTextElement'), [tagIdent, createRawCodeSegment(code)])
-	return [ts.createExpressionStatement(statement)]
+	const ident = isTextarea ? 'textarea' : 'input'
+	return generateSyncedSomething(ident, 'syncTextElement', code, attributes, [], offset, ctx, realParent, parent)
 }
 export function generateSyncedCheckboxInput(
-	{ mutable: { code }, /*value,*/ attributes }: SyncedCheckboxInput, offset: string,
+	{ mutable: { code }, attributes }: SyncedCheckboxInput, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ) {
-	const tagIdent = generateTagFromAttributes('input', attributes, offset, ctx, realParent, parent)
-	// const s = value.type === 'static' ? :
-	// static: value
-	// dynamic: code, initialModifier
-	const statement = createCall(ctx.requireRuntime('syncCheckboxElement'), [tagIdent, createRawCodeSegment(code)])
-	return [ts.createExpressionStatement(statement)]
+	return generateSyncedSomething('input', 'syncCheckboxElement', code, attributes, [], offset, ctx, realParent, parent)
 }
 export function generateSyncedRadioInput(
-	entity: SyncedRadioInput, offset: string,
+	{ mutable: { code }, attributes }: SyncedRadioInput, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ) {
-	//
+	return generateSyncedSomething('input', 'syncRadioElement', code, attributes, [], offset, ctx, realParent, parent)
 }
 export function generateSyncedSelect(
-	entity: SyncedSelect, offset: string,
+	{ mutable: { code }, isMultiple, attributes, entities }: SyncedSelect, offset: string,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ) {
-	//
+	const runtimeFn = isMultiple ? 'syncSelectElement' : 'syncSelectMultipleElement'
+	return generateSyncedSomething('select', runtimeFn, code, attributes, entities, offset, ctx, realParent, parent)
 }
 
-
-
-function strongerLiveness(a: LivenessType, b: LivenessType) {
-	switch (a) {
-	case LivenessType.static:
-		return b
-	case LivenessType.dynamic:
-		return b === LivenessType.reactive ? b : a
-	case LivenessType.reactive:
-		return a
-	}
+function generateSyncedSomething(
+	ident: string, runtimeFn: string, code: string, attributes: TagAttributes, entities: Entity[], offset: string,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	const [tagIdent, , assigner, statements] = generateTagFromAttributes(ident, attributes, entities, offset, ctx, realParent, parent)
+	statements[0] = assigner
+	const syncStatement = createCall(runtimeFn, [tagIdent, createRawCodeSegment(code)])
+	statements.push(ts.createExpressionStatement(syncStatement))
+	return statements
 }
+
 
 export function generateText(
 	{ items }: TextSection, offset: string, isRealLone: boolean,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ): ts.Statement[] {
 	let totalContent = ''
-	let liveness: LivenessType = BindingType.static
+	let overallLiveness: LivenessType = LivenessType.static
 
 	const [wrapCode, wrapItem]: [(s: string) => string, (s: string) => string] = items.length > 1
 		? [s => '`' + s + '`', s => '${' + s + '}']
 		: [s => s, s => s]
 
-	for (const { isCode, content } of items) {
-		const [itemLiveness, itemContent]: [LivenessType, string] = isCode
-			? content.startsWith(':')
-				? [BindingType.reactive, wrapItem(content.slice(1).trim() + '()')]
-				: [BindingType.dynamic, wrapItem(content.trim())]
-			: [BindingType.static, content]
-
+	for (const { liveness, content } of items) {
+		const finalContent = liveness === LivenessType.static ? content
+			: liveness === LivenessType.dynamic ? wrapItem(content)
+			: /*liveness === LivenessType.reactive*/ wrapItem(createReactiveCode(content))
 		// in the wolf grammar, we have information about line breaks in text sections
 		// this means that we can add empty whitespace text sections at the parser level rather than here
-		liveness = strongerLiveness(liveness, itemLiveness)
-		totalContent += itemContent
+		overallLiveness = LivenessType.max(overallLiveness, liveness)
+		totalContent += finalContent
 	}
 
-	if (isRealLone) switch (liveness) {
-		case BindingType.reactive:
+	if (isRealLone) switch (overallLiveness) {
+		case LivenessType.reactive:
 			return [createBind(ctx, realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
-		case BindingType.dynamic:
+		case LivenessType.dynamic:
 			return [createFieldAssignment(realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
-		case BindingType.static:
+		case LivenessType.static:
 			return [createFieldAssignment(realParent, 'textContent', ts.createStringLiteral(totalContent))]
 	}
 
-	switch (liveness) {
-	case BindingType.reactive:
+	switch (overallLiveness) {
+	case LivenessType.reactive:
 		const textIdent = safePrefixIdent('text', offset)
 		return [
 			createConst(
@@ -497,119 +419,72 @@ export function generateText(
 			),
 			createBind(ctx, textIdent, 'data', createRawCodeSegment(wrapCode(totalContent))),
 		]
-	case BindingType.dynamic:
+	case LivenessType.dynamic:
 		return [ts.createExpressionStatement(
 			createCall(ctx.requireRuntime('createTextNode'), [parent, createRawCodeSegment(wrapCode(totalContent))])
 		)]
-	case BindingType.static:
+	case LivenessType.static:
 		return [ts.createExpressionStatement(
 			createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral(totalContent)]),
 		)]
 	}
 }
 
-
 export function generateComponentInclusion(
-	{ name, params, entities }: ComponentInclusion,
+	{ name, props, syncs, /*nativeEvents,*/ events, slotInsertions }: ComponentInclusion,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ) {
-	const [bindings, eventHandlers, fns] = processAttributes(params)
-	if (fns.length !== 0)
-		throw new Error("node receivers don't make any sense on components")
+	const propsArgs = Object.values(props).map(({ attribute, value }) => {
+		switch (value.type) {
+			case 'empty':
+				const fakeSwitch = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createTrue()])
+				return ts.createPropertyAssignment(attribute, fakeSwitch)
+			case 'static':
+				const fakeString = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createStringLiteral(value.value)])
+				return ts.createPropertyAssignment(attribute, fakeString)
+			case 'dynamic':
+				const dynamicBinding = createDynamicBinding(value, ctx)
+				return ts.createPropertyAssignment(attribute, dynamicBinding)
+			case 'reactive':
+				return ts.createPropertyAssignment(attribute, createRawCodeSegment(value.reactiveCode.code))
+		}
+	})
 
-	const props = []
-	const syncs = []
-	const events = []
-
-	for (const [binding, [type, modifiers, code]] of bindings) switch (type) {
-		case BindingType.empty:
-			// intentionally ignore modifiers
-			// empty is automatically wrapped up in a fake boolean and put into propsArgs
-			const fakeSwitch = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createTrue()])
-			props.push(ts.createPropertyAssignment(binding, fakeSwitch))
-			break
-		case BindingType.static:
-			// intentionally ignore modifiers
-			const fakeString = createCall(ctx.requireRuntime('fakeImmutable'), [ts.createStringLiteral(code)])
-			props.push(ts.createPropertyAssignment(binding, fakeString))
-			break
-		case BindingType.dynamic:
-			const fakeImmutable = processDynamicModifiers(ctx, modifiers, code, true)
-			props.push(ts.createPropertyAssignment(binding, fakeImmutable))
-			break
-		case BindingType.reactive:
-			// intentionally ignore modifiers
-			props.push(ts.createPropertyAssignment(binding, createRawCodeSegment(code)))
-			break
-		case BindingType.sync:
-			const mutable = processSyncModifiers(ctx, modifiers, code)
-			syncs.push(ts.createPropertyAssignment(binding, mutable))
-			break
-	}
+	const syncsArgs = Object.values(syncs).map(({ attribute, modifier, code: { code } }) => {
+		switch (modifier) {
+			case undefined:
+				return ts.createPropertyAssignment(attribute, createRawCodeSegment(code))
+			case SyncModifier.fake: {
+				const sync = createCall(ctx.requireRuntime('fakeMutable'), [createRawCodeSegment(code)])
+				return ts.createPropertyAssignment(attribute, sync)
+			}
+			case SyncModifier.setter:
+				const sync = createCall(ctx.requireRuntime('fakeSetter'), [createRawCodeSegment(code)])
+				return ts.createPropertyAssignment(attribute, sync)
+		}
+	})
 
 	// TODO at some point we should allow proxying native events with a native modifier
 	// we'll generate code to receive the single return node of the component
 	// and fold its existing handler in with a runtime function
 	// however, that code will only be valid on components that have a single root,
 	// and that therefore actually do return a node
-	for (const [event, handlers] of eventHandlers) {
-		// for now, we'll simply not allow native proxying
-		if (handlers.length === 0) continue
-		if (handlers.length !== 1)
-			throw new Error("duplicate event handlers on component")
+	const eventsArgs = Object.entries(events).map(([event, handlers]) => {
+		const handler = generateHandler(handlers, true)
+		return ts.createPropertyAssignment(event, handler)
+	})
 
-		const [[modifiers, code, isBare]] = handlers
-
-		// function wrapComponentHandler() {
-		// 	return modifiers.handler || isBare ? code : `() => ${code}`
-		// }
-		const handler = createRawCodeSegment(modifiers.handler || isBare ? code : `() => ${code}`)
-		events.push(ts.createPropertyAssignment(event, handler))
-	}
-
-	const nonInsertEntities = []
-	const slotInsertions = new UniqueDict<SlotInsertion>()
-	for (const entity of entities) {
-		if (entity.type !== 'SlotInsertion') {
-			nonInsertEntities.push(entity)
-			continue
-		}
-
-		const name = entity.name || 'def'
-		const result = slotInsertions.set(name, entity)
-		if (result.is_err()) throw new Error(`duplicate slot insertion ${name}`)
-	}
-
-	if (nonInsertEntities.length > 0) {
-		const defaultInsertion = new SlotInsertion(undefined, undefined, nonInsertEntities as NonEmpty<Entity>)
-		const result = slotInsertions.set('def', defaultInsertion)
-		if (result.is_err()) throw new Error("can't use an explicit default slot insert and nodes outside of a slot insert")
-	}
-
-	const slots = slotInsertions.entries().map(([slotName, { paramsExpression, entities }]) => {
+	const slotsArgs = Object.entries(slotInsertions).map(([slotName, { paramsExpression, entities }]) => {
 		const [params, block] = generateGenericInsertableDefinition(ctx, paramsExpression, entities, false)
 		return ts.createPropertyAssignment(slotName, createArrowFunction(params, block))
 	})
 
-	// as an optimization for the call sites to avoid a bunch of empty object allocations,
-	// you can pass a reference to the same global empty object for all the groups that haven't provided anything
-	const propsArgs = props.length !== 0 ? ts.createObjectLiteral(props, false) : ctx.requireRuntime('EMPTYOBJECT')
-	const syncsArgs = syncs.length !== 0 ? ts.createObjectLiteral(syncs, false) : ctx.requireRuntime('EMPTYOBJECT')
-	const eventsArgs = events.length !== 0 ? ts.createObjectLiteral(events, false) : ctx.requireRuntime('EMPTYOBJECT')
-	const slotsArgs = slots.length !== 0 ? ts.createObjectLiteral(slots, false) : ctx.requireRuntime('EMPTYOBJECT')
-
-	return [ts.createExpressionStatement(createCall(
-		name,
-		[realParent, parent, propsArgs, syncsArgs, eventsArgs, slotsArgs],
-	))]
+	return [ts.createExpressionStatement(createCall(name, [
+		realParent, parent, efficientObject(propsArgs, ctx), efficientObject(syncsArgs, ctx),
+		efficientObject(eventsArgs, ctx), efficientObject(slotsArgs, ctx),
+	]))]
 }
 
-
-function processExpressionReactive(expression: string): [string, boolean] {
-	/*return expression.startsWith('::') ? [expression.slice(2), true]
-	:*/ return expression.startsWith(':') ? [`${expression.slice(1)}()`, true]
-	: [expression, false]
-}
 
 function generateAreaEffect(
 	statements: ts.Statement[], isRealLone: boolean, ctx: CodegenContext,
@@ -627,13 +502,17 @@ function generateAreaEffect(
 }
 
 
+function generateLiveCode({ reactive, code }: LiveCode) {
+	return reactive ? createReactiveCodeSegment(code) : createRawCodeSegment(code)
+}
+
 function createIf(
-	expression: string, entities: NonEmpty<Entity>, elseBranch: ts.Statement | undefined,
+	expression: LiveCode, entities: Entity[], elseBranch: ts.Statement | undefined,
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	realParent: ts.Identifier, parent: ts.Identifier,
 ) {
 	return ts.createIf(
-		createRawCodeSegment(expression),
+		generateLiveCode(expression),
 		ts.createBlock(generateEntities(entities, offset, isRealLone, ctx, realParent, parent), true),
 		elseBranch,
 	)
@@ -643,18 +522,7 @@ export function generateIfBlock(
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
-	// TODO I'm slowly settling on :expression for code that is simply some Immutable (so we add the actual call),
-	// and ::expression for code that is reactive, but is already applying the call
-	// that seems not terrible, and it keeps things granular
-	// it does mean a few things for this function though:
-	// - we can't know `reactive` until we've examined all the expressions and done a "strongest" computation
-	// - that means that if the first one isn't reactive, you have to iterate over them
-
-	const [usedExpression, reactive] =
-		/*expression.startsWith('::') ? [expression.slice(2), true]
-		:*/ expression.startsWith(':') ? processExpressionReactive(expression)
-		: [expression, elseIfBranches.some(([expression, ]) => expression.startsWith(':'))]
-
+	const reactive = expression.reactive || elseIfBranches.some(([b, ]) => b.reactive)
 	const [realParent, parent] = reactive
 		? resetParentIdents()
 		: [aboveRealParent, aboveParent]
@@ -670,11 +538,10 @@ export function generateIfBlock(
 
 	for (let index = elseIfBranches.length - 1; index >= 0; index--) {
 		const [expression, entities] = elseIfBranches[index]
-		const [usedExpression, ] = processExpressionReactive(expression)
-		currentElse = createIf(usedExpression, entities, currentElse, offset, false, ctx, realParent, parent)
+		currentElse = createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)
 	}
 
-	const statements = [createIf(usedExpression, entities, currentElse, offset, false, ctx, realParent, parent)]
+	const statements = [createIf(expression, entities, currentElse, offset, false, ctx, realParent, parent)]
 	return !reactive
 		? statements
 		: generateAreaEffect(statements, isRealLone, ctx, aboveRealParent, aboveParent)
@@ -686,8 +553,7 @@ export function generateEachBlock(
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
-	const [usedListExpression, reactive] = processExpressionReactive(listExpression)
-
+	const reactive = listExpression.reactive
 	const [realParent, parent] = reactive
 		? resetParentIdents()
 		: [aboveRealParent, aboveParent]
@@ -700,7 +566,7 @@ export function generateEachBlock(
 	const collectionIdent = safePrefixIdent('eachBlockCollection', offset)
 	const lengthIdent = safePrefixIdent('eachBlockCollectionLength', offset)
 	const statements = [
-		createConst(collectionIdent, createRawCodeSegment(usedListExpression)),
+		createConst(collectionIdent, generateLiveCode(listExpression)),
 		createConst(lengthIdent, ts.createPropertyAccess(collectionIdent, 'length')),
 		ts.createFor(
 			ts.createVariableDeclarationList(
@@ -730,19 +596,15 @@ function createBreakBlock(...args: Parameters<typeof generateEntities>) {
 	return ts.createBlock(statements, true)
 }
 
-function processExpressionReactiveAssignable(expression: string) {
-	const [firstSegment, ...restSegments] = expression.startsWith(':')
-		? expression.slice(1).split(/ += +/)
-		: [expression]
-	const [statements, [usedExpression, reactive]] = restSegments.length === 0
-		? [[] as ts.Statement[], processExpressionReactive(expression)]
-		: [
-			[createConst(firstSegment, createRawCodeSegment(restSegments[0] + '()'))],
-			[firstSegment, true],
-		]
-
-	const codeExpression = createRawCodeSegment(usedExpression)
-	return [statements, codeExpression, reactive] as [typeof statements, typeof codeExpression, typeof reactive]
+function generateAssignableLiveCode(expression: LiveCode | AssignedLiveCode) {
+	switch (expression.type) {
+	case 'LiveCode':
+		return t([] as ts.Statement[], generateLiveCode(expression), expression.reactive)
+	case 'AssignedLiveCode':
+		const ident = ts.createIdentifier(expression.assignedName)
+		const statements = [createConst(ident, createReactiveCodeSegment(expression.reactiveCode))]
+		return t(statements, ident, true)
+	}
 }
 
 export function generateMatchBlock(
@@ -750,14 +612,14 @@ export function generateMatchBlock(
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
-	const [statements, codeMatchExpression, reactive] = processExpressionReactiveAssignable(matchExpression)
+	const [statements, codeMatchExpression, reactive] = generateAssignableLiveCode(matchExpression)
 	const [realParent, parent] = reactive
 		? resetParentIdents()
 		: [aboveRealParent, aboveParent]
 
 	const blocks = patterns.map(([expression, entities], index) => {
 		const block = createBreakBlock(entities, nextOffset(offset, index), false, ctx, realParent, parent)
-		return ts.createCaseClause(createRawCodeSegment(expression), [block]) as ts.CaseOrDefaultClause
+		return ts.createCaseClause(generateLiveCode(expression), [block]) as ts.CaseOrDefaultClause
 	})
 	const defaultBlock = ts.createDefaultClause([
 		defaultPattern === undefined
@@ -780,7 +642,7 @@ export function generateSwitchBlock(
 	offset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ) {
-	const [statements, codeSwitchExpression, reactive] = processExpressionReactiveAssignable(switchExpression)
+	const [statements, codeSwitchExpression, reactive] = generateAssignableLiveCode(switchExpression)
 	const [realParent, parent] = reactive
 		? resetParentIdents()
 		: [aboveRealParent, aboveParent]
@@ -797,12 +659,8 @@ export function generateSwitchBlock(
 
 		const [isDefault, clause] = switchCase.isDefault
 			? [true, ts.createDefaultClause([block])]
-			: [false, ts.createCaseClause(createRawCodeSegment(switchCase.expression), [block])]
-
-		if (isDefault) {
-			if (seenDefault) throw new Error("duplicate default cases")
-			seenDefault = true
-		}
+			: [false, ts.createCaseClause(generateLiveCode(switchCase.expression), [block])]
+		seenDefault = seenDefault || isDefault
 
 		blocks.push(clause)
 	}
@@ -835,7 +693,7 @@ export function generateTemplateDefinition(
 function generateGenericInsertableDefinition(
 	ctx: CodegenContext,
 	paramsExpression: string | undefined,
-	entities: NonEmpty<Entity>,
+	entities: Entity[],
 	typed: boolean,
 ) {
 	const remainingParams = paramsExpression !== undefined

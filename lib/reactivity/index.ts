@@ -444,3 +444,21 @@ export function thunk<T>(fn: () => T, comparator?: Comparator<T>): Immutable<T> 
 	}
 	return _thunk
 }
+
+// TODO
+// ignores all mutations
+// function fakeMutable<T>(immutable: Immutable<T>) {
+// 	return new Mutable(immutable, () => {})
+// }
+
+// TODO
+// uses a custom handler as the other side
+// function fakeSetter<T>(immutable: Immutable<T>, mutator: (value: T) => void) {
+// 	return new Mutable(immutable, mutator)
+// }
+
+// TODO
+// samples an immutable an converts the value into a fake Immutable
+// function fakeInitial<T>(immutable: Immutable<T>) {
+// 	return new Fake(sample(immutable))
+// }

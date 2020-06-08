@@ -291,29 +291,29 @@ const entity_indented_multiple = `div
 	p
 	a(disabled)`
 
-describe('entity', () => it('works', () => {
-	parse(entity, entity_descriptor_simple)
+describe('entity alone', () => it('works', () => {
+	// parse(entity, entity_descriptor_simple)
 	parse(entity, entity_descriptor_attrs)
-	// parse(entity, entity_descriptor_closed)
-	// parse(entity, entity_descriptor_attrs_closed)
-	parse(entity, entity_descriptor_plus)
-	parse(entity, entity_descriptor_plus_attrs)
-	parse(entity, entity_descriptor_at)
-	parse(entity, entity_descriptor_at_attrs)
-	parse(entity, entity_descriptor_at_spaced)
-	parse(entity, entity_descriptor_at_spaced_more)
+	// // parse(entity, entity_descriptor_closed)
+	// // parse(entity, entity_descriptor_attrs_closed)
+	// parse(entity, entity_descriptor_plus)
+	// parse(entity, entity_descriptor_plus_attrs)
+	// parse(entity, entity_descriptor_at)
+	// parse(entity, entity_descriptor_at_attrs)
+	// parse(entity, entity_descriptor_at_spaced)
+	// parse(entity, entity_descriptor_at_spaced_more)
 
-	parse(entity, entity_simple)
-	parse(entity, entity_simple_spaced)
-	parse(entity, entity_simple_text)
-	parse(entity, entity_simple_spaced_text)
-	parse(entity, entity_text_bar)
-	parse(entity, entity_text_indented)
-	parse(entity, entity_text_indented_multiple)
-	parse(entity, entity_indented)
-	parse(entity, entity_indented_multiple)
+	// parse(entity, entity_simple)
+	// parse(entity, entity_simple_spaced)
+	// parse(entity, entity_simple_text)
+	// parse(entity, entity_simple_spaced_text)
+	// parse(entity, entity_text_bar)
+	// parse(entity, entity_text_indented)
+	// parse(entity, entity_text_indented_multiple)
+	// parse(entity, entity_indented)
+	// parse(entity, entity_indented_multiple)
 
-	bad(entity, 'div:p')
+	// bad(entity, 'div:p')
 }))
 
 describe('wolf', () => it('works', () => {

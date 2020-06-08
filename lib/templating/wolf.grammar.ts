@@ -4,7 +4,7 @@ import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
 import { Token, RawToken, Span, Spanned, TokenSpanned } from 'kreia/dist/runtime/lexer'
 
 import { NonEmpty } from '../utils'
-import { Context, ParseResult } from './utils'
+import { Context, ParseResult, unspan } from './utils'
 
 import {
 	Entity, Directive, LivenessType,
@@ -166,19 +166,19 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 	return or(
 		c((): TagDescriptor => {
 			const { tag_name, span, metas } = tag()
-			const attributes_list = maybe(attributes, _NFQGh) || []
+			const attributesListResult: ParseResult<Spanned<Attribute>>[] = maybe(attributes, _NFQGh) || []
 			// TODO this would allow children of a self-closing tag
 			// maybe(tok.slash)
 
-			return { type: 'tag', ident: tag_name, span, metas, attributes: attributes_list }
+			return { type: 'tag', ident: tag_name, span, metas, attributes: attributesListResult }
 		}, _Z1s8tjH),
 
 		c((): InclusionDescriptor => {
 			const ident = consume(tok.plus_identifier)[0]
-			const attributes_list = maybe(attributes, _NFQGh) || []
+			const attributesListResult: ParseResult<Spanned<Attribute>>[] = maybe(attributes, _NFQGh) || []
 
 			const name = ident.content.slice(1)
-			return { type: 'inclusion', name, span: ident.span, params: attributes_list }
+			return { type: 'inclusion', name, span: ident.span, params: attributesListResult }
 		}, _ZiAKh1),
 
 		c((): DirectiveDescriptor => {
@@ -188,7 +188,7 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 				consume(tok.open_paren)
 				const segments = many(paren_code, _Z1O2lKj) as Spanned<string>[]
 				consume(tok.close_paren)
-				return segments.map(s => s.item).join('')
+				return segments.map(unspan).join('')
 			}, _2w47cC)
 
 			const command = ident.content.slice(1)
@@ -240,10 +240,10 @@ export function meta() {
 	return meta_item
 }
 
-export function attributes(): ParseResult<Attribute>[] {
+export function attributes(): ParseResult<Spanned<Attribute>>[] {
 	consume(tok.open_paren)
 	const attribute_results = or(
-		c((): ParseResult<Attribute>[] => {
+		c((): ParseResult<Spanned<Attribute>>[] => {
 			consume(tok.indent)
 			const attribute_results = lines(() => {
 				const result = attribute_line()
@@ -251,10 +251,10 @@ export function attributes(): ParseResult<Attribute>[] {
 				return result
 			}, _Z1F9dGs)
 			consume(tok.deindent, tok.indent_continue)
-			return ([] as ParseResult<Attribute>[]).concat(...attribute_results)
+			return ([] as ParseResult<Spanned<Attribute>>[]).concat(...attribute_results)
 		}, _Z1owlnn),
 
-		c((): ParseResult<Attribute>[] => {
+		c((): ParseResult<Spanned<Attribute>>[] => {
 			maybe(tok.large_space)
 			const attribute_results = attribute_line()
 			maybe(tok.large_space)
@@ -299,7 +299,7 @@ export function code_segment() {
 	const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
 	const close = consume(tok.close_bracket)[0]
 
-	return Spanned(new AttributeCode(false, segments.map(s => s.item).join('')), Span.around(open, close))
+	return Spanned(new AttributeCode(false, segments.map(unspan).join('')), Span.around(open, close))
 }
 
 export function code(): Spanned<string> {
@@ -308,7 +308,7 @@ export function code(): Spanned<string> {
 			const open = consume(tok.open_bracket)[0]
 			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
 			const close = consume(tok.close_bracket)[0]
-			return Spanned(`{${segments.map(s => s.item).join('')}}`, Span.around(open, close))
+			return Spanned(`{${segments.map(unspan).join('')}}`, Span.around(open, close))
 		}, _J5AgF),
 		c(tok.str), c(tok.not_bracket),
 	)
@@ -321,7 +321,7 @@ export function paren_code(): Spanned<string> {
 			const open = consume(tok.open_paren)[0]
 			const segments = maybe_many(paren_code, _Z1O2lKj) || [] as Spanned<string>[]
 			const close = consume(tok.close_paren)[0]
-			return Spanned(`(${segments.map(s => s.item).join('')})`, Span.around(open, close))
+			return Spanned(`(${segments.map(unspan).join('')})`, Span.around(open, close))
 		}, _NFQGh),
 		c(tok.not_paren),
 	)
@@ -335,7 +335,7 @@ export function text() {
 			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
 			consume(tok.close_double_bracket)
 
-			return parseDynamicTextSection(segments.map(s => s.item).join(''))
+			return parseDynamicTextSection(segments.map(unspan).join(''))
 		}, _Z2cNPgr),
 		c(tok.not_double_bracket),
 	)

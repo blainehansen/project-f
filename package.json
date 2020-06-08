@@ -13,6 +13,7 @@
 
 		"test": "mocha lib/**/*.spec.ts",
 		"coverage": "nyc npm run test",
+		"test:dev": "mocha lib/templating/wolf.grammar.spec.ts",
 		"test:examples": "mocha examples/index.spec.ts",
 		"test:reactivity": "mocha lib/reactivity/**/*.spec.ts",
 		"test:dom": "mocha -r jsdom-global/register lib/dom/**/*.spec.ts",

@@ -2,10 +2,11 @@ import '@ts-std/extensions/dist/array'
 import { Span, Spanned } from 'kreia/dist/runtime/lexer'
 import { UniqueDict, UniqueValue, DefaultDict } from '@ts-std/collections'
 
-import { Context, Warnings, ParseResult } from './utils'
-import { splitGuard, Dict, NonEmpty, OmitVariants } from '../utils'
+import { Context, Warnings, ParseResult, unspan } from './utils'
+import { splitGuard, Dict, NonEmpty, OmitVariants, exec } from '../utils'
 import {
-	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
 	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
 	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
@@ -64,7 +65,17 @@ export function parseComponentDefinition(
 	return ctx.Ok(() => new ComponentDefinition(props, syncs, events, slots, createFn, entities))
 }
 
-export type InclusionDescriptor = { type: 'inclusion', name: string, span: Span, params: Spanned<Attribute>[] }
+// function cleanResults<T>(ctx: Context<unknown>, results: ParseResult<T>[]): ParseResult<T[]> {
+// 	for (const result of results) {
+// 		const r = ctx.subsume(result)
+// 		if (r.is_err())
+// 	}
+// }
+
+export type InclusionDescriptor = {
+	type: 'inclusion', name: string, span: Span,
+	params: ParseResult<Spanned<Attribute>>[],
+}
 export function parseComponentInclusion(
 	{ name, span: nameSpan, params: attributes }: InclusionDescriptor,
 	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
@@ -149,8 +160,28 @@ function isInertBindingValue(v: BindingValue): v is InertBindingValue {
 	return v.type !== 'empty' && v.type !== 'reactive'
 }
 
-export function parseLiveness(content: string): [Exclude<LivenessType, LivenessType.static>, string] {
-	return content.startsWith(':') ? [LivenessType.reactive, content.slice(1)] : [LivenessType.dynamic, content]
+export function parseReactive(expression: string): [boolean, string] {
+	return expression.startsWith(':') ? [true, expression.slice(1)] : [false, expression]
+}
+export function parseLiveCode(expression: string): LiveCode {
+	const [reactive, code] = parseReactive(expression)
+	return new LiveCode(reactive, code)
+}
+export function parseLiveness(expression: string): [Exclude<LivenessType, LivenessType.static>, string] {
+	const [reactive, code] = parseReactive(expression)
+	return [reactive ? LivenessType.reactive : LivenessType.dynamic, code]
+}
+
+export function AssignableLiveCode(rawExpression: string) {
+	const [reactive, expression] = parseReactive(rawExpression)
+	if (!reactive)
+		return new LiveCode(reactive, expression)
+
+	const [firstSegment, ...restSegments] = expression.split(/ += +/)
+	if (restSegments.length === 0)
+		return new LiveCode(reactive, expression)
+
+	return new AssignedLiveCode(firstSegment, restSegments.join(' = '))
 }
 
 export function parseDynamicMeta(isClass: true, rawContent: string): ClassMeta
@@ -177,7 +208,11 @@ export function parseAttribute(
 	const [value, valueSpan] = valueSpanned
 		? [valueSpanned.item, valueSpanned.span]
 		: [undefined, undefined]
-	const ctx = new Context<Attribute>()
+	const totalSpan = valueSpan
+		? Span.around(rawAttributeSpan, valueSpan)
+		: rawAttributeSpan
+
+	const ctx = new Context<Spanned<Attribute>>()
 	const [attribute, ...modifiersList] = rawAttribute.split('|')
 	const modifiersUnique = new UniqueDict<true>()
 	for (const modifier of modifiersList) {
@@ -190,7 +225,7 @@ export function parseAttribute(
 		if (!isAttributeCode(value))
 			return ctx.Err('REQUIRES_CODE', valueSpan || rawAttributeSpan, 'node receivers')
 		Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'node receivers')
-		return ctx.Ok(() => new ReceiverAttribute(value))
+		return ctx.Ok(() => Spanned(new ReceiverAttribute(value), totalSpan))
 	}
 
 	// TODO remember that if an attribute contains dashes it's a dom attribute instead of property, and should be set differently
@@ -214,7 +249,7 @@ export function parseAttribute(
 			ctx.warn('REDUNDANT_HANDLER_BARE', rawAttributeSpan)
 		delete modifiers.handler
 		Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'events')
-		return ctx.Ok(() => new EventAttribute(sliced, variety, code))
+		return ctx.Ok(() => Spanned(new EventAttribute(sliced, variety, code), totalSpan))
 
 	case '!': {
 		if (!isAttributeCode(value))
@@ -225,37 +260,41 @@ export function parseAttribute(
 		const modifier = modifiers.fake ? SyncModifier.fake
 			: modifiers.setter ? SyncModifier.setter
 			: undefined
+		// TODO possibly get mad about value.isBare when modifiers.setter is also true?
 		delete modifiers.fake; delete modifiers.setter
 		Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'syncs')
 
-		return ctx.Ok(() => new SyncAttribute(sliced, modifier, value))
+		return ctx.Ok(() => Spanned(new SyncAttribute(sliced, modifier, value), totalSpan))
 	}
 
 	case ':': {
 		if (!isAttributeCode(value))
 			return ctx.Err('REQUIRES_CODE', valueSpan || rawAttributeSpan, 'reactive bindings')
 		Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'reactive bindings')
-		return ctx.Ok(() => new BindingAttribute(sliced, { type: 'reactive', reactiveCode: value }))
+		return ctx.Ok(() => Spanned(new BindingAttribute(sliced, { type: 'reactive', reactiveCode: value }), totalSpan))
 	}
 
 	default: switch (typeof value) {
 		case 'undefined':
 			Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'attributes')
-			return ctx.Ok(() => new BindingAttribute(attribute, { type: 'empty' }))
+			return ctx.Ok(() => Spanned(new BindingAttribute(attribute, { type: 'empty' }), totalSpan))
 		case 'string':
 			Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'attributes')
-			return ctx.Ok(() => new BindingAttribute(attribute, { type: 'static', value }))
+			return ctx.Ok(() => Spanned(new BindingAttribute(attribute, { type: 'static', value }), totalSpan))
 		default:
 			const initialModifier = modifiers.initial || false
 			delete modifiers.initial
 			Warnings.checkExtraneousModifiers(ctx, rawAttributeSpan, modifiers, 'bindings')
-			return ctx.Ok(() => new BindingAttribute(attribute, { type: 'dynamic', code: value, initialModifier }))
+			return ctx.Ok(() => Spanned(new BindingAttribute(attribute, { type: 'dynamic', code: value, initialModifier }), totalSpan))
 	}}
 }
 
 
 const leafTags = ['br', 'input']
-export type TagDescriptor = { type: 'tag', ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[], attributes: Spanned<Attribute>[] }
+export type TagDescriptor = {
+	type: 'tag', ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[],
+	attributes: ParseResult<Spanned<Attribute>>[],
+}
 export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescriptor, entities: Entity[]) {
 	const ctx = new Context<Html>()
 
@@ -317,7 +356,7 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 		const multipleBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'multiple')
 		const multipleBinding = multipleBindingAttribute ? multipleBindingAttribute.item.value : undefined
 		if (!multipleBinding || multipleBinding.type === 'empty')
-			return ctx.Ok(() => new SyncedSelect(sync.code, !!multipleBinding, tagAttributes))
+			return ctx.Ok(() => new SyncedSelect(sync.code, !!multipleBinding, tagAttributes, entities))
 		return ctx.Err('INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE', multipleBindingAttribute ? multipleBindingAttribute.span : syncSpan)
 
 	default:
@@ -332,14 +371,22 @@ export function parseTagAttributes(
 	const ctx = new Context<TagAttributes>()
 
 	const idMeta = new UniqueValue<[IdMeta, Span]>()
-	const classMetas = [] as ClassMeta[]
+	// const classMetas = [] as ClassMeta[]
+	const classMetas = new UniqueDict<[ClassMeta, Span]>()
+	// const staticClasses = new UniqueDict<Span>()
 	for (const { item: meta, span } of metas) switch (meta.type) {
-	case 'IdMeta':
+	case 'IdMeta': {
 		const result = idMeta.set([meta, span])
 		if (result.is_err())
 			ctx.warn('TAG_DUPLICATE_ID', span, result.error[1][1])
+		break
+	}
 	case 'ClassMeta':
-		classMetas.push()
+		const result = classMetas.set(`${meta.liveness}${meta.value}`, [meta, span])
+		if (result.is_err()) {
+			ctx.warn('TAG_DUPLICATE_CLASS_META', span, result.error[2][1])
+			continue
+		}
 	}
 
 	const bindings = new UniqueDict<[BindingAttribute, Span]>()
@@ -347,6 +394,11 @@ export function parseTagAttributes(
 	const receivers: ReceiverAttribute[] = []
 	for (const { item: attribute, span } of attributes) switch (attribute.type) {
 	case 'BindingAttribute': {
+		if (['class', 'className'].includes(attribute.attribute))
+			ctx.error('TAG_CLASS_ATTRIBUTE', span)
+		if (attribute.attribute === 'id')
+			ctx.error('TAG_ID_ATTRIBUTE', span)
+
 		const result = bindings.set(attribute.attribute, [attribute, span])
 		if (result.is_err())
 			ctx.error('TAG_DUPLICATE_BINDING', span, result.error[2][1])
@@ -365,7 +417,7 @@ export function parseTagAttributes(
 
 	const bindingsDict = bindings.entries().map(([k, [v, ]]) => [k, v] as [string, BindingAttribute]).entries_to_dict()
 	return ctx.Ok(() => new TagAttributes(
-		idMeta.get().change(([id, ]) => id).to_undef(), classMetas, bindingsDict,
+		idMeta.get().change(unspan).to_undef(), classMetas.values().map(unspan), bindingsDict,
 		events.into_dict() as Dict<NonEmpty<EventAttribute>>, receivers,
 	))
 }
@@ -389,11 +441,11 @@ function processInsertableCode(
 export type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
 export type InProgressIf = {
 	type: 'if', span: Span, expression: string, entities: Entity[],
-	elseIfBranches: [string, Entity[]][], elseBranch: Entity[] | undefined,
+	elseIfBranches: [LiveCode, Entity[]][], elseBranch: Entity[] | undefined,
 }
 export type InProgressMatch = {
 	type: 'match', span: Span, matchExpression: string,
-	patterns: [string, Entity[]][], defaultPattern: Entity[] | undefined,
+	patterns: [LiveCode, Entity[]][], defaultPattern: Entity[] | undefined,
 }
 export type InProgressSwitch = {
 	type: 'switch', span: Span, switchExpression: string,
@@ -415,19 +467,19 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 		switch (inProgressDirective.type) {
 			case 'if': {
 				const { expression, span, entities, elseIfBranches, elseBranch } = inProgressDirective
-				giveEntities.push(Spanned(new IfBlock(expression, entities, elseIfBranches, elseBranch), span))
+				giveEntities.push(Spanned(new IfBlock(parseLiveCode(expression), entities, elseIfBranches, elseBranch), span))
 				break
 			}
 			case 'match': {
 				const { matchExpression, span, patterns, defaultPattern } = inProgressDirective
-				giveEntities.push(Spanned(new MatchBlock(matchExpression, patterns, defaultPattern), span))
+				giveEntities.push(Spanned(new MatchBlock(AssignableLiveCode(matchExpression), patterns, defaultPattern), span))
 				break
 			}
 			case 'switch':
 				const { switchExpression, span, cases } = inProgressDirective
 				if (cases.length === 0)
 					return ctx.error('SWITCH_NO_CASES', span)
-				giveEntities.push(Spanned(new SwitchBlock(switchExpression, cases), span))
+				giveEntities.push(Spanned(new SwitchBlock(AssignableLiveCode(switchExpression), cases), span))
 				break
 		}
 	}
@@ -453,7 +505,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 			const span = inProgressTextSection.length === 1
 				? inProgressTextSection[0].span
 				: Span.around(inProgressTextSection[0].span, inProgressTextSection[inProgressTextSection.length - 1].span)
-			giveEntities.push(Spanned(new TextSection(inProgressTextSection.map(s => s.item) as NonEmpty<TextItem>), span))
+			giveEntities.push(Spanned(new TextSection(inProgressTextSection.map(unspan) as NonEmpty<TextItem>), span))
 			inProgressTextSection = undefined
 		}
 
@@ -480,7 +532,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 					return ctx.Err('IF_UNPRECEDED_ELSEIF', span)
 				if (code === undefined)
 					return ctx.Err('IF_NO_EXPRESSION', span)
-				inProgressDirective.elseIfBranches.push([code, entities])
+				inProgressDirective.elseIfBranches.push([parseLiveCode(code), entities])
 				break
 			case 'else':
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'if')
@@ -506,7 +558,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 				if (code === undefined)
 					return ctx.Err('EACH_NO_EXPRESSION', span)
 				const [paramsExpression, listExpression] = processEachBlockCode(code)
-				giveEntities.push(Spanned(new EachBlock(paramsExpression, listExpression, entities), span))
+				giveEntities.push(Spanned(new EachBlock(paramsExpression, parseLiveCode(listExpression), entities), span))
 				break
 
 			case 'match':
@@ -522,7 +574,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 					return ctx.Err('MATCH_UNPRECEDED_WHEN', span)
 				if (code === undefined)
 					return ctx.Err('WHEN_NO_EXPRESSION', span)
-				inProgressDirective.patterns.push([code, entities])
+				inProgressDirective.patterns.push([parseLiveCode(code), entities])
 				break
 
 			case 'switch':
@@ -539,7 +591,7 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 					return ctx.Err('SWITCH_UNPRECEDED_CASE', span)
 				if (code === undefined)
 					return ctx.Err('CASE_NO_EXPRESSION', span)
-				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', code, entities))
+				inProgressDirective.cases.push(new SwitchCase(command === 'fallcase', parseLiveCode(code), entities))
 				break
 			case 'falldefault':
 				if (inProgressDirective === undefined || inProgressDirective.type !== 'switch')

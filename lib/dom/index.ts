@@ -1,15 +1,24 @@
-import { NonEmpty, NonLone, Overwrite, KeysOfType } from '../utils'
-
 import { effect, statefulEffect, Mutable, Immutable } from '../reactivity'
+import { NonEmpty, NonLone, Overwrite, KeysOfType, Falsey } from '../utils'
 
 
 export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
 	fn(node)
 }
 
-export function joinClass(...classes: NonEmpty<string | undefined | null | false>) {
+export function joinClass(...classes: NonLone<string | Falsey>) {
 	return classes.filter(c => !!c).join(' ')
 }
+// export function joinReactiveClass(
+// 	...classes: NonLone<Immutable<string | Falsey> | string | Falsey>
+// ) {
+// 	const actual = classes.filter(c => !!c)
+// 	if (actual.length === 0) throw new Error()
+
+// 	return derived(() => {
+// 		//
+// 	}, )
+// }
 
 export function createElement<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
@@ -28,6 +37,40 @@ export function createElementClass<K extends keyof HTMLElementTagNameMap>(
   const el = document.createElement(tagName)
   el.className = className
   parent.appendChild(el)
+  return el
+}
+export function createElementClasses<K extends keyof HTMLElementTagNameMap>(
+	parent: Node,
+	tagName: K,
+	...classes: (string | Falsey)[]
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tagName)
+  el.className = classes.filter(c => !!c).join(' ')
+  parent.appendChild(el)
+  return el
+}
+export function createElementReactiveClasses(
+	parent: Node,
+	tagName: K,
+	...classes: (Immutable<string | Falsey> | string | Falsey)[]
+) {
+  const el = document.createElement(tagName)
+  parent.appendChild(el)
+
+	const immutables = [] as Immutable<string | Falsey>
+	const strings = [] as string[]
+	const classesLength = classes.length
+	for (let index = 0; index < classesLength; index++) {
+		const item = classes[index]
+		if (!item) continue
+		if (typeof item === 'string') strings.push(item)
+		else immutables.push(item)
+	}
+	const staticClassName = strings.join(' ')
+	watchArray(immutables, values => {
+		el.className = staticClassName + ' ' + values.filter(c => !!c).join(' ')
+	})
+
   return el
 }
 

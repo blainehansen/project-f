@@ -17,6 +17,7 @@ export function splitGuard<T, U extends T>(arr: T[], fn: (v: T) => v is U): [U[]
 
 export type Dict<T> = { [key: string]: T }
 export type Primitive = string | number | boolean | null | undefined
+export type Falsey = undefined | null | false
 export type OnlyAllow<A, E> = A extends E ? A : never
 export type Comparator<T> = (left: T, right: T) => boolean
 

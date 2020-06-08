@@ -1,4 +1,4 @@
-import { Dict, NonEmpty, OmitVariants } from '../utils'
+import { Dict, NonEmpty, OmitVariants, PickVariants } from '../utils'
 
 export const CTXFN: unique symbol = Symbol()
 export type CTXFN = typeof CTXFN
@@ -47,6 +47,22 @@ export class TagAttributes {
 }
 
 export enum LivenessType { static, dynamic, reactive }
+export namespace LivenessType {
+	export function max(a: LivenessType, b: LivenessType) {
+		switch (a) {
+		case LivenessType.static:
+			return b
+		case LivenessType.dynamic:
+			return b === LivenessType.reactive ? b : a
+		case LivenessType.reactive:
+			return a
+		}
+	}
+
+	// export function strongest(values: Iterable<>) {
+	// 	let strongest =
+	// }
+}
 export class IdMeta {
 	readonly type = 'IdMeta' as const
 	constructor(
@@ -143,6 +159,7 @@ export class SyncedSelect {
 		readonly mutable: AttributeCode,
 		readonly isMultiple: boolean,
 		readonly attributes: TagAttributes,
+		readonly entities: Entity[],
 	) {}
 }
 
@@ -192,12 +209,27 @@ export class SyncAttribute {
 	) {}
 }
 
+export class LiveCode {
+	readonly type = 'LiveCode' as const
+	constructor(
+		readonly reactive: boolean,
+		readonly code: string,
+	) {}
+}
+export class AssignedLiveCode {
+	readonly type = 'AssignedLiveCode' as const
+	constructor(
+		readonly assignedName: string,
+		readonly reactiveCode: string,
+	) {}
+}
+
 export class IfBlock {
 	readonly type = 'IfBlock' as const
 	constructor(
-		readonly expression: string,
+		readonly expression: LiveCode,
 		readonly entities: Entity[],
-		readonly elseIfBranches: [string, Entity[]][],
+		readonly elseIfBranches: [LiveCode, Entity[]][],
 		readonly elseBranch: Entity[] | undefined,
 	) {}
 }
@@ -218,7 +250,7 @@ export class EachBlock {
 	readonly type = 'EachBlock' as const
 	constructor(
 		readonly params: { variableCode: string, indexCode: string | undefined },
-		readonly listExpression: string,
+		readonly listExpression: LiveCode,
 		readonly entities: Entity[],
 		// readonly keyExpression: string | undefined,
 		// readonly emptyBranch: NonEmpty<Entity> | undefined,
@@ -228,9 +260,8 @@ export class EachBlock {
 export class MatchBlock {
 	readonly type = 'MatchBlock' as const
 	constructor(
-		readonly matchExpression: string,
-		// readonly patterns: [string, Entity[]][],
-		readonly patterns: [string, Entity[]][],
+		readonly matchExpression: LiveCode | AssignedLiveCode,
+		readonly patterns: [LiveCode, Entity[]][],
 		readonly defaultPattern: Entity[] | undefined,
 	) {}
 }
@@ -238,7 +269,7 @@ export class MatchBlock {
 export class SwitchBlock {
 	readonly type = 'SwitchBlock' as const
 	constructor(
-		readonly switchExpression: string,
+		readonly switchExpression: LiveCode | AssignedLiveCode,
 		readonly cases: (SwitchCase | SwitchDefault)[],
 	) {}
 }
@@ -246,7 +277,7 @@ export class SwitchCase {
 	readonly isDefault = false
 	constructor(
 		readonly isFallthrough: boolean,
-		readonly expression: string,
+		readonly expression: LiveCode,
 		readonly entities: Entity[],
 	) {}
 }

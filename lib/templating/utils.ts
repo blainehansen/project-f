@@ -1,5 +1,5 @@
-import { Span } from 'kreia/dist/runtime/lexer'
 import { Result, Ok, Err } from '@ts-std/monads'
+import { Span, Spanned } from 'kreia/dist/runtime/lexer'
 
 import { NonEmpty, Dict, KeysOfType } from '../utils'
 
@@ -21,6 +21,10 @@ export type KeysOTypeReturners<T, U> = { [K in keyof T]: T[K] extends (...args: 
 export type ArgsOfTypeReturner<T, U, K extends KeysOTypeReturners<T, U>> = T[K] extends (...args: infer A) => U ? A : never
 function unsafePass<T, U, K extends KeysOTypeReturners<T, U>>(t: T, k: K, args: ArgsOfTypeReturner<T, U, K>): U {
 	return (t[k] as ((...args: any[]) => U))(...args)
+}
+
+export function unspan<T>(s: Spanned<T> | [T, Span]): T {
+	return Array.isArray(s) ? s[0] : s.item
 }
 
 export abstract class ParseContext<T> {
@@ -294,6 +298,9 @@ export const Errors = {
 	INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE: (span: Span) => ParseError(span, 'INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE', ""),
 	INVALID_SYNCED_TAG: (span: Span) => ParseError(span, 'INVALID_SYNCED_TAG', ""),
 	TAG_DUPLICATE_BINDING: (_first: Span, _second: Span) => ParseError(_second, 'TAG_DUPLICATE_BINDING', ""),
+	TAG_CLASS_ATTRIBUTE: (span: Span) => ParseError(span, 'TAG_CLASS_ATTRIBUTE', ""),
+	TAG_ID_ATTRIBUTE: (span: Span) => ParseError(span, 'TAG_ID_ATTRIBUTE', ""),
+
 	COMPONENT_INCLUSION_DUPLICATE_ARGUMENT: (_first: Span, _second: Span) => ParseError(_second, 'COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', ""),
 	COMPONENT_INCLUSION_RECEIVER: (span: Span) => ParseError(span, 'COMPONENT_INCLUSION_RECEIVER', ""),
 	INVALID_SLOT_USAGE: (span: Span) => ParseError(span, 'INVALID_SLOT_USAGE', ""),
@@ -349,9 +356,10 @@ export const Warnings = {
 	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE',
 		"",
 	),
+	TAG_DUPLICATE_ID: (_first: Span, _second: Span) => ParseWarning(_second, 'TAG_DUPLICATE_ID', ""),
+	TAG_DUPLICATE_CLASS_META: (_first: Span, _second: Span) => ParseWarning(_second, 'TAG_DUPLICATE_CLASS_META', ""),
 
 	COMPONENT_USAGE_REDUNDANT_FALLBACK: (span: Span) => ParseWarning(span, 'COMPONENT_USAGE_REDUNDANT_FALLBACK', ""),
-	TAG_DUPLICATE_ID: (_first: Span, _second: Span) => ParseWarning(_second, 'TAG_DUPLICATE_ID', ""),
 
 	COMPONENT_NOT_EXPORTED: (span: Span) => ParseWarning(span, 'COMPONENT_NOT_EXPORTED',
 		"It's a good idea to export `Component` type declarations.",
