@@ -7,15 +7,17 @@ import { NonEmpty } from '../utils'
 import { Context, ParseResult, unspan } from './utils'
 
 import {
-	Entity, Directive, LivenessType,
-	ComponentDefinition, Tag, IdMeta, ClassMeta, Attribute, AttributeCode, TextSection, TextItem,
-	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
+	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
+	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
+	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
 } from './ast'
 import {
 	parseAttribute, parseHtml, parseTagAttributes, parseComponentInclusion,
 	parseDynamicMeta, parseMeta, parseDynamicTextSection, parseTextSection,
-	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, NotReadyEntity, parseEntities,
+	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, DirectivePending, NotReadyEntity, parseEntities,
 } from './ast.parse'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
@@ -91,7 +93,7 @@ const { _Z2nLjPg, _17D7Of, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ
 // export type PlusHandler = (name: string, code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 // export type AtHandler = (code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 
-export function wolf() {
+export function wolf(): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> {
 	const items = lines(() => {
 		return or(
 			c(entity, _Z2nLjPg),
@@ -102,28 +104,31 @@ export function wolf() {
 	return parseEntities(items)
 }
 
-export function entity(): ParseResult<NotReadyEntity> {
+export function entity(): ParseResult<Spanned<Entity> | DirectivePending> {
 	return or(
-		c(() => {
-			const ctx = new Context<NotReadyEntity>()
+		c((): ParseResult<Spanned<Entity> | DirectivePending> => {
+			const ctx = new Context<Spanned<Entity> | DirectivePending>()
 			const entity_item = entity_descriptor()
 			const entitiesResult = ctx.subsume(maybe_or(
-				c(() => {
+				c((): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> => {
 					consume(tok.colon, tok.large_space)
 					return parseEntities([entity()])
 				}, _6PPuF),
 
-				c(() => {
+				c((): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> => {
 					consume(tok.indent)
 					const entitiesResult = wolf()
 					consume(tok.deindent)
 					return entitiesResult
 				}, _Z1owlnn),
 
-				c(() => {
+				c((): ParseResult<Spanned<TextSection>[]> => {
 					consume(tok.space)
-					const children = many(text, _Z2evaAJ)
-					return Context.Ok([new TextSection(children) as Entity])
+					const children: NonEmpty<Spanned<TextItem>> = many(text, _Z2evaAJ)
+					const span = children.length === 1
+						? children[0].span
+						: Span.around(children[0].span, children[children.length - 1].span)
+					return Context.Ok([Spanned(new TextSection(children.map(unspan)) as NonEmpty<TextItem>, span)])
 				}, _7U1Cw),
 			) || Ok({ value: [], warnings: [] }))
 			if (entitiesResult.is_err()) return ctx.subsumeFail(entitiesResult.error)
@@ -131,7 +136,7 @@ export function entity(): ParseResult<NotReadyEntity> {
 
 			switch (entity_item.type) {
 				case 'tag':
-				return parseHtml(entity_item, entities)
+					return parseHtml(entity_item, entities)
 				case 'inclusion':
 					return parseComponentInclusion(entity_item, entities)
 				case 'directive':
@@ -139,7 +144,7 @@ export function entity(): ParseResult<NotReadyEntity> {
 			}
 		}, _ZCgW0s),
 
-		c((): ParseResult<NotReadyEntity> => {
+		c((): ParseResult<NonEmpty<Spanned<TextItem>>> => {
 			consume(tok.text_bar)
 			const text_items = or(
 				c(() => {
@@ -148,7 +153,7 @@ export function entity(): ParseResult<NotReadyEntity> {
 						return many(text, _Z2evaAJ)
 					}, _Z1F9dGs)
 					consume(tok.deindent)
-					return ([] as TextItem[]).concat(...text_items) as NonEmpty<TextItem>
+					return ([] as Spanned<TextItem>[]).concat(...text_items) as NonEmpty<Spanned<TextItem>>
 				}, _Z1owlnn),
 
 				c(() => {
@@ -165,12 +170,12 @@ export function entity(): ParseResult<NotReadyEntity> {
 export function entity_descriptor(): TagDescriptor | InclusionDescriptor | DirectiveDescriptor {
 	return or(
 		c((): TagDescriptor => {
-			const { tag_name, span, metas } = tag()
+			const { ident, span, metas } = tag()
 			const attributesListResult: ParseResult<Spanned<Attribute>>[] = maybe(attributes, _NFQGh) || []
 			// TODO this would allow children of a self-closing tag
 			// maybe(tok.slash)
 
-			return { type: 'tag', ident: tag_name, span, metas, attributes: attributesListResult }
+			return { type: 'tag', ident, span, metas, attributes: attributesListResult }
 		}, _Z1s8tjH),
 
 		c((): InclusionDescriptor => {
@@ -197,20 +202,20 @@ export function entity_descriptor(): TagDescriptor | InclusionDescriptor | Direc
 	)
 }
 
-type TagItem = { tag_name: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[] }
-export function tag(): TagItem {
+type FinalizableTag = { ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[] }
+export function tag(): FinalizableTag {
 	return or(
-		c((): TagItem => {
+		c((): FinalizableTag => {
 			const tag_item = consume(tok.tag_identifier)[0]
 			const metas = maybe_many(meta, _1VQg9s) || [] as Spanned<IdMeta | ClassMeta>[]
 			const span = metas.length > 0 ? Span.around(tag_item, metas[metas.length - 1].span) : tag_item.span
-			return { tag_name: tag_item.content, span, metas }
+			return { ident: tag_item.content, span, metas }
 		}, _Z1yGH1N),
 
-		c((): TagItem => {
+		c((): FinalizableTag => {
 			const metas = many(meta, _1VQg9s) as Spanned<IdMeta | ClassMeta>[]
 			const span = metas.length > 1 ? Span.around(metas[0].span, metas[metas.length - 1].span) : metas[0].span
-			return { tag_name: 'div', span, metas }
+			return { ident: 'div', span, metas }
 		}, _1VQg9s),
 	)
 }
@@ -266,14 +271,14 @@ export function attributes(): ParseResult<Spanned<Attribute>>[] {
 	return attribute_results
 }
 
-export function attribute_line() {
+export function attribute_line(): ParseResult<Spanned<Attribute>>[] {
 	const results = [attribute()]
-	const rest_results = maybe_many(() => {
+	maybe_many(() => {
 		consume(tok.comma)
 		results.push(attribute())
 	}, _6PPJc)
 
-	return results.concat(rest_results || [])
+	return results
 }
 
 export function attribute() {
@@ -328,20 +333,20 @@ export function paren_code(): Spanned<string> {
 	return flatten_string(item)
 }
 
-export function text() {
+export function text(): Spanned<TextItem> {
 	const item = or(
 		c(() => {
-			consume(tok.open_double_bracket)
+			const open = consume(tok.open_double_bracket)[0]
 			const segments = maybe_many(code, _14hbOa) || [] as Spanned<string>[]
-			consume(tok.close_double_bracket)
+			const close = consume(tok.close_double_bracket)[0]
 
-			return parseDynamicTextSection(segments.map(unspan).join(''))
+			return Spanned(parseDynamicTextSection(segments.map(unspan).join('')), Span.around(open, close))
 		}, _Z2cNPgr),
 		c(tok.not_double_bracket),
 	)
 
 	return Array.isArray(item)
-		? parseTextSection(item[0].content)
+		? Spanned(parseTextSection(item[0].content), item[0].span)
 		: item
 }
 

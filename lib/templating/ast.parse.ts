@@ -65,22 +65,29 @@ export function parseComponentDefinition(
 	return ctx.Ok(() => new ComponentDefinition(props, syncs, events, slots, createFn, entities))
 }
 
-// function cleanResults<T>(ctx: Context<unknown>, results: ParseResult<T>[]): ParseResult<T[]> {
-// 	for (const result of results) {
-// 		const r = ctx.subsume(result)
-// 		if (r.is_err())
-// 	}
-// }
+function cleanResults<T>(results: ParseResult<T>[]) {
+	const ctx = new Context<T[]>()
+	const items = [] as T[]
+	for (const result of results) {
+		const r = ctx.take(result)
+		if (r.is_err()) continue
+		items.push(r.value)
+	}
+	return ctx.Ok(() => items)
+}
 
 export type InclusionDescriptor = {
 	type: 'inclusion', name: string, span: Span,
 	params: ParseResult<Spanned<Attribute>>[],
 }
 export function parseComponentInclusion(
-	{ name, span: nameSpan, params: attributes }: InclusionDescriptor,
+	{ name, span: nameSpan, params }: InclusionDescriptor,
 	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
 ) {
-	const ctx = new Context<ComponentInclusion>()
+	const ctx = new Context<Spanned<ComponentInclusion>>()
+	const attributesResult = ctx.subsume(cleanResults(params))
+	if (attributesResult.is_err()) return ctx.subsumeFail(attributesResult.error)
+	const attributes = attributesResult.value
 
 	const componentArguments = new UniqueDict<[boolean, Span]>()
 	const props = {} as Dict<BindingAttribute>
@@ -145,11 +152,11 @@ export function parseComponentInclusion(
 		slotInsertionsDict['def'] = [defaultInsertion, undefined as unknown as Span]
 	}
 
-	return ctx.Ok(() => new ComponentInclusion(
+	return ctx.Ok(() => Spanned(new ComponentInclusion(
 		name, props, syncs,
 		events.into_dict() as Dict<NonEmpty<EventAttribute>>,
 		slotInsertions.entries().reduce((acc, [k, [v, ]]) => { acc[k] = v; return acc }, {} as Dict<SlotInsertion>),
-	))
+	), nameSpan))
 }
 
 
@@ -204,7 +211,7 @@ export function parseTextSection(content: string) {
 export function parseAttribute(
 	{ item: rawAttribute, span: rawAttributeSpan }: Spanned<string>,
 	valueSpanned: Spanned<string | AttributeCode> | undefined,
-) {
+): ParseResult<Spanned<Attribute>> {
 	const [value, valueSpan] = valueSpanned
 		? [valueSpanned.item, valueSpanned.span]
 		: [undefined, undefined]
@@ -295,8 +302,11 @@ export type TagDescriptor = {
 	type: 'tag', ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[],
 	attributes: ParseResult<Spanned<Attribute>>[],
 }
-export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescriptor, entities: Entity[]) {
-	const ctx = new Context<Html>()
+export function parseHtml({ ident, span: tagSpan, metas, attributes: attributesResultArray, }: TagDescriptor, entities: Entity[]) {
+	const ctx = new Context<Spanned<Html>>()
+	const attributesResult = ctx.subsume(cleanResults(attributesResultArray))
+	if (attributesResult.is_err()) return ctx.subsumeFail(attributesResult.error)
+	const attributes = attributesResult.value
 
 	if (entities.length > 0 && leafTags.includes(ident))
 		ctx.warn('LEAF_CHILDREN', tagSpan, ident)
@@ -310,7 +320,7 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 	const tagAttributes = tagAttributesResult.value
 
 	if (syncs.length === 0)
-		return ctx.Ok(() => new Tag(ident, tagAttributes, entities))
+		return ctx.Ok(() => Spanned(new Tag(ident, tagAttributes, entities), tagSpan))
 
 	if (syncs.length !== 1) return ctx.Err('INVALID_TAG_SYNC_MULTIPLE', tagSpan)
 	const [{ item: sync, span: syncSpan }] = syncs
@@ -328,13 +338,13 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 			return ctx.Err('INPUT_TAG_SYNC_NOT_KNOWN_TYPE', tagSpan)
 
 		if (typeBinding === undefined || ['text', 'password', 'search'].includes(typeBinding.value))
-			return ctx.Ok(() => new SyncedTextInput(false, sync.code, tagAttributes))
+			return ctx.Ok(() => Spanned(new SyncedTextInput(false, sync.code, tagAttributes), tagSpan))
 
 		if (typeBinding.value === 'checkbox') {
 			const valueBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'value')
 			const valueBinding = valueBindingAttribute ? valueBindingAttribute.item.value : undefined
 			if (!valueBinding || isInertBindingValue(valueBinding))
-				return ctx.Ok(() => new SyncedCheckboxInput(sync.code, valueBinding, tagAttributes))
+				return ctx.Ok(() => Spanned(new SyncedCheckboxInput(sync.code, valueBinding, tagAttributes), tagSpan))
 			return ctx.Err('INPUT_TAG_SYNC_CHECKBOX_NOT_KNOWN_VALUE', valueBindingAttribute ? valueBindingAttribute.span : tagSpan)
 		}
 
@@ -342,7 +352,7 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 			const valueBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'value')
 			const valueBinding = valueBindingAttribute ? valueBindingAttribute.item.value : undefined
 			if (valueBinding && isInertBindingValue(valueBinding))
-				return ctx.Ok(() => new SyncedRadioInput(sync.code, valueBinding, tagAttributes))
+				return ctx.Ok(() => Spanned(new SyncedRadioInput(sync.code, valueBinding, tagAttributes), tagSpan))
 
 			return ctx.Err('INPUT_TAG_SYNC_RADIO_NOT_KNOWN_VALUE', valueBindingAttribute ? valueBindingAttribute.span : syncSpan)
 		}
@@ -350,13 +360,13 @@ export function parseHtml({ ident, span: tagSpan, metas, attributes, }: TagDescr
 		return ctx.Err('INPUT_TAG_SYNC_UNSUPPORTED_TYPE', typeBindingAttribute!.span)
 
 	case 'textarea':
-		return ctx.Ok(() => new SyncedTextInput(true, sync.code, tagAttributes))
+		return ctx.Ok(() => Spanned(new SyncedTextInput(true, sync.code, tagAttributes), tagSpan))
 
 	case 'select':
 		const multipleBindingAttribute = nonSyncs.find((a): a is Spanned<BindingAttribute> => a.item.type === 'BindingAttribute' && a.item.attribute === 'multiple')
 		const multipleBinding = multipleBindingAttribute ? multipleBindingAttribute.item.value : undefined
 		if (!multipleBinding || multipleBinding.type === 'empty')
-			return ctx.Ok(() => new SyncedSelect(sync.code, !!multipleBinding, tagAttributes, entities))
+			return ctx.Ok(() => Spanned(new SyncedSelect(sync.code, !!multipleBinding, tagAttributes, entities), tagSpan))
 		return ctx.Err('INPUT_TAG_SYNC_SELECT_INVALID_MULTIPLE', multipleBindingAttribute ? multipleBindingAttribute.span : syncSpan)
 
 	default:
@@ -438,25 +448,29 @@ function processInsertableCode(
 }
 
 
-export type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
-export type InProgressIf = {
+type InProgressDirective = InProgressIf | InProgressMatch | InProgressSwitch
+type InProgressIf = {
 	type: 'if', span: Span, expression: string, entities: Entity[],
 	elseIfBranches: [LiveCode, Entity[]][], elseBranch: Entity[] | undefined,
 }
-export type InProgressMatch = {
+type InProgressMatch = {
 	type: 'match', span: Span, matchExpression: string,
 	patterns: [LiveCode, Entity[]][], defaultPattern: Entity[] | undefined,
 }
-export type InProgressSwitch = {
+type InProgressSwitch = {
 	type: 'switch', span: Span, switchExpression: string,
 	cases: (SwitchCase | SwitchDefault)[],
 }
 
 export type DirectiveDescriptor = { type: 'directive', command: string, span: Span, code: string | undefined }
 export type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
-export type NotReadyEntity = Spanned<Html | ComponentInclusion> | NonEmpty<Spanned<TextItem>> | DirectivePending
+// export type NotReadyEntity = Spanned<Html | ComponentInclusion> | NonEmpty<Spanned<TextItem>> | DirectivePending
+export type FinalizableEntity =
+	| { ready: true, entity: Spanned<Entity | SlotInsertion | SlotUsage> }
+	| { ready: false, pending: DirectivePending | NonEmpty<Spanned<TextItem>> }
 
-export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]) {
+// export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]) {
+export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined)[]) {
 	const ctx = new Context<(Spanned<Entity | SlotInsertion | SlotUsage>)[]>()
 	const giveEntities = [] as (Spanned<Entity | SlotInsertion | SlotUsage>)[]
 	let inProgressTextSection = undefined as NonEmpty<Spanned<TextItem>> | undefined
@@ -491,9 +505,20 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 			continue
 		}
 		const result = ctx.take(mixedItemResult)
-		if (result.is_err())
-			continue
+		if (result.is_err()) continue
 		const item = result.value
+
+		if (item.ready) {
+			finalizeInProgressDirective()
+
+		}
+
+		if ('span' in item && 'item' in item) {
+			finalizeInProgressDirective()
+			giveEntities.push(item)
+			continue
+		}
+
 		// TextItem
 		if (Array.isArray(item)) {
 			finalizeInProgressDirective()
@@ -509,12 +534,6 @@ export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]
 			inProgressTextSection = undefined
 		}
 
-		// if ('span' in item) {
-		if (!('type' in item)) {
-			finalizeInProgressDirective()
-			giveEntities.push(item)
-			continue
-		}
 
 		const { command, code, span, entities } = item
 		switch (command) {

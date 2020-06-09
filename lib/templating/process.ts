@@ -39,15 +39,15 @@ export function processFile(source: string, lineWidth: number, filename: string)
 		return entities
 	})
 
-	const [definitionArgs, createFn] = script === undefined ? [undefined, undefined] : exec(() => {
+	const [definitionArgs, createFn, scriptText] = script === undefined ? [undefined, undefined, ''] : exec(() => {
 		if (script.lang && script.lang !== 'ts')
 			return parser.die('NON_TS_SCRIPT_LANG', script.span)
 		const sourceFile = ts.createSourceFile(filename, script.text, ts.ScriptTarget.Latest, true)
-		return parser.expect(inspect(sourceFile))
+		return [...parser.expect(inspect(sourceFile)), script.text]
 	})
 
 	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
-	return parser.finalize(() => generateComponentDefinition(definition))
+	return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
 }
 
 
