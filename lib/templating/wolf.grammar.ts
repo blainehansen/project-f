@@ -17,7 +17,7 @@ import {
 import {
 	parseAttribute, parseHtml, parseTagAttributes, parseComponentInclusion,
 	parseDynamicMeta, parseMeta, parseDynamicTextSection, parseTextSection,
-	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, DirectivePending, NotReadyEntity, parseEntities,
+	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, DirectivePending, FinalizableEntity, parseEntities,
 } from './ast.parse'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
@@ -93,7 +93,8 @@ const { _Z2nLjPg, _17D7Of, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ
 // export type PlusHandler = (name: string, code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 // export type AtHandler = (code: string | undefined, children: IntermediateElement[]) => IntermediateElement[]
 
-export function wolf(): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> {
+export function wolf(): ParseResult<(Spanned<Entity | SlotInsertion>)[]> {
+	maybe_many(tok.indent_continue)
 	const items = lines(() => {
 		return or(
 			c(entity, _Z2nLjPg),
@@ -104,18 +105,19 @@ export function wolf(): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>
 	return parseEntities(items)
 }
 
-export function entity(): ParseResult<Spanned<Entity> | DirectivePending> {
+export function entity(): ParseResult<FinalizableEntity> {
 	return or(
-		c((): ParseResult<Spanned<Entity> | DirectivePending> => {
-			const ctx = new Context<Spanned<Entity> | DirectivePending>()
+		c((): ParseResult<FinalizableEntity> => {
+			const ctx = new Context<FinalizableEntity>()
 			const entity_item = entity_descriptor()
+
 			const entitiesResult = ctx.subsume(maybe_or(
-				c((): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> => {
+				c((): ParseResult<(Spanned<Entity | SlotInsertion>)[]> => {
 					consume(tok.colon, tok.large_space)
 					return parseEntities([entity()])
 				}, _6PPuF),
 
-				c((): ParseResult<(Spanned<Entity | SlotInsertion | SlotUsage>)[]> => {
+				c((): ParseResult<(Spanned<Entity | SlotInsertion>)[]> => {
 					consume(tok.indent)
 					const entitiesResult = wolf()
 					consume(tok.deindent)
@@ -128,23 +130,29 @@ export function entity(): ParseResult<Spanned<Entity> | DirectivePending> {
 					const span = children.length === 1
 						? children[0].span
 						: Span.around(children[0].span, children[children.length - 1].span)
-					return Context.Ok([Spanned(new TextSection(children.map(unspan)) as NonEmpty<TextItem>, span)])
+					return Context.Ok([Spanned(new TextSection(children.map(unspan) as NonEmpty<TextItem>), span)])
 				}, _7U1Cw),
-			) || Ok({ value: [], warnings: [] }))
+			) || Ok({ value: [] as (Spanned<Entity | SlotInsertion>)[], warnings: [] }))
 			if (entitiesResult.is_err()) return ctx.subsumeFail(entitiesResult.error)
 			const entities = entitiesResult.value
 
 			switch (entity_item.type) {
 				case 'tag':
-					return parseHtml(entity_item, entities)
+					const htmlResult = ctx.subsume(parseHtml(entity_item, entities))
+					if (htmlResult.is_err()) return ctx.subsumeFail(htmlResult.error)
+					return ctx.Ok(() => ({ ready: true, entity: htmlResult.value }))
+
 				case 'inclusion':
-					return parseComponentInclusion(entity_item, entities)
+					const componentInclusionResult = ctx.subsume(parseComponentInclusion(entity_item, entities))
+					if (componentInclusionResult.is_err()) return ctx.subsumeFail(componentInclusionResult.error)
+					return ctx.Ok(() => ({ ready: true, entity: componentInclusionResult.value }))
+
 				case 'directive':
-					return ctx.Ok(() => ({ entities, ...entity_item }))
+					return ctx.Ok(() => ({ ready: false, pending: { rawEntities: entities, ...entity_item } }))
 			}
 		}, _ZCgW0s),
 
-		c((): ParseResult<NonEmpty<Spanned<TextItem>>> => {
+		c((): ParseResult<FinalizableEntity> => {
 			consume(tok.text_bar)
 			const text_items = or(
 				c(() => {
@@ -156,13 +164,13 @@ export function entity(): ParseResult<Spanned<Entity> | DirectivePending> {
 					return ([] as Spanned<TextItem>[]).concat(...text_items) as NonEmpty<Spanned<TextItem>>
 				}, _Z1owlnn),
 
-				c(() => {
+				c((): NonEmpty<Spanned<TextItem>> => {
 					consume(tok.space)
 					return many(text, _Z2evaAJ)
 				}, _7U1Cw),
 			)
 
-			return Context.Ok(text_items)
+			return Context.Ok({ ready: false, pending: text_items })
 		}, _Z1bsgQT),
 	)
 }

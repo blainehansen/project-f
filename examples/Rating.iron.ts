@@ -1,52 +1,45 @@
-import {
-	createElementClass as ___createElementClass,
-	contentEffect as ___contentEffect,
-	joinClass as ___joinClass,
-	rangeEffect as ___rangeEffect,
-	bindProperty as ___bindProperty,
-	ComponentDefinition as ___ComponentDefinition
-} from "project-f/runtime"
+import { createElementClass as ___createElementClass, createElementClasses as ___createElementClasses, contentEffect as ___contentEffect, bindProperty as ___bindProperty, rangeEffect as ___rangeEffect, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, { maxStars, hasCounter }, { stars }, {}, {}) => {
 	const { starItems } = create({ maxStars, hasCounter, stars })
 
-	const ___div0 = ___createElementClass(___parent, "div", "rating")
+	const ___div_0 = ___createElementClass(___parent, "div", "rating")
 
-	const ___ul0_0 = ___createElementClass(___div0, "ul", "list")
+	const ___ul_0_0 = ___createElementClass(___div_0, "ul", "list")
 	// ___forContentEffect((___real, ___parent, star) => {
-	// 	const ___li0 = ___createElementClass(___parent, "li", ___joinClass("star", star.active && 'active'))
-	// 	___li0.onclick = $event => stars(star.amount)
+	// 	const ___li_0 = ___createElementClass(___parent, "li", ___joinClass("star", star.active && 'active'))
+	// 	___li_0.onclick = $event => stars(star.amount)
 
-	// 	___createElementClass(___li0, "i", star.active ? 'fas fa-star' : 'far fa-star')
-	// }, ___ul0_0, starItems)
+	// 	___createElementClass(___li_0, "i", star.active ? 'fas fa-star' : 'far fa-star')
+	// }, ___ul_0_0, starItems)
 	___contentEffect((___real, ___parent) => {
 		const ___eachBlockCollection = starItems.r()
 		const ___eachBlockCollectionLength = ___eachBlockCollection.length
 		for (let ___eachBlockIndex = 0; ___eachBlockIndex < ___eachBlockCollectionLength; ___eachBlockIndex++) {
 			const star = ___eachBlockCollectionLength[___eachBlockIndex]
 
-			const ___li0 = ___createElementClass(___parent, "li", ___joinClass("star", star.active && 'active'))
-			___li0.onclick = $event => stars(star.amount)
+			const ___li_0 = ___createElementClasses(___parent, "li", "star", star.active && 'active')
+			___li_0.onclick = $event => stars(star.amount)
 
-			___createElementClass(___li0, "i", star.active ? 'fas fa-star' : 'far fa-star')
+			___createElementClasses(___li_0_0_0_0, "i", star.active ? 'fas fa-star' : 'far fa-star')
 		}
-	}, ___ul0_0)
+	}, ___ul_0_0)
 
 	___rangeEffect((___real, ___parent) => {
 		if (hasCounter.r()) {
-			const ___div0 = ___createElementClass(___parent, "div", "counter")
+			const ___div_0 = ___createElementClass(___parent, "div", "counter")
 
-			const ___span0_0 = ___createElementClass(___div0, "span", "score-rating")
-			___bindProperty(___span0_0, 'textContent', stars)
+			const ___span_0_0 = ___createElementClass(___div_0, "span", "score-rating")
+			___bindProperty(___span_0_0, 'textContent', stars)
 
-			___createElementClass(___div0, "span", "divider")
+			___createElementClass(___div_0, "span", "divider")
 
-			const ___span0_2 = ___createElementClass(___div0, "span", "score-max")
-			___bindProperty(___span0_2, 'textContent', maxStars)
+			const ___span_0_2 = ___createElementClass(___div_0, "span", "score-max")
+			___bindProperty(___span_0_2, 'textContent', maxStars)
 		}
-	}, ___div0)
+	}, ___div_0)
 
-	return ___div0
+	return ___div_0
 }
 export default ___Component
 

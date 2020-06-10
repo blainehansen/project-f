@@ -27,38 +27,40 @@ import {
 // // const keyModifiers = [] as const
 // // const mouseModifiers = ['left', 'right', 'middle'] as const
 
+function removeSlotInsertions(ctx: Context<unknown>, rawEntities: (Spanned<Entity | SlotInsertion>)[]) {
+	const entities = [] as Entity[]
+	for (const { item: entity, span } of rawEntities) {
+		if (entity.type !== 'SlotInsertion')
+			entities.push(entity)
+		else
+			ctx.error('INVALID_SLOT_INSERTION', span)
+	}
+	return entities
+}
+
 export type ComponentDefinitionTypes = { props: string[], events: string[], syncs: string[], slots: Dict<boolean> }
 export function parseComponentDefinition(
 	component: ComponentDefinitionTypes | undefined,
 	createFn: NonEmpty<string> | CTXFN | undefined,
-	rawEntities: (Spanned<Entity | SlotUsage | SlotInsertion>)[],
+	rawEntities: (Spanned<Entity | SlotInsertion>)[],
 ) {
 	const ctx = new Context<ComponentDefinition>()
 
-	const entities = [] as (Entity | SlotUsage)[]
 	// TODO here's where we'd add backfilled slots
 	// const foundSlots = new UniqueDict<[boolean, string | undefined]>()
-	for (const { item: entity, span } of rawEntities) {
-		if (entity.type === 'SlotUsage') {
-			const slotName = entity.name || 'def'
-			// foundSlots.set(slotName, [entity.fallback !== undefined, entity.argsExpression])
-
-			const optional = component && component.slots[slotName]
-			// if (!component && optional === undefined) {
-			if (optional === undefined) {
-				ctx.error('COMPONENT_USAGE_NONEXISTENT_SLOT', span)
-				continue
-			}
-
-			if (!optional && entity.fallback !== undefined)
-				ctx.warn('COMPONENT_USAGE_REDUNDANT_FALLBACK', span)
-		}
-
-		if (entity.type !== 'SlotInsertion')
-			entities.push(entity)
-		else
-			ctx.error('COMPONENT_INVALID_SLOT_INSERTION', span)
-	}
+		// if (entity.type === 'SlotUsage') {
+		// 	const slotName = entity.name || 'def'
+		// 	// foundSlots.set(slotName, [entity.fallback !== undefined, entity.argsExpression])
+		// 	const optional = component && component.slots[slotName]
+		// 	// if (!component && optional === undefined) {
+		// 	if (optional === undefined) {
+		// 		ctx.error('COMPONENT_USAGE_NONEXISTENT_SLOT', span)
+		// 		continue
+		// 	}
+		// 	if (!optional && entity.fallback !== undefined)
+		// 		ctx.warn('COMPONENT_USAGE_REDUNDANT_FALLBACK', span)
+		// }
+	const entities = removeSlotInsertions(ctx, rawEntities)
 
 	const { props = [], syncs = [], events = [], slots = {} } = component || {}
 	// slots = foundSlots.into_dict()
@@ -82,7 +84,7 @@ export type InclusionDescriptor = {
 }
 export function parseComponentInclusion(
 	{ name, span: nameSpan, params }: InclusionDescriptor,
-	entities: Spanned<(Entity | SlotInsertion | SlotUsage)>[],
+	rawEntities: Spanned<(Entity | SlotInsertion)>[],
 ) {
 	const ctx = new Context<Spanned<ComponentInclusion>>()
 	const attributesResult = ctx.subsume(cleanResults(params))
@@ -109,7 +111,8 @@ export function parseComponentInclusion(
 		break
 	}
 	case 'EventAttribute':
-		const { event, variety, code: rawCode } = attribute
+		const { event, variety, code: untrimmedCode } = attribute
+		const rawCode = untrimmedCode.trim()
 
 		const previous = componentArguments.get(event)
 		if (previous.is_some() && previous.value[0]) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, previous.value[1])
@@ -126,11 +129,7 @@ export function parseComponentInclusion(
 
 	const nonInsertEntities = [] as Entity[]
 	const slotInsertions = new UniqueDict<[SlotInsertion, Span]>()
-	for (const { item: entity, span } of entities) {
-		if (entity.type === 'SlotUsage') {
-			ctx.error('INVALID_SLOT_USAGE', span)
-			continue
-		}
+	for (const { item: entity, span } of rawEntities) {
 		if (entity.type !== 'SlotInsertion') {
 			nonInsertEntities.push(entity)
 			continue
@@ -302,12 +301,16 @@ export type TagDescriptor = {
 	type: 'tag', ident: string, span: Span, metas: Spanned<IdMeta | ClassMeta>[],
 	attributes: ParseResult<Spanned<Attribute>>[],
 }
-export function parseHtml({ ident, span: tagSpan, metas, attributes: attributesResultArray, }: TagDescriptor, entities: Entity[]) {
+export function parseHtml(
+	{ ident, span: tagSpan, metas, attributes: attributesResultArray, }: TagDescriptor,
+	rawEntities: (Spanned<Entity | SlotInsertion>)[],
+) {
 	const ctx = new Context<Spanned<Html>>()
 	const attributesResult = ctx.subsume(cleanResults(attributesResultArray))
 	if (attributesResult.is_err()) return ctx.subsumeFail(attributesResult.error)
 	const attributes = attributesResult.value
 
+	const entities = removeSlotInsertions(ctx, rawEntities)
 	if (entities.length > 0 && leafTags.includes(ident))
 		ctx.warn('LEAF_CHILDREN', tagSpan, ident)
 
@@ -415,7 +418,8 @@ export function parseTagAttributes(
 		break
 	}
 	case 'EventAttribute':
-		const { event, variety, code: rawCode } = attribute
+		const { event, variety, code: untrimmedCode } = attribute
+		const rawCode = untrimmedCode.trim()
 		const code = variety === 'inline' ? `$event => ${rawCode}` : rawCode
 		events.get(event).push(new EventAttribute(event, variety, code))
 		break
@@ -463,17 +467,25 @@ type InProgressSwitch = {
 }
 
 export type DirectiveDescriptor = { type: 'directive', command: string, span: Span, code: string | undefined }
-export type DirectivePending = DirectiveDescriptor & { entities: Entity[] }
-// export type NotReadyEntity = Spanned<Html | ComponentInclusion> | NonEmpty<Spanned<TextItem>> | DirectivePending
+export type DirectivePending = DirectiveDescriptor & { rawEntities: (Spanned<Entity | SlotInsertion>)[] }
 export type FinalizableEntity =
-	| { ready: true, entity: Spanned<Entity | SlotInsertion | SlotUsage> }
+	| { ready: true, entity: Spanned<Entity> }
 	| { ready: false, pending: DirectivePending | NonEmpty<Spanned<TextItem>> }
 
-// export function parseEntities(items: (ParseResult<NotReadyEntity> | undefined)[]) {
-export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined)[]) {
-	const ctx = new Context<(Spanned<Entity | SlotInsertion | SlotUsage>)[]>()
-	const giveEntities = [] as (Spanned<Entity | SlotInsertion | SlotUsage>)[]
+export function parseEntities(finalizables: (ParseResult<FinalizableEntity> | undefined)[]) {
+	const ctx = new Context<(Spanned<Entity | SlotInsertion>)[]>()
+	const giveEntities = [] as (Spanned<Entity | SlotInsertion>)[]
+
 	let inProgressTextSection = undefined as NonEmpty<Spanned<TextItem>> | undefined
+	function finalizeInProgressTextSection() {
+		if (inProgressTextSection === undefined) return
+
+		const span = inProgressTextSection.length === 1
+			? inProgressTextSection[0].span
+			: Span.around(inProgressTextSection[0].span, inProgressTextSection[inProgressTextSection.length - 1].span)
+		giveEntities.push(Spanned(new TextSection(inProgressTextSection.map(unspan) as NonEmpty<TextItem>), span))
+		inProgressTextSection = undefined
+	}
 	let inProgressDirective = undefined as InProgressDirective | undefined
 	function finalizeInProgressDirective() {
 		if (inProgressDirective === undefined) return
@@ -497,48 +509,38 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 		}
 	}
+	function finalize() {
+		finalizeInProgressTextSection()
+		finalizeInProgressDirective()
+	}
 
-	for (const mixedItemResult of items) {
-		// comment
-		if (mixedItemResult === undefined) {
-			finalizeInProgressDirective()
-			continue
-		}
-		const result = ctx.take(mixedItemResult)
+	for (const finalizableResult of finalizables) {
+		// we don't finalize on comments since they could be separating different parts of a contiguous section
+		if (finalizableResult === undefined) continue
+
+		const result = ctx.take(finalizableResult)
 		if (result.is_err()) continue
-		const item = result.value
+		const finalizable = result.value
 
-		if (item.ready) {
-			finalizeInProgressDirective()
-
-		}
-
-		if ('span' in item && 'item' in item) {
-			finalizeInProgressDirective()
-			giveEntities.push(item)
+		if (finalizable.ready) {
+			finalize()
+			giveEntities.push(finalizable.entity)
 			continue
 		}
+		const item = finalizable.pending
 
-		// TextItem
+		// NonEmpty<Spanned<TextItem>>
 		if (Array.isArray(item)) {
 			finalizeInProgressDirective()
 			inProgressTextSection = (inProgressTextSection || [] as Spanned<TextItem>[]).concat(item) as NonEmpty<Spanned<TextItem>>
 			continue
 		}
-		// finalize inProgressTextSection
-		if (inProgressTextSection !== undefined) {
-			const span = inProgressTextSection.length === 1
-				? inProgressTextSection[0].span
-				: Span.around(inProgressTextSection[0].span, inProgressTextSection[inProgressTextSection.length - 1].span)
-			giveEntities.push(Spanned(new TextSection(inProgressTextSection.map(unspan) as NonEmpty<TextItem>), span))
-			inProgressTextSection = undefined
-		}
 
-
-		const { command, code, span, entities } = item
+		const { command, code, span, rawEntities } = item
+		const entities = removeSlotInsertions(ctx, rawEntities)
 		switch (command) {
 			case 'if':
-				finalizeInProgressDirective()
+				finalize()
 				if (code === undefined)
 					return ctx.Err('IF_NO_EXPRESSION', span)
 				inProgressDirective = {
@@ -564,7 +566,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 
 			case 'each':
-				finalizeInProgressDirective()
+				finalize()
 				function processEachBlockCode(code: string): [EachBlock['params'], string] {
 					const [paramsSection, ...remainingSections] = code.split(/ +of +/)
 					const paramsMatch = paramsSection.match(/\( *(\S+) *, *(\S+) *\)/)
@@ -581,7 +583,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 
 			case 'match':
-				finalizeInProgressDirective()
+				finalize()
 				if (entities.length > 0)
 					return ctx.Err('MATCH_NESTED_ENTITIES', span)
 				if (code === undefined)
@@ -597,7 +599,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 
 			case 'switch':
-				finalizeInProgressDirective()
+				finalize()
 				if (entities.length > 0)
 					return ctx.Err('SWITCH_NESTED_ENTITIES', span)
 				if (code === undefined)
@@ -650,16 +652,15 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 
 			case 'slot': {
-				finalizeInProgressDirective()
+				finalize()
 				const result = ctx.subsume(processInsertableCode(true, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [slotName, argsExpression] = result.value
-				// giveSlotUsages.push(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)))
 				giveEntities.push(Spanned(new SlotUsage(slotName, argsExpression, NonEmpty.undef(entities)), span))
 				break
 			}
 			case 'insert': {
-				finalizeInProgressDirective()
+				finalize()
 				const result = ctx.subsume(processInsertableCode(true, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [slotName, paramsExpression] = result.value
@@ -669,7 +670,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 			}
 
 			case 'template': {
-				finalizeInProgressDirective()
+				finalize()
 				const result = ctx.subsume(processInsertableCode(false, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [templateName, argsExpression] = result.value
@@ -681,7 +682,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				break
 			}
 			case 'include': {
-				finalizeInProgressDirective()
+				finalize()
 				const result = ctx.subsume(processInsertableCode(false, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [templateName, argsExpression] = result.value
@@ -697,6 +698,7 @@ export function parseEntities(items: (ParseResult<FinalizableEntity> | undefined
 				ctx.error('UNKNOWN_DIRECTIVE', span)
 		}
 	}
+	finalize()
 
 	return ctx.Ok(() => giveEntities)
 }

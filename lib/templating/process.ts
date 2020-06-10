@@ -30,7 +30,7 @@ export function processFile(source: string, lineWidth: number, filename: string)
 		if (template.lang && template.lang !== 'wolf')
 			return parser.die('UNSUPPORTED_TEMPLATE_LANG', template.span)
 
-		reset(template.text)
+		reset(template.text, filename)
 		const entitiesResult = wolf()
 		exit()
 		const entities = parser.expect(entitiesResult)
@@ -47,7 +47,9 @@ export function processFile(source: string, lineWidth: number, filename: string)
 	})
 
 	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
-	return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
+	// return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
+	// TODO
+	return parser.finalize(() => generateComponentDefinition(definition))
 }
 
 
@@ -235,7 +237,7 @@ export function cutSource(file: SourceFile) {
 		line += entireMatch.split('\n').length - 1
 
 		if (last !== undefined)
-			setSection(last, source.slice(0, index))
+			setSection(last, '\n'.repeat(line - 2) + source.slice(0, index))
 
 		source = source.slice(sectionIndex)
 		last = { name: sectionName, lang, span: sectionMarkerSpan }

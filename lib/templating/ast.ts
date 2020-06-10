@@ -9,7 +9,7 @@ export class ComponentDefinition {
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
 		readonly createFn: NonEmpty<string> | CTXFN | undefined,
-		readonly entities: (Entity | SlotUsage)[],
+		readonly entities: Entity[],
 	) {}
 }
 
@@ -17,6 +17,7 @@ export type Entity =
 	| Html
 	| TextSection
 	| Directive
+	| SlotUsage
 
 
 export type Html =

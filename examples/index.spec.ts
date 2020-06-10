@@ -5,12 +5,17 @@ import { expect } from 'chai'
 import { readFileSync } from 'fs'
 
 import { compileFile } from '../lib/'
-import { boilString } from '../lib/utils.spec'
+function boilSource(source: string) {
+	return source
+		.replace(/    /g, '  ')
+		.replace(/\n+/g, '\n')
+		.replace(/;\n/g, '\n')
+}
 
 for (const sourceFilename of glob.sync('./examples/**/*.iron')) {
 	const expected = readFileSync(sourceFilename + '.ts', 'utf-8')
 	describe(path.basename(sourceFilename, '.iron'), () => it('works', () => {
-		// expect(boilString(compileFile(sourceFilename))).equal(boilString(expected))
-		console.log(compileFile(sourceFilename))
+		// expect(boilSource(compileFile(sourceFilename))).equal(boilSource(expected))
+		console.log(boilSource(compileFile(sourceFilename)))
 	}))
 }

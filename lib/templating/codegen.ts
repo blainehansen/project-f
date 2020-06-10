@@ -22,17 +22,17 @@ function safePrefixIdent(...segments: NonLone<string>) {
 }
 
 function createReactiveCode(code: string) {
-	// return code + '.r()'
-	return code + '()'
+	// return code.trim() + '.r()'
+	return code.trim() + '()'
 }
 function createRawCodeSegment(code: string) {
-	return ts.createIdentifier(code)
+	return ts.createIdentifier(code.trim())
 }
 function createReactiveCodeSegment(code: string) {
 	return ts.createIdentifier(createReactiveCode(code))
 }
 function createAnonCall(fnCode: string, args: ts.Expression[]) {
-	return createCall(createRawCodeSegment(`(${fnCode})`), args)
+	return createCall(createRawCodeSegment(`(${fnCode.trim()})`), args)
 }
 
 function createDynamicBinding({ code, initialModifier }: PickVariants<BindingValue, 'type', 'dynamic'>, ctx: CodegenContext) {
@@ -49,6 +49,9 @@ function efficientObject(assignments: readonly ts.ObjectLiteralElementLike[], ct
 
 export class CodegenContext {
 	protected requiredFunctions = new Set<string>()
+	constructor(
+		readonly slots: Dict<boolean>,
+	) {}
 
 	requireRuntime(functionName: string) {
 		this.requiredFunctions.add(functionName)
@@ -86,41 +89,14 @@ const typedParentParams = () => t(
 
 export function generateComponentDefinition({
 	props, syncs, events,
-	slots: slotMap, createFn, entities,
+	slots, createFn, entities,
 }: ComponentDefinition) {
-	const ctx = new CodegenContext()
+	const ctx = new CodegenContext(slots)
 	const [realParentIdent, parentIdent] = resetParentIdents()
 
-	const entitiesStatements = [] as ts.Statement[]
-	for (let index = 0; index < entities.length; index++) {
-		const entity = entities[index]
-		if (entity.type !== 'SlotUsage') {
-			// at the component level, we can't know whether we're truly the lone child of a real node
-			// so we pass false, and only concrete nodes below us can reset that based on their status
-			const entityStatements = generateEntity(entity, '' + index, false, ctx, realParentIdent, parentIdent)
-			Array.prototype.push.apply(entitiesStatements, entityStatements)
-			continue
-		}
-
-		const { name: slotName = 'def', argsExpression, fallback } = entity
-		// we've already checked for existence and redundance in the parsing stages
-		const slotOptional = slotMap[slotName] || false
-		const usageTarget = !slotOptional ? slotName : ts.createParen(ts.createBinary(
-			ts.createIdentifier(slotName),
-			ts.createToken(ts.SyntaxKind.BarBarToken),
-			fallback === undefined
-				// no fallback: default to noop, thereby outputing nothing
-				? ctx.requireRuntime('noop')
-				// has fallback: default to their fallback, which takes no arguments because it captures its environment
-				: ts.createParen(createArrowFunction(
-					...generateGenericInsertableDefinition(ctx, undefined, fallback, false),
-				)),
-		))
-
-		const slotUsageStatement = generateGenericInsertableCall(usageTarget, argsExpression, realParentIdent, parentIdent)
-		entitiesStatements.push(slotUsageStatement)
-	}
-
+	// at the component level, we can't know whether we're truly the lone child of a real node
+	// so we pass false, and only concrete nodes below us can reset that based on their status
+	const entitiesStatements = generateEntities(entities, '', false, ctx, realParentIdent, parentIdent)
 
 	const createFnStatements = createFn === undefined ? [] : exec(() => {
 		const args = props.concat(syncs).concat(events)
@@ -142,7 +118,7 @@ export function generateComponentDefinition({
 	})
 
 	const statements = createFnStatements.concat(entitiesStatements)
-	const slotNames = Object.keys(slotMap)
+	const slotNames = Object.keys(slots)
 	const params = [realParentText, parentText, props, syncs, events, slotNames].map(n => createParameter(n))
 	const componentArrow = createArrowFunction(params, ts.createBlock(statements, true))
 
@@ -196,6 +172,9 @@ export function generateEntity(
 	case 'TextSection':
 		return generateText(entity, offset, isRealLone, ctx, realParent, parent)
 
+	case 'SlotUsage':
+		return generateSlotUsage(entity, ctx, realParent, parent)
+
 	case 'ComponentInclusion':
 		return generateComponentInclusion(entity, ctx, realParent, parent)
 
@@ -230,10 +209,8 @@ export function generateTagFromAttributes(
 
 	let needTagIdent = false
 	let classLiveness: LivenessType | undefined = undefined
-	for (const { liveness, value } of classMetas) {
-		needTagIdent = true
-		classLiveness = classLiveness !== undefined ? LivenessType.max(classLiveness, liveness) : classLiveness
-	}
+	for (const { liveness, value } of classMetas)
+		classLiveness = LivenessType.max(classLiveness || LivenessType.static, liveness)
 
 	function literalOrCode({ liveness, value }: ClassMeta) {
 		return liveness === LivenessType.static
@@ -328,7 +305,7 @@ function generateHandler(handlers: NonEmpty<EventAttribute>, isComponent: boolea
 	return createArrowFunction([createParameter(param)], ts.createBlock(
 		handlers.map(({ code }) => {
 			return ts.createExpressionStatement(createAnonCall(code, [ts.createIdentifier(param)]))
-		})
+		}),
 	))
 }
 
@@ -430,6 +407,28 @@ export function generateText(
 	}
 }
 
+
+export function generateSlotUsage(
+	{ name: slotName = 'def', argsExpression, fallback }: SlotUsage,
+	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
+) {
+	// we've already checked for existence and redundance in the parsing stages
+	const slotOptional = ctx.slots[slotName] || false
+	const usageTarget = !slotOptional ? slotName : ts.createParen(ts.createBinary(
+		ts.createIdentifier(slotName),
+		ts.createToken(ts.SyntaxKind.BarBarToken),
+		fallback === undefined
+			// no fallback: default to noop, thereby outputing nothing
+			? ctx.requireRuntime('noop')
+			// has fallback: default to their fallback, which takes no arguments because it captures its environment
+			: ts.createParen(createArrowFunction(
+				...generateGenericInsertableDefinition(ctx, undefined, fallback, false),
+			)),
+	))
+
+	return [generateGenericInsertableCall(usageTarget, argsExpression, realParent, parent)]
+}
+
 export function generateComponentInclusion(
 	{ name, props, syncs, /*nativeEvents,*/ events, slotInsertions }: ComponentInclusion,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
@@ -495,9 +494,9 @@ function generateAreaEffect(
 	// is by simply using `contentEffect` ourselves if our parent has given the all clear
 	// all the sub entities might be able to piggyback from that?
 	return [ts.createExpressionStatement(
-		/*isRealLone
+		isRealLone
 			? createCall(ctx.requireRuntime('contentEffect'), [closure, aboveRealParent])
-			:*/ createCall(ctx.requireRuntime('rangeEffect'), [closure, aboveRealParent, aboveParent])
+			: createCall(ctx.requireRuntime('rangeEffect'), [closure, aboveRealParent, aboveParent])
 	)]
 }
 
@@ -519,13 +518,13 @@ function createIf(
 }
 export function generateIfBlock(
 	{ expression, entities, elseIfBranches, elseBranch }: IfBlock,
-	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	parentOffset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
 	const reactive = expression.reactive || elseIfBranches.some(([b, ]) => b.reactive)
-	const [realParent, parent] = reactive
-		? resetParentIdents()
-		: [aboveRealParent, aboveParent]
+	const [offset, [realParent, parent]] = reactive
+		? ['', resetParentIdents()]
+		: [parentOffset, [aboveRealParent, aboveParent]]
 
 	// we start with the else block and work our way backwards
 	// this way we avoid needing any pesky recursion to build up the recursive ts.IfStatement
@@ -550,13 +549,13 @@ export function generateIfBlock(
 
 export function generateEachBlock(
 	{ params: { variableCode, indexCode }, listExpression, entities }: EachBlock,
-	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	parentOffset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
 	const reactive = listExpression.reactive
-	const [realParent, parent] = reactive
-		? resetParentIdents()
-		: [aboveRealParent, aboveParent]
+	const [offset, [realParent, parent]] = reactive
+		? ['', resetParentIdents()]
+		: [parentOffset, [aboveRealParent, aboveParent]]
 
 	const variableIdent = createRawCodeSegment(variableCode)
 	const indexIdent = indexCode !== undefined
@@ -609,13 +608,13 @@ function generateAssignableLiveCode(expression: LiveCode | AssignedLiveCode) {
 
 export function generateMatchBlock(
 	{ matchExpression, patterns, defaultPattern }: MatchBlock,
-	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	parentOffset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ): ts.Statement[] {
 	const [statements, codeMatchExpression, reactive] = generateAssignableLiveCode(matchExpression)
-	const [realParent, parent] = reactive
-		? resetParentIdents()
-		: [aboveRealParent, aboveParent]
+	const [offset, [realParent, parent]] = reactive
+		? ['', resetParentIdents()]
+		: [parentOffset, [aboveRealParent, aboveParent]]
 
 	const blocks = patterns.map(([expression, entities], index) => {
 		const block = createBreakBlock(entities, nextOffset(offset, index), false, ctx, realParent, parent)
@@ -639,13 +638,13 @@ export function generateMatchBlock(
 
 export function generateSwitchBlock(
 	{ switchExpression, cases }: SwitchBlock,
-	offset: string, isRealLone: boolean, ctx: CodegenContext,
+	parentOffset: string, isRealLone: boolean, ctx: CodegenContext,
 	aboveRealParent: ts.Identifier, aboveParent: ts.Identifier,
 ) {
 	const [statements, codeSwitchExpression, reactive] = generateAssignableLiveCode(switchExpression)
-	const [realParent, parent] = reactive
-		? resetParentIdents()
-		: [aboveRealParent, aboveParent]
+	const [offset, [realParent, parent]] = reactive
+		? ['', resetParentIdents()]
+		: [parentOffset, [aboveRealParent, aboveParent]]
 
 	const blocks: ts.CaseOrDefaultClause[] = []
 	let seenDefault = false
@@ -806,13 +805,6 @@ function createBind(
 	return ts.createExpressionStatement(
 		createCall(ctx.requireRuntime('bindProperty'), [target, ts.createStringLiteral(field), expression])
 	)
-	// return ts.createExpressionStatement(
-	// 	createCall(ctx.requireRuntime('effect'), [
-	// 		createArrowFunction([], ts.createBlock([
-	// 			createFieldAssignment(target, field, expression),
-	// 		], true)),
-	// 	]),
-	// )
 }
 
 

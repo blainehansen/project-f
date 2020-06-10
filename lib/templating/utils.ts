@@ -123,7 +123,7 @@ function formatDiagnostics(diagnostics: (ParseError | ParseWarning)[], lineWidth
 }
 function parseDie(errors: NonEmpty<ParseError>, warnings: ParseWarning[], lineWidth: number): never {
 	const message = formatDiagnostics((errors as (ParseError | ParseWarning)[]).concat(warnings), lineWidth)
-	throw new Error(message)
+	throw new Error('\n\n' + message)
 }
 function withWarnings<T>(value: T, warnings: ParseWarning[], lineWidth: number): T {
 	if (warnings.length > 0) {
@@ -142,13 +142,14 @@ export function formatDiagnostic(
 	{ region, title, message, error }: ParseError | ParseWarning,
 	lineWidth: number,
 ): string {
-	const header = `-- ${title} ` + '-'.repeat(lineWidth - (title.length + 4))
+	const header = info(`-- ${title} ` + '-'.repeat(lineWidth - (title.length + 4)))
 
-	if (typeof region === 'string')
-		return header + '\n' + file(region) + formatMessage(message, '\n  ', lineWidth)
+	if (typeof region === 'string') {
+		const fileHeader = '\n' + ' '.repeat(3) + file(region)
+		return header + '\n' + fileHeader + formatMessage(message, '\n  ', lineWidth)
+	}
 
 	const { file: { source, filename }, start, end, line, column } = region
-	const fileHeader = (filename ? file(filename) + '\n' : '')
 	const lineNumberWidth = line.toString().length
 	function makeGutter(lineNumber?: number) {
 		const insert = lineNumber !== undefined
@@ -167,11 +168,12 @@ export function formatDiagnostic(
 	const sourceLine = source.slice(sourceLineStart + 1, sourceLineEnd)
 
 	const printSourceLine = sourceLine.replace('\t', '  ')
-	const pointerPrefix = sourceLine.slice(0, column).replace('\t', '  ')
+	const pointerPrefix = ' '.repeat(sourceLine.slice(0, column).replace('\t', '  ').length)
 	const highlight = error ? chalk.red.bold : chalk.yellow.bold
 	const pointerWidth = end - start
 	const pointer = pointerPrefix + highlight('^'.repeat(pointerWidth))
 
+	const fileHeader = (filename ? '\n' + ' '.repeat(lineNumberWidth + 3) + file(filename) : '')
 	return header
 		+ '\n' + fileHeader
 		+ blankGutter
@@ -181,12 +183,13 @@ export function formatDiagnostic(
 }
 
 function formatMessage(message: string, margin: string, lineWidth: number) {
+	const finalLineWidth = Math.min(lineWidth, 80)
 	return message.split(/\n+/).map(paragraph => {
 		const lines: string[] = []
 		let line = margin
 		const words = paragraph.split(/[ \t]+/)
 		for (const word of words) {
-			if (line.length + word.length + 1 > lineWidth) {
+			if (line.length + word.length + 1 > finalLineWidth) {
 				lines.push(line)
 				line = margin + ' ' + word
 			}
@@ -199,32 +202,8 @@ function formatMessage(message: string, margin: string, lineWidth: number) {
 	}).join('\n')
 }
 
-// const source = `span something stufff
-// if (def)
-// 	whatevs() then sdf
-// sdfd
-// `
-
-
-// const span = { file: { source, filename: 'lib/compiler/lexer.ts' }, start: 32, end: 32 + 7, line: 3, column: 1 }
-// const m = [
-// 	formatDiagnostic(ParseError(span, 'big problem', "This is a very big problem.\nIn order to solve this you really have to do a big thing and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this and this.\nSound good?"), process.stdout.columns),
-// 	formatDiagnostic(ParseWarning(span, 'big problem', "This is a very big problem"), process.stdout.columns),
-// ].join('\n\n\n') + '\n'
-// console.log(m)
-
-
-
 
 export const Errors = {
-	// requiresCode: (span: Span, variety: string) => ParseError(span, 'requires code', `static attribute values are invalid for ${variety}`),
-	// // noModifiers: (span: Span, variety: string) => ParseError(span, 'invalid modifiers', `modifiers aren't allowed on ${variety}`),
-	// conflictingModifiers: (span: Span, message: string) => ParseError(span, 'conflicting modifiers', message),
-	// invalidModifier: (span: Span, message: string) => ParseError(span, 'invalid modifier', message),
-	// invalidTagSync: (span: Span, message: string) => ParseError(span, 'invalid tag sync', message),
-	// invalidSelectMultiple: (span: Span) =>
-	// 	ParseError(span, 'invalid select multiple', `the 'multiple' attribute must be either absent or a simple boolean flag`),
-
 	UNSUPPORTED_TEMPLATE_LANG: (span: Span) => ParseError(span, 'UNSUPPORTED_TEMPLATE_LANG',
 		"At this time, only the `wolf` templating language is supported.",
 		"This is a restriction that will be lifted as soon as possible.",
@@ -281,7 +260,7 @@ export const Errors = {
 	),
 
 	COMPONENT_USAGE_NONEXISTENT_SLOT: (span: Span) => ParseError(span, 'COMPONENT_USAGE_NONEXISTENT_SLOT', ""),
-	COMPONENT_INVALID_SLOT_INSERTION: (span: Span) => ParseError(span, 'COMPONENT_INVALID_SLOT_INSERTION', ""),
+	INVALID_SLOT_INSERTION: (span: Span) => ParseError(span, 'INVALID_SLOT_INSERTION', ""),
 
 	REQUIRES_CODE: (span: Span, variety: string) => ParseError(span, 'REQUIRES_CODE',
 		`${variety} don't make any sense if passed a static value.`,
@@ -326,9 +305,13 @@ export const Errors = {
 	MATCH_DUPLICATE_DEFAULT: (span: Span) => ParseError(span, 'MATCH_DUPLICATE_DEFAULT', ""),
 	TEMPLATE_NAMELESS: (span: Span) => ParseError(span, 'TEMPLATE_NAMELESS', ""),
 	INCLUDE_NAMELESS: (span: Span) => ParseError(span, 'INCLUDE_NAMELESS', ""),
-	UNKNOWN_DIRECTIVE: (span: Span) => ParseError(span, 'UNKNOWN_DIRECTIVE', ""),
+	UNKNOWN_DIRECTIVE: (span: Span) => ParseError(span, 'UNKNOWN_DIRECTIVE',
+		"So, this isn't a valid directive.",
+		"Instead, try this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this or this.",
+	),
 }
 export type Errors = typeof Errors
+
 export const Warnings = {
 	checkExtraneousModifiers(ctx: ParseContext<unknown>, span: Span, modifiers: Dict<true>, variety: string) {
 		const m = Object.keys(modifiers)
