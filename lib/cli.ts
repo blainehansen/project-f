@@ -4,8 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'fs'
 
-
-import { processFile } from './templating/process'
+import { compileFile } from './index'
 
 const args = process.argv.slice(2)
 

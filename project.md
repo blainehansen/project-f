@@ -1,3 +1,20 @@
+- dom interaction library (need to actually think about new interface given move toward more imperative style and fragment gathering)
+
+- much more exact and advanced thinking about reactivity
+  - safe class-based api
+  - actually do various combinators
+  - need way to safely mutate signals in a reactive context
+
+- state management system, especially with "thunk" objects, and desperately want self canceling async reactive wrappers
+- routing, static vs compile time resolved vs dynamically resolved
+- how to constrain type system to only allow node and browser apis in certain places
+- wolf (and basic html version using third party parser)
+- markdown variant
+- whatever macro layers
+
+
+
+
 # framework
 
 - create "raw" version of a simple rigor todo app, one without the wolf templates and webpack loading

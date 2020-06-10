@@ -2,24 +2,6 @@ import { effect, statefulEffect, Mutable, Immutable } from '../reactivity'
 import { NonEmpty, NonLone, Overwrite, KeysOfType, Falsey } from '../utils'
 
 
-export function nodeReceiver<N extends Node>(node: N, fn: (node: N) => void) {
-	fn(node)
-}
-
-export function joinClass(...classes: NonLone<string | Falsey>) {
-	return classes.filter(c => !!c).join(' ')
-}
-// export function joinReactiveClass(
-// 	...classes: NonLone<Immutable<string | Falsey> | string | Falsey>
-// ) {
-// 	const actual = classes.filter(c => !!c)
-// 	if (actual.length === 0) throw new Error()
-
-// 	return derived(() => {
-// 		//
-// 	}, )
-// }
-
 export function createElement<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
 	tagName: K,
@@ -28,7 +10,6 @@ export function createElement<K extends keyof HTMLElementTagNameMap>(
   parent.appendChild(el)
   return el
 }
-
 export function createElementClass<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
 	tagName: K,

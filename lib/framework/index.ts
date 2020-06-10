@@ -28,8 +28,9 @@ export type Slots<C> = C extends { slots: Dict<any> }
 
 // export type Refs<C> = C extends { refs: Dict<any> }
 // 	? {
-// 		[K in keyof C['refs']]: C['refs'][K] extends HTMLElementTagNameMap
-// 			? HTMLElementTagNameMap[C['refs'][K]]
+// 		[K in keyof C['refs']]:
+// 			C['refs'][K] extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[C['refs'][K]]
+// 			: C['refs'][K] extends keyof SVGElementTagNameMap ? SVGElementTagNameMap[C['refs'][K]]
 // 			: never
 // 	}
 // 	: {}
