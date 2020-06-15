@@ -20,11 +20,9 @@ export type Primitive = string | number | boolean | null | undefined
 export type Falsey = undefined | null | false
 export type OnlyAllow<A, E> = A extends E ? A : never
 export type Comparator<T> = (left: T, right: T) => boolean
+export type Reducer<T> = (left: T, right: T) => T
 
 export const noop = () => {}
-export const alwaysTrue = () => true
-export const alwaysFalse = () => false
-export const eq = <T>(left: T, right: T) => left === right
 export function exhaustive(v: never) {}
 
 export type Fn = () => unknown
