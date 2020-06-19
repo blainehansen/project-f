@@ -7,8 +7,45 @@ export interface Mutable<T> extends Immutable<T> {
 	s(next: T): void,
 }
 
+export function borrow<T>(box: Immutable<T> | Mutable<T>): Immutable<T> {
+	return box
+}
+
 // export type Watchable<T = unknown> = OnlyWatchable<T> | Derived<T>
 // export type Watcher = OnlyWatcher | Derived<unknown>
+
+// interface Triggerable {
+// 	trigger(): void,
+// 	triggered(): boolean,
+// 	untrigger(): void,
+// }
+
+// interface Watchable<T = unknown> extends Triggerable {
+// 	watchers(): Set<Watcher>,
+// 	addWatcher(watcher: Watcher): void,
+// 	removeWatcher(watcher: Watcher): void,
+// 	sample(): T,
+// }
+
+// interface Watchable {
+// 	addDependency(watchable: Watchable): void,
+// 	addChild(watcher: Watcher): void,
+// 	ready(): boolean,
+// 	reset(final: boolean): void,
+// }
+
+// OnlyWatchable:
+// 	trigger is called whenever s is used to mutate, notifies all Watchers by calling their trigger
+// 	triggered is pending
+// 	untrigger is finish
+// OnlyWatcher:
+// 	trigger is called by watchable dependencies
+// 	triggered is triggered
+// 	untrigger is run
+// WatchableWatcher:
+// 	trigger is called by watchable dependencies, both notifies all Watchers by calling their trigger and calls s on internal watchable
+// 	triggered is
+
 
 export interface Watchable<T = unknown> {
 	watchers(): Set<Watcher>,
@@ -35,9 +72,12 @@ const REACTIVITY_CONTEXT = {
 	batch: null as null | Batch,
 	owner: null as null | Watcher,
 	watcher: null as null | Watcher,
+	// what is runWithin really for?
+	// it's for any Watcher to capture children Watchers to ensure they're cleaned up properly
+	// and it's for variable dependency
 	runWithin<T>(fn: () => T, pushWatcher: Watcher, useWatcher: boolean) {
-		// TODO for computations that didn't capture any actual signals
-		// we should send a flag or something indicating to just throw everything away
+		// TODO if useWatcher is true, and after running the fn no Watchables were actually gathered,
+		// then that Watcher will *never be run again*, since it has no way of being triggered
 		const { owner, watcher, mutationAllowed } = this
 		this.owner = pushWatcher
 		this.watcher = useWatcher ? pushWatcher : null
@@ -72,9 +112,11 @@ class Batch {
 	static handleWatchable(REACTIVITY_CONTEXT: REACTIVITY_CONTEXT, watchable: Watchable) {
 		const { batch } = REACTIVITY_CONTEXT
 		if (batch === null) {
-			const batch = new Batch()
-			batch.addWatchable(watchable)
-			batch.run()
+			const immediateBatch = new Batch()
+			immediateBatch.addWatchable(watchable)
+			REACTIVITY_CONTEXT.batch = immediateBatch
+			immediateBatch.run()
+			REACTIVITY_CONTEXT.batch = null
 		}
 		else
 			batch.addWatchable(watchable)
@@ -135,7 +177,6 @@ export function batch(fn: Fn) {
 // 	it seems the first is most natural, since the Watcher side is the "receiver" of information originally
 
 export abstract class OnlyWatchable<T> implements Watchable<T>, Mutable<T> {
-	readonly type = 'OnlyWatchable' as const
 	protected REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
 
 	protected readonly _watchers = new Set<Watcher>()
@@ -154,7 +195,11 @@ export abstract class OnlyWatchable<T> implements Watchable<T>, Mutable<T> {
 	}
 
 	protected _pending = false
-	pend() { this._pending = true }
+	pend() {
+		this._pending = true
+		for (const watcher of this._watchers)
+			watcher.trigger()
+	}
 	abstract pending(): boolean
 	abstract finish(): void
 
@@ -172,7 +217,6 @@ export abstract class OnlyWatchable<T> implements Watchable<T>, Mutable<T> {
 }
 
 export abstract class OnlyWatcher implements Watcher {
-	readonly type = 'OnlyWatcher' as const
 	protected REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
 
 	abstract addDependency(watchable: Watchable): void
@@ -196,12 +240,14 @@ export abstract class OnlyWatcher implements Watcher {
 	abstract run(): void
 }
 abstract class FixedDependencyWatcher extends OnlyWatcher {
+	constructor(protected readonly destructor: Fn) { super() }
 	addDependency(_watchable: Watchable) {}
 	abstract ready(): boolean
 	abstract reset(final: boolean): void
 	abstract run(): void
 }
 abstract class VariableDependencyWatcher extends OnlyWatcher {
+	constructor(protected readonly destructor: Fn) { super() }
 	protected readonly _dependencies = new Set<Watchable>()
 	addDependency(watchable: Watchable) {
 		this._dependencies.add(watchable)
@@ -222,197 +268,96 @@ abstract class VariableDependencyWatcher extends OnlyWatcher {
 	abstract run(): void
 }
 
+class StatelessEffect extends VariableDependencyWatcher {
+	constructor(protected readonly fn: Fn, destructor: Fn) {
+		super(destructor)
+		this.REACTIVITY_CONTEXT.runWithin(this.fn, this, true)
+	}
+	run() {
+		this.reset(false)
+		this.REACTIVITY_CONTEXT.runWithin(this.fn, this, true)
+	}
+}
+export function effect(fn: (destructor: Registrar) => unknown): Handle {
+	let userDestructor = noop
+	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
+	const eff = new StatelessEffect(
+		() => { fn(destructorRegistrar) },
+		() => { userDestructor() },
+	)
+	return () => { eff.reset(true) }
+}
 
-export abstract class Derived<T> extends OnlyWatcher implements Watchable<T> {
-	constructor(protected readonly proxyWatchable: OnlyWatchable<T>) { super() }
+class StatefulEffect<T> extends VariableDependencyWatcher {
+	constructor(protected state: T, protected readonly fn: (state: T) => T, destructor: Fn) {
+		super(destructor)
+		this.state = this.REACTIVITY_CONTEXT.runWithin(() => this.fn(this.state), this, true)
+	}
+	run() {
+		this.reset(false)
+		this.state = this.REACTIVITY_CONTEXT.runWithin(() => this.fn(this.state), this, true)
+	}
+}
+export function statefulEffect<T>(
+	fn: (state: T, destructor: Registrar) => T,
+	initialState: T,
+): Handle {
+	let userDestructor = noop
+	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
+	const eff = new StatefulEffect(
+		initialState,
+		state => fn(state, destructorRegistrar),
+		() => { userDestructor() },
+	)
 
-	abstract addDependency(watchable: Watchable): void
-	abstract ready(): boolean
-	abstract reset(final: boolean): void
-	abstract run(): void
-
-	watchers(): Set<Watcher> { return this.proxyWatchable.watchers() }
-	addWatcher(watcher: Watcher) { return this.proxyWatchable.addWatcher(watcher) }
-	removeWatcher(watcher: Watcher) { return this.proxyWatchable.removeWatcher(watcher) }
-	pend() { return this.proxyWatchable.pend() }
-	pending(): boolean { return this.proxyWatchable.pending() }
-	finish() { return this.proxyWatchable.finish() }
-	sample(): T { return this.proxyWatchable.sample() }
+	return () => { eff.reset(true) }
 }
 
 
 
-abstract class FixedDependencyPureDerived<T> extends Derived<T> implements Immutable<T> {
-	r() { return this.proxyWatchable.r() }
+class Signal extends OnlyWatchable<void> {
+	pending() { return this._pending }
+	finish() { this._pending = false }
+	r() { this.maybeAddGlobalWatcher() }
+	sample() {}
+	s() { this.notify() }
 }
-abstract class FixedDependencyDriftingDerived<T> extends FixedDependencyPureDerived<T> implements Mutable<T> {
-	s(next: T) { return this.proxyWatchable.s(next) }
-}
-abstract class VariableDependencyPureDerived<T> extends Derived<T> implements Immutable<T> {
-	r() { return this.proxyWatchable.r() }
-}
-abstract class VariableDependencyDriftingDerived<T> extends VariableDependencyPureDerived<T> implements Mutable<T> {
-	s(next: T) { return this.proxyWatchable.s(next) }
+export function signal(): Mutable<void> {
+	return new Signal()
 }
 
+const EMPTY: unique symbol = Symbol()
+type EMPTY = typeof EMPTY
 
-
-
-
-// abstract class Effect extends OnlyWatcher {
-// 	constructor(protected readonly destructor: Fn) { super() }
-
-// 	protected readonly _dependencies = new Set<Watchable>()
-// 	addDependency(watchable: Watchable) {
-// 		this._dependencies.add(watchable)
-// 	}
-// 	ready(): boolean {
-// 		for (const dependency of this._dependencies)
-// 			if (dependency.pending()) return false
-// 		return true
-// 	}
-
-// 	reset(final: boolean) {
-// 		for (const dependency of this._dependencies)
-// 			dependency.removeWatcher(this)
-// 		this._dependencies.clear()
-
-// 		this.globalReset(final)
-// 		this.destructor()
-// 	}
-// 	abstract run(): void
-// }
-
-// class StatelessEffect extends Effect {
-// 	constructor(protected readonly fn: Fn, destructor: Fn) {
-// 		super(destructor)
-// 		this.REACTIVITY_CONTEXT.runWithin(this.fn, this, true)
-// 	}
-// 	run() {
-// 		this.reset(false)
-// 		this.REACTIVITY_CONTEXT.runWithin(this.fn, this, true)
-// 	}
-// }
-// export function effect(fn: (destructor: Registrar) => unknown): Handle {
-// 	let userDestructor = noop
-// 	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
-// 	const eff = new StatelessEffect(
-// 		() => { fn(destructorRegistrar) },
-// 		() => { userDestructor() },
-// 	)
-// 	return () => { eff.reset(true) }
-// }
-
-// class StatefulEffect<T> extends Effect {
-// 	constructor(protected state: T, protected readonly fn: (state: T) => T, destructor: Fn) {
-// 		super(destructor)
-// 		this.state = this.REACTIVITY_CONTEXT.runWithin(() => this.fn(this.state), this, true)
-// 	}
-// 	run() {
-// 		this.reset(false)
-// 		this.state = this.REACTIVITY_CONTEXT.runWithin(() => this.fn(this.state), this, true)
-// 	}
-// }
-// export function statefulEffect<T>(
-// 	fn: (state: T, destructor: Registrar) => T,
-// 	initialState: T,
-// ): Handle {
-// 	let userDestructor = noop
-// 	const destructorRegistrar = (destructor: Fn) => { userDestructor = destructor }
-// 	const eff = new StatefulEffect(
-// 		initialState,
-// 		state => fn(state, destructorRegistrar),
-// 		() => { userDestructor() },
-// 	)
-
-// 	return () => { eff.reset(true) }
-// }
-
-
-
-
-// class Signal extends OnlyWatchable<void> {
-// 	pending() { return this._pending }
-// 	finish() { this._pending = false }
-// 	r() { this.maybeAddGlobalWatcher() }
-// 	sample() {}
-// 	s() { this.notify() }
-// }
-// export function signal(): Mutable<void> {
-// 	return new Signal()
-// }
-
-// class DerivedSignal extends Derived<void> {
-// 	constructor(protected readonly watchables: NonEmpty<Watchable>) {
-// 		super()
-// 		for (const watchable of this.watchables)
-// 			watchable.addWatcher(this)
-// 	}
-
-// 	addDependency(_watchable: Watchable) {}
-// 	ready(): boolean {
-// 		for (const watchable of this.watchables)
-// 			if (watchable.pending()) return false
-// 		return true
-// 	}
-
-// 	reset(final: boolean) {
-// 		for (const watchable of this.watchables)
-// 			watchable.removeWatcher(this)
-
-// 		this.globalReset(final)
-// 	}
-// 	run() {
-// 		this.reset(false)
-// 		for (const watchable of this.watchables)
-// 			watchable.addWatcher(this)
-// 	}
-
-// 	pending() { return this._pending }
-// 	finish() { this._pending = false }
-// 	r() { this.maybeAddGlobalWatcher() }
-// 	sample() {}
-// 	s() { this.notify() }
-// }
-// export function derivedSignal(...watchables: NonEmpty<Watchable>) {
-// 	return new DerivedSignal(watchables)
-// }
-
-
-
-
-// const EMPTY: unique symbol = Symbol()
-// type EMPTY = typeof EMPTY
-
-// class Channel<T> extends OnlyWatchable<T> {
-// 	protected next: T | EMPTY = EMPTY
-// 	constructor(protected value: T) { super() }
-// 	pending() {
-// 		return this._pending || this.next !== EMPTY
-// 	}
-// 	finish() {
-// 		// TODO perhaps add an assertion that checks if both _pending is true and next === EMPTY
-// 		// if that's happened, then we were pended but never received a new value
-// 		this._pending = false
-// 		if (this.next === EMPTY) return
-// 		this.value = this.next
-// 		this.next = EMPTY
-// 	}
-// 	r() {
-// 		this.maybeAddGlobalWatcher()
-// 		return this.value
-// 	}
-// 	sample() {
-// 		return this.value
-// 	}
-// 	s(next: T) {
-// 		this.notify(next)
-// 		this.next = next
-// 	}
-// }
-// export function channel<T>(initial: T): Mutable<T> {
-// 	return new Channel(initial)
-// }
+class Channel<T> extends OnlyWatchable<T> {
+	protected next: T | EMPTY = EMPTY
+	constructor(protected value: T) { super() }
+	pending() {
+		return this._pending || this.next !== EMPTY
+	}
+	finish() {
+		// TODO perhaps add an assertion that checks if both _pending is true and next === EMPTY
+		// if that's happened, then we were pended but never received a new value
+		this._pending = false
+		if (this.next === EMPTY) return
+		this.value = this.next
+		this.next = EMPTY
+	}
+	r() {
+		this.maybeAddGlobalWatcher()
+		return this.value
+	}
+	sample() {
+		return this.value
+	}
+	s(next: T) {
+		this.next = next
+		this.notify(next)
+	}
+}
+export function channel<T>(initial: T): Mutable<T> {
+	return new Channel(initial)
+}
 
 // class DerivedChannel<U, T> extends Derived<T> {
 // 	protected value: T
@@ -461,52 +406,148 @@ abstract class VariableDependencyDriftingDerived<T> extends VariableDependencyPu
 // 	}
 // }
 
+class ReducerChannel<T> extends Channel<T> {
+	constructor(
+		value: T,
+		protected readonly reducerFn: Reducer<T>,
+	) { super(value) }
+
+	s(next: T) {
+		this.next = this.reducerFn(this.value, next)
+		this.notify(next)
+	}
+}
+export function reducer<T>(initial: T, reducerFn: Reducer<T>): Mutable<T> {
+	return new ReducerChannel(initial, reducerFn)
+}
+
+class ValueChannel<T> extends Channel<T> {
+	constructor(value: T) { super(value) }
+
+	s(next: T) {
+		if (this.value === next) return
+		super.s(next)
+	}
+}
+// https://github.com/microsoft/TypeScript/issues/22596
+export function primitive<T>(initial: T): [T] extends [Primitive] ? Mutable<T> : never {
+	return new ValueChannel(initial) as unknown as [T] extends [Primitive] ? Mutable<T> : never
+}
+export function pointer<T>(initial: T): Mutable<T> {
+	return new ValueChannel(initial)
+}
+
+class DistinctChannel<T> extends Channel<T> {
+	constructor(value: T, readonly comparator: Comparator<T>) { super(value) }
+
+	s(next: T) {
+		if (this.comparator(this.value, next)) return
+		super.s(next)
+	}
+}
+export function distinct<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
+	return new DistinctChannel(initial, comparator)
+}
 
 
 
+export abstract class Derived<T> extends OnlyWatcher implements Watchable<T>, Immutable<T> {
+	constructor(protected readonly proxyWatchable: OnlyWatchable<T>) { super() }
+
+	trigger() {
+		this._triggered = true
+		this.proxyWatchable.pend()
+	}
+
+	abstract addDependency(watchable: Watchable): void
+	abstract ready(): boolean
+	abstract reset(final: boolean): void
+	abstract run(): void
+
+	watchers(): Set<Watcher> { return this.proxyWatchable.watchers() }
+	addWatcher(watcher: Watcher) { return this.proxyWatchable.addWatcher(watcher) }
+	removeWatcher(watcher: Watcher) { return this.proxyWatchable.removeWatcher(watcher) }
+	pend() { return this.proxyWatchable.pend() }
+	pending(): boolean { return this.proxyWatchable.pending() }
+	finish() { return this.proxyWatchable.finish() }
+	sample(): T { return this.proxyWatchable.sample() }
+
+	r() { return this.proxyWatchable.r() }
+}
+
+abstract class FixedDependencyPureDerived<T> extends Derived<T>{
+}
+abstract class FixedDependencyDriftingDerived<T> extends FixedDependencyPureDerived<T> implements Mutable<T> {
+	s(next: T) { return this.proxyWatchable.s(next) }
+}
+abstract class VariableDependencyPureDerived<T> extends Derived<T>{
+	protected readonly _dependencies = new Set<Watchable>()
+	addDependency(watchable: Watchable) {
+		this._dependencies.add(watchable)
+	}
+	ready(): boolean {
+		for (const dependency of this._dependencies)
+			if (dependency.pending()) return false
+		return true
+	}
+	reset(final: boolean) {
+		for (const dependency of this._dependencies)
+			dependency.removeWatcher(this)
+		this._dependencies.clear()
+
+		this.globalReset(final)
+	}
+	abstract run(): void
+}
+
+class Computed<T> extends VariableDependencyPureDerived<T> {
+	// UNSAFE
+	constructor(protected readonly transformer: () => T, comparator?: Comparator<T>) {
+		super(undefined as unknown as OnlyWatchable<T>)
+		const value = this.REACTIVITY_CONTEXT.runWithin(transformer, this, true)
+		;(this as any).proxyWatchable = comparator ? new DistinctChannel(value, comparator) : new ValueChannel(value)
+	}
+	run() {
+		this.reset(false)
+		const value = this.REACTIVITY_CONTEXT.runWithin(this.transformer, this, true)
+		this.proxyWatchable.s(value)
+	}
+}
+export function computed<T>(transformer: () => T, comparator?: Comparator<T>): Immutable<T> {
+	return new Computed(transformer, comparator)
+}
+
+abstract class VariableDependencyDriftingDerived<T> extends VariableDependencyPureDerived<T> implements Mutable<T> {
+	s(next: T) { return this.proxyWatchable.s(next) }
+}
 
 
+// class DerivedSignal extends FixedDependencyPureDerived<void> {
+// 	constructor(protected readonly watchables: NonEmpty<Watchable>) {
+// 		super(new Signal())
+// 		for (const watchable of this.watchables)
+// 			watchable.addWatcher(this)
+// 	}
 
+// 	addDependency(_watchable: Watchable) {}
+// 	ready(): boolean {
+// 		for (const watchable of this.watchables)
+// 			if (watchable.pending()) return false
+// 		return true
+// 	}
+// 	reset(final: boolean) {
+// 		for (const watchable of this.watchables)
+// 			watchable.removeWatcher(this)
 
-// // class ReducerChannel<T> extends Channel<T> {
-// // 	constructor(
-// // 		value: T,
-// // 		protected readonly reducerFn: Reducer<T>,
-// // 	) { super(value) }
-
-// // 	s(next: T) {
-// // 		this.notify(next)
-// // 		this.next = this.reducerFn(this.value, next)
-// // 	}
-// // }
-// // export function reducer<T>(initial: T, reducerFn: Reducer<T>): Mutable<T> {
-// // 	return new ReducerChannel(initial, reducerFn)
-// // }
-
-// // class ValueChannel<T> extends Channel<T> {
-// // 	constructor(value: T) { super(value) }
-
-// // 	s(next: T) {
-// // 		if (this.value === next) return
-// // 		super.s(next)
-// // 	}
-// // }
-// // // https://github.com/microsoft/TypeScript/issues/22596
-// // export function primitive<T>(initial: T): [T] extends [Primitive] ? Mutable<T> : never {
-// // 	return new ValueChannel(initial) as unknown as [T] extends [Primitive] ? Mutable<T> : never
-// // }
-// // export function pointer<T>(initial: T): Mutable<T> {
-// // 	return new ValueChannel(initial)
-// // }
-
-// // class DistinctChannel<T> extends Channel<T> {
-// // 	constructor(value: T, readonly comparator: Comparator<T>) { super(value) }
-
-// // 	s(next: T) {
-// // 		if (this.comparator(this.value, next)) return
-// // 		super.s(next)
-// // 	}
-// // }
-// // export function distinct<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
-// // 	return new DistinctChannel(initial, comparator)
-// // }
+// 		this.globalReset(final)
+// 	}
+// 	run() {
+// 		this.reset(false)
+// 		for (const watchable of this.watchables)
+// 			watchable.addWatcher(this)
+// 		this.proxyWatchable.s()
+// 	}
+// }
+// export function derivedSignal(...watchables: NonEmpty<Watchable>) {
+// 	return new DerivedSignal(watchables)
+// }

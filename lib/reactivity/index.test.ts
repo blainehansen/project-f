@@ -2,638 +2,698 @@ import 'mocha'
 import { expect } from 'chai'
 import { assert_type as assert, tuple as t } from '@ts-std/types'
 
-import { data, ref, value, channel, batch, effect, statefulEffect, computed, thunk, sample, Immutable } from './index'
+import {
+	Immutable, Mutable, batch,
+	signal, channel, primitive, pointer, distinct, borrow,
+	/*derived, driftingDerived,*/ computed, /*driftingComputed,*/ /*thunk,*/
+	effect, statefulEffect
+} from './index'
 
 
-describe('value', () => it('works', () => {
-	const a = value('a')
-	expect(a()).equal('a')
-	a('')
-	expect(a()).equal('')
-
-	let bad: never = value([])
-	bad = value({})
-	bad = value(new Set())
-}))
-
-describe('boolean value', () => it('works', () => {
-	const v = value(true)
-	const a: boolean = v()
-	const b: void = v(false)
-	const c: void = v(true)
-}))
-
-describe('data', () => it('works', () => {
-	const a = data([0, 0, 0], (left, right) => left.length === right.length)
-	expect(a()).eql([0, 0, 0])
-
-	// we don't just not alert dependencies
-	// we drop the value on the ground
-	a([1, 2, 3])
-	expect(a()).eql([0, 0, 0])
-
-	let runCount = 0
-	let currentMessage = ''
-	effect(() => {
-		runCount++
-		currentMessage = a().join(', ')
+describe('OnlyWatchable', () => {
+	it('signal', () => {
+		const s = signal()
+		s.r()
+		s.s()
 	})
 
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('0, 0, 0')
+	it('channel', () => {
+		const a = channel([0, 0, 0])
+		expect(a.r()).eql([0, 0, 0])
 
-	a([1])
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('1')
+		a.s([1, 2, 3])
+		expect(a.r()).eql([1, 2, 3])
 
-	a([0])
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('1')
-}))
-
-
-describe('channel', () => it('works', () => {
-	const a = channel([0, 0, 0])
-	expect(a()).eql([0, 0, 0])
-
-	a([1, 2, 3])
-	expect(a()).eql([1, 2, 3])
-
-	let runCount = 0
-	let currentMessage = ''
-	effect(() => {
-		runCount++
-		currentMessage = a().join(', ')
-	})
-
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('1, 2, 3')
-
-	a([1])
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('1')
-
-	a([0])
-	expect(runCount).equal(3)
-	expect(currentMessage).equal('0')
-}))
-
-
-describe('readonly ref', () => it('works', () => {
-	const a = value('a')
-	const r = ref(a)
-	assert.values_callable(r, t(), true)
-	assert.values_callable(r, t('b'), false)
-
-	expect(r()).equal('a')
-
-	let runCount = 0
-	let currentMessage = ''
-	effect(() => {
-		runCount++
-		currentMessage = r()
-	})
-
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('a')
-
-	a('b')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('b')
-
-	a('b')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('b')
-}))
-
-
-describe('simple effect', () => it('works', () => {
-	const a = value('a')
-	let runCount = 0
-	let currentMessage = ''
-	effect(() => {
-		runCount++
-		currentMessage = a()
-	})
-
-	expect(currentMessage).equal('a')
-	expect(runCount).equal(1)
-
-	a('b')
-	expect(currentMessage).equal('b')
-	expect(runCount).equal(2)
-
-	// checking for non repetition
-	a('b')
-	expect(currentMessage).equal('b')
-	expect(runCount).equal(2)
-
-	a('c')
-	expect(currentMessage).equal('c')
-	expect(runCount).equal(3)
-}))
-
-describe('statefulEffect', () => it('works', () => {
-	const a = channel(0)
-	let n = 0
-	let runCount = 0
-	let destructorRunCount = 0
-	const stop = statefulEffect((b, destroy) => {
-		n = a() + b
-		runCount++
-		destroy(() => {
-			destructorRunCount++
-			n = 0
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = a.r().join(', ')
 		})
 
-		return ++b
-	}, 0)
+		expect(runCount === 1).true
+		expect(currentMessage === '1, 2, 3').true
 
-	expect(n).equal(0)
-	expect(runCount).equal(1)
-	expect(destructorRunCount).equal(0)
+		a.s([1])
+		expect(runCount === 2).true
+		expect(currentMessage === '1').true
 
-	a(0)
-	expect(a()).equal(0)
-	expect(n).equal(1)
-	expect(runCount).equal(2)
-	expect(destructorRunCount).equal(1)
-
-	a(0)
-	expect(a()).equal(0)
-	expect(n).equal(2)
-	expect(runCount).equal(3)
-	expect(destructorRunCount).equal(2)
-
-	a(1)
-	expect(a()).equal(1)
-	expect(n).equal(4)
-	expect(runCount).equal(4)
-	expect(destructorRunCount).equal(3)
-
-	stop()
-	expect(a()).equal(1)
-	expect(n).equal(0)
-	expect(runCount).equal(4)
-	expect(destructorRunCount).equal(4)
-}))
-
-describe('effect disallows mutation', () => it('works', () => {
-	const a = value('a')
-	expect(() => effect(() => a('b'))).throw('readonly')
-}))
-
-
-describe('complex effect', () => it('works', () => {
-	const shouldRepeat = value(true)
-	const str = value('initial')
-	const count = value(1)
-	const message = value('message')
-
-	let runCount = 0
-	let currentMessage = ''
-
-	effect(() => {
-		runCount++
-		if (shouldRepeat())
-			currentMessage = str().repeat(count())
-		else
-			currentMessage = message()
+		a.s([0])
+		expect(runCount === 3).true
+		expect(currentMessage === '0').true
 	})
 
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('initial')
+	it('primitive', () => {
+		const a = primitive('a')
+		expect(a.r() === 'a').true
+		a.s('b')
+		expect(a.r() === 'b').true
 
-	shouldRepeat(false)
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('message')
-
-	// deregistered signals
-	count(2)
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('message')
-
-	shouldRepeat(true)
-	expect(runCount).equal(3)
-	expect(currentMessage).equal('initialinitial')
-
-	count(1)
-	expect(runCount).equal(4)
-	expect(currentMessage).equal('initial')
-}))
-
-
-describe('batch', () => it('works', () => {
-	const str = value('initial')
-	const count = value(1)
-
-	let runCount = 0
-	let currentMessage = ''
-
-	effect(() => {
-		runCount++
-		currentMessage = str().repeat(count())
+		let bad: never = primitive([])
+		bad = primitive({})
+		bad = primitive(new Set())
+	})
+	it('boolean primitive', () => {
+		const v = primitive(true)
+		const a: boolean = v.r()
+		const b: void = v.s(false)
+		const c: void = v.s(true)
 	})
 
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('initial')
-
-	batch(() => {
-		count(4)
-		expect(count()).equal(1)
-		expect(runCount).equal(1)
-		expect(currentMessage).equal('initial')
-
-		str('blah')
-		expect(str()).equal('initial')
-		expect(runCount).equal(1)
-		expect(currentMessage).equal('initial')
+	it('pointer', () => {
+		const arrOne = [] as number[]
+		const a = pointer(arrOne)
+		expect(a.r() === arrOne).true
+		const arrTwo = [1, 2, 3]
+		a.s(arrTwo)
+		expect(a.r() === arrTwo).true
 	})
 
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('blahblahblahblah')
-}))
+	it('distinct', () => {
+		const a = distinct([0, 0, 0], (left, right) => left.length === right.length)
+		expect(a.r()).eql([0, 0, 0])
 
+		// we don't just not alert dependencies
+		// we drop the value on the ground
+		a.s([1, 2, 3])
+		expect(a.r()).eql([0, 0, 0])
 
-describe('computed', () => it('works', () => {
-	const str = value('a')
-	let runCount = 0
-	const upper = computed(() => {
-		runCount++
-		return str().toUpperCase()
-	})
-	assert.values_callable(upper, t(), true)
-	assert.values_callable(upper, t('b'), false)
-
-	expect(upper() as string).equal('A')
-	expect(runCount).equal(1)
-
-	str('b')
-	expect(upper()).equal('B')
-	expect(runCount).equal(2)
-
-	str('b')
-	expect(upper()).equal('B')
-	expect(runCount).equal(2)
-}))
-
-
-describe('computed diamond', () => it('works', () => {
-	const str = value('a')
-	const evenLetters = computed(() => str().length % 2 === 0)
-	const upperStr = computed(() => str().toUpperCase())
-
-	expect(str()).equal('a')
-	expect(evenLetters()).equal(false)
-	expect(upperStr()).equal('A')
-
-	let runCount = 0
-	let currentMessage = ''
-
-	effect(() => {
-		runCount++
-		currentMessage = evenLetters() ? `${upperStr()} even` : upperStr()
-	})
-
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('A')
-
-	str('aa')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('AA even')
-}))
-
-
-describe('complex computed diamond', () => it('works', () => {
-	const append = value('append')
-	const str = value('a')
-
-	let evenLettersRunCount = 0
-	const evenLetters = computed(() => {
-		evenLettersRunCount++
-		return str().length % 2 === 0
-	})
-	let transformedStrRunCount = 0
-	const transformedStr = computed(() => {
-		transformedStrRunCount++
-		const app = ` ${append()}`
-		return evenLetters()
-			? str().toUpperCase() + app
-			: str() + app
-	})
-
-	expect(append()).equal('append')
-	expect(str()).equal('a')
-	expect(evenLetters()).equal(false)
-	expect(transformedStr()).equal('a append')
-	expect(evenLettersRunCount).equal(1)
-	expect(transformedStrRunCount).equal(1)
-
-	let runCount = 0
-	let currentMessage = ''
-	effect(() => {
-		runCount++
-		currentMessage = evenLetters() ? `${transformedStr()} even` : transformedStr()
-	})
-
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('a append')
-	expect(evenLettersRunCount).equal(1)
-	expect(transformedStrRunCount).equal(1)
-
-	str('aa')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('AA append even')
-	expect(evenLettersRunCount).equal(2)
-	expect(transformedStrRunCount).equal(2)
-}))
-
-
-describe('computed circular reference', () => it('works', () => {
-	const str = value('a')
-	const upperStr: Immutable<string> = computed(() => {
-		return str() === str().toUpperCase()
-			? alreadyUpper() ? str() : str()
-			: str().toUpperCase()
-	})
-	const alreadyUpper: Immutable<boolean> = computed(() => {
-		return upperStr() === str()
-	})
-
-	expect(() => str('A')).throw('circular reference')
-}))
-
-
-describe('thunk', () => it('works', () => {
-	const str = value('a')
-	let runCount = 0
-	const upperStr = thunk(() => {
-		runCount++
-		return str().toUpperCase()
-	})
-
-	expect(runCount).equal(0)
-	expect(upperStr()).equal('A')
-	expect(runCount).equal(1)
-}))
-
-
-describe('destructors', () => it('works', () => {
-	let destructorRunCount = 0
-	let totalRunCount = 0
-	let runCount = 0
-	const s = value(true)
-
-	const stop = effect(destroy => {
-		s()
-		runCount++
-		totalRunCount++
-		destroy(() => {
-			destructorRunCount++
-			runCount = 0
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = a.r().join(', ')
 		})
+
+		expect(runCount === 1).true
+		expect(currentMessage === '0, 0, 0').true
+
+		a.s([1])
+		expect(runCount === 2).true
+		expect(currentMessage === '1').true
+
+		a.s([0])
+		expect(runCount === 2).true
+		expect(currentMessage === '1').true
 	})
 
-	expect(runCount).equal(1)
-	expect(totalRunCount).equal(1)
-	expect(destructorRunCount).equal(0)
+	it('immutable borrow', () => {
+		const a = primitive('a')
+		const r = borrow(a)
+		assert.same<typeof a, Mutable<string>>(true)
+		assert.same<typeof r, Mutable<string>>(false)
+		assert.same<typeof r, Immutable<string>>(true)
 
-	s(false)
-	expect(runCount).equal(1)
-	expect(totalRunCount).equal(2)
-	expect(destructorRunCount).equal(1)
+		expect(r.r() === 'a').true
 
-	s(true)
-	expect(runCount).equal(1)
-	expect(totalRunCount).equal(3)
-	expect(destructorRunCount).equal(2)
-
-	stop()
-	expect(runCount).equal(0)
-	expect(totalRunCount).equal(3)
-	expect(destructorRunCount).equal(3)
-
-	// all watching should have stopped
-	s(false)
-	expect(runCount).equal(0)
-	expect(totalRunCount).equal(3)
-	expect(destructorRunCount).equal(3)
-
-	s(true)
-	expect(runCount).equal(0)
-	expect(totalRunCount).equal(3)
-	expect(destructorRunCount).equal(3)
-}))
-
-
-describe('sample', () => it('works', () => {
-	const a = value('a')
-	const b = value('b')
-
-	let runCount = 0
-	let currentMessage = ''
-
-	effect(() => {
-		runCount++
-		currentMessage = `${sample(a)} ${b()}`
-	})
-
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('a b')
-
-	a('aa')
-	expect(runCount).equal(1)
-	expect(currentMessage).equal('a b')
-
-	b('bb')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('aa bb')
-
-	a('a')
-	expect(runCount).equal(2)
-	expect(currentMessage).equal('aa bb')
-
-	b('b')
-	expect(runCount).equal(3)
-	expect(currentMessage).equal('a b')
-}))
-
-
-describe('nested computations', () => it('works', () => {
-	const active = value(true)
-	const a = value('a')
-	const b = value('b')
-	let aRunCount = 0
-	let aMessage = ''
-	let bRunCount = 0
-	let bMessage = ''
-
-	effect(() => {
-		if (!active()) return
-		effect(destroy => {
-			aRunCount++
-			aMessage = a()
-			destroy(() => { aMessage = '' })
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = r.r()
 		})
-		effect(destroy => {
-			bRunCount++
-			bMessage = b()
-			destroy(() => { bMessage = '' })
+
+		expect(runCount === 1).true
+		expect(currentMessage === 'a').true
+
+		a.s('b')
+		expect(runCount === 2).true
+		expect(currentMessage === 'b').true
+
+		a.s('b')
+		expect(runCount === 2).true
+		expect(currentMessage === 'b').true
+	})
+})
+
+
+describe('OnlyWatcher', () => {
+	it('signal effect', () => {
+		const s = signal()
+		let runCount = 0
+		effect(() => {
+			s.r()
+			runCount++
 		})
+
+		expect(runCount === 1).true
+		s.s()
+		expect(runCount === 2).true
+		s.s()
+		expect(runCount === 3).true
 	})
 
-	expect(aRunCount).equal(1)
-	expect(aMessage).equal('a')
-	expect(bRunCount).equal(1)
-	expect(bMessage).equal('b')
+	it('simple effect', () => {
+		const a = primitive('a')
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = a.r()
+		})
 
-	batch(() => { a('aa'); b('bb') })
-	expect(aRunCount).equal(2)
-	expect(aMessage).equal('aa')
-	expect(bRunCount).equal(2)
-	expect(bMessage).equal('bb')
+		expect(currentMessage === 'a').true
+		expect(runCount === 1).true
 
-	active(false)
-	expect(aRunCount).equal(2)
-	expect(aMessage).equal('')
-	expect(bRunCount).equal(2)
-	expect(bMessage).equal('')
+		a.s('b')
+		expect(currentMessage === 'b').true
+		expect(runCount === 2).true
 
-	batch(() => { a('a'); b('b') })
-	expect(aRunCount).equal(2)
-	expect(aMessage).equal('')
-	expect(bRunCount).equal(2)
-	expect(bMessage).equal('')
+		// checking for non repetition
+		a.s('b')
+		expect(currentMessage === 'b').true
+		expect(runCount === 2).true
 
-	active(true)
-	expect(aRunCount).equal(3)
-	expect(aMessage).equal('a')
-	expect(bRunCount).equal(3)
-	expect(bMessage).equal('b')
-}))
+		a.s('c')
+		expect(currentMessage === 'c').true
+		expect(runCount === 3).true
+	})
 
-describe('deep nested computations', () => it('works', () => {
-	const active = value(true)
-	const a = value('a')
-	const b = value('b')
-	let aRunCount = 0
-	let aDestructorRunCount = 0
-	let aMessage = ''
-	let bRunCount = 0
-	let bDestructorRunCount = 0
-	let bMessage = ''
+	it('statefulEffect', () => {
+		const a = channel(0)
+		let n = 0
+		let runCount = 0
+		let destructorRunCount = 0
+		const stop = statefulEffect((b, destroy) => {
+			n = a.r() + b
+			runCount++
+			destroy(() => {
+				destructorRunCount++
+				n = 0
+			})
 
-	effect(() => {
-		if (!active()) return
-		effect(destroy => {
-			aRunCount++
-			aMessage = a()
-			destroy(() => { aDestructorRunCount++; aMessage = '' })
+			return ++b
+		}, 0)
 
-			effect(destroy => {
-				bRunCount++
-				bMessage = b()
-				destroy(() => { bDestructorRunCount++; bMessage = '' })
+		expect(n === 0).true
+		expect(runCount === 1).true
+		expect(destructorRunCount === 0).true
+
+		a.s(0)
+		expect(a.r() === 0).true
+		expect(n === 1).true
+		expect(runCount === 2).true
+		expect(destructorRunCount === 1).true
+
+		a.s(0)
+		expect(a.r() === 0).true
+		expect(n === 2).true
+		expect(runCount === 3).true
+		expect(destructorRunCount === 2).true
+
+		a.s(1)
+		expect(a.r() === 1).true
+		expect(n === 4).true
+		expect(runCount === 4).true
+		expect(destructorRunCount === 3).true
+
+		stop()
+		expect(a.r() === 1).true
+		expect(n === 0).true
+		expect(runCount === 4).true
+		expect(destructorRunCount === 4).true
+	})
+
+	it('effect disallows mutation', () => {
+		const a = primitive('a')
+		expect(() => effect(() => a.s('b'))).throw('readonly')
+	})
+
+	it('complex effect', () => {
+		const shouldRepeat = primitive(true)
+		const str = primitive('initial')
+		const count = primitive(1)
+		const message = primitive('message')
+
+		let runCount = 0
+		let currentMessage = ''
+
+		effect(() => {
+			runCount++
+			if (shouldRepeat.r())
+				currentMessage = str.r().repeat(count.r())
+			else
+				currentMessage = message.r()
+		})
+
+		expect(runCount === 1).true
+		expect(currentMessage === 'initial').true
+
+		shouldRepeat.s(false)
+		expect(runCount === 2).true
+		expect(currentMessage === 'message').true
+
+		// deregistered signals
+		count.s(2)
+		expect(runCount === 2).true
+		expect(currentMessage === 'message').true
+
+		shouldRepeat.s(true)
+		expect(runCount === 3).true
+		expect(currentMessage === 'initialinitial').true
+
+		count.s(1)
+		expect(runCount === 4).true
+		expect(currentMessage === 'initial').true
+	})
+
+
+	it('batch', () => {
+		const str = primitive('initial')
+		const count = primitive(1)
+
+		let runCount = 0
+		let currentMessage = ''
+
+		effect(() => {
+			runCount++
+			currentMessage = str.r().repeat(count.r())
+		})
+
+		expect(runCount === 1).true
+		expect(currentMessage === 'initial').true
+
+		batch(() => {
+			count.s(4)
+			expect(count.r() === 1).true
+			expect(runCount === 1).true
+			expect(currentMessage === 'initial').true
+
+			str.s('blah')
+			expect(str.r() === 'initial').true
+			expect(runCount === 1).true
+			expect(currentMessage === 'initial').true
+		})
+
+		expect(runCount === 2).true
+		expect(currentMessage === 'blahblahblahblah').true
+	})
+
+	it('destructors', () => {
+		let destructorRunCount = 0
+		let totalRunCount = 0
+		let runCount = 0
+		const s = primitive(true)
+
+		const stop = effect(destroy => {
+			s.r()
+			runCount++
+			totalRunCount++
+			destroy(() => {
+				destructorRunCount++
+				runCount = 0
 			})
 		})
+
+		expect(runCount === 1).true
+		expect(totalRunCount === 1).true
+		expect(destructorRunCount === 0).true
+
+		s.s(false)
+		expect(runCount === 1).true
+		expect(totalRunCount === 2).true
+		expect(destructorRunCount === 1).true
+
+		s.s(true)
+		expect(runCount === 1).true
+		expect(totalRunCount === 3).true
+		expect(destructorRunCount === 2).true
+
+		stop()
+		expect(runCount === 0).true
+		expect(totalRunCount === 3).true
+		expect(destructorRunCount === 3).true
+
+		// all watching should have stopped
+		s.s(false)
+		expect(runCount === 0).true
+		expect(totalRunCount === 3).true
+		expect(destructorRunCount === 3).true
+
+		s.s(true)
+		expect(runCount === 0).true
+		expect(totalRunCount === 3).true
+		expect(destructorRunCount === 3).true
 	})
 
-	expect(aRunCount).equal(1)
-	expect(aDestructorRunCount).equal(0)
-	expect(aMessage).equal('a')
-	expect(bRunCount).equal(1)
-	expect(bDestructorRunCount).equal(0)
-	expect(bMessage).equal('b')
 
-	a('aa')
-	expect(aRunCount).equal(2)
-	expect(aDestructorRunCount).equal(1)
-	expect(aMessage).equal('aa')
-	expect(bRunCount).equal(2)
-	expect(bDestructorRunCount).equal(1)
-	expect(bMessage).equal('b')
+	// it('sample', () => {
+	// 	const a = primitive('a')
+	// 	const b = primitive('b')
 
-	b('bb')
-	expect(aRunCount).equal(2)
-	expect(aDestructorRunCount).equal(1)
-	expect(aMessage).equal('aa')
-	expect(bRunCount).equal(3)
-	expect(bDestructorRunCount).equal(2)
-	expect(bMessage).equal('bb')
+	// 	let runCount = 0
+	// 	let currentMessage = ''
 
-	batch(() => { a('a'); b('b') })
-	expect(aRunCount).equal(3)
-	expect(aDestructorRunCount).equal(2)
-	expect(aMessage).equal('a')
-	expect(bRunCount).equal(4)
-	expect(bDestructorRunCount).equal(3)
-	expect(bMessage).equal('b')
+	// 	effect(() => {
+	// 		runCount++
+	// 		currentMessage = `${sample(a)} ${b.r()}`
+	// 	})
 
-	active(false)
-	expect(aRunCount).equal(3)
-	expect(aDestructorRunCount).equal(3)
-	expect(aMessage).equal('')
-	expect(bRunCount).equal(4)
-	expect(bDestructorRunCount).equal(4)
-	expect(bMessage).equal('')
+	// 	expect(runCount === 1).true
+	// 	expect(currentMessage === 'a b').true
 
-	batch(() => { a('aa'); b('bb') })
-	expect(aRunCount).equal(3)
-	expect(aDestructorRunCount).equal(3)
-	expect(aMessage).equal('')
-	expect(bRunCount).equal(4)
-	expect(bDestructorRunCount).equal(4)
-	expect(bMessage).equal('')
+	// 	a.s('aa')
+	// 	expect(runCount === 1).true
+	// 	expect(currentMessage === 'a b').true
 
-	active(true)
-	expect(aRunCount).equal(4)
-	expect(aDestructorRunCount).equal(3)
-	expect(aMessage).equal('aa')
-	expect(bRunCount).equal(5)
-	expect(bDestructorRunCount).equal(4)
-	expect(bMessage).equal('bb')
-}))
+	// 	b.s('bb')
+	// 	expect(runCount === 2).true
+	// 	expect(currentMessage === 'aa bb').true
+
+	// 	a.s('a')
+	// 	expect(runCount === 2).true
+	// 	expect(currentMessage === 'aa bb').true
+
+	// 	b.s('b')
+	// 	expect(runCount === 3).true
+	// 	expect(currentMessage === 'a b').true
+	// })
 
 
-describe('nested computed', () => it('works', () => {
-	const active = value(true)
-	const a = value('a')
-	const b = value('b')
+	it('nested computations', () => {
+		const active = primitive(true)
+		const a = primitive('a')
+		const b = primitive('b')
+		let aRunCount = 0
+		let aMessage = ''
+		let bRunCount = 0
+		let bMessage = ''
 
-	let aRunCount = 0
-	let bRunCount = 0
-
-	effect(() => {
-		if (!active()) return
-		computed(() => {
-			aRunCount++
-			return a()
+		effect(() => {
+			if (!active.r()) return
+			effect(destroy => {
+				aRunCount++
+				aMessage = a.r()
+				destroy(() => { aMessage = '' })
+			})
+			effect(destroy => {
+				bRunCount++
+				bMessage = b.r()
+				destroy(() => { bMessage = '' })
+			})
 		})
-		computed(() => {
-			bRunCount++
-			return b()
-		})
+
+		expect(aRunCount === 1).true
+		expect(aMessage === 'a').true
+		expect(bRunCount === 1).true
+		expect(bMessage === 'b').true
+
+		batch(() => { a.s('aa'); b.s('bb') })
+		expect(aRunCount === 2).true
+		expect(aMessage === 'aa').true
+		expect(bRunCount === 2).true
+		expect(bMessage === 'bb').true
+
+		active.s(false)
+		expect(aRunCount === 2).true
+		expect(aMessage === '').true
+		expect(bRunCount === 2).true
+		expect(bMessage === '').true
+
+		batch(() => { a.s('a'); b.s('b') })
+		expect(aRunCount === 2).true
+		expect(aMessage === '').true
+		expect(bRunCount === 2).true
+		expect(bMessage === '').true
+
+		active.s(true)
+		expect(aRunCount === 3).true
+		expect(aMessage === 'a').true
+		expect(bRunCount === 3).true
+		expect(bMessage === 'b').true
 	})
 
-	expect(aRunCount).equal(1)
-	expect(bRunCount).equal(1)
+	it('deep nested computations', () => {
+		const active = primitive(true)
+		const a = primitive('a')
+		const b = primitive('b')
+		let aRunCount = 0
+		let aDestructorRunCount = 0
+		let aMessage = ''
+		let bRunCount = 0
+		let bDestructorRunCount = 0
+		let bMessage = ''
 
-	a('aa')
-	expect(aRunCount).equal(2)
-	expect(bRunCount).equal(1)
-	b('bb')
-	expect(aRunCount).equal(2)
-	expect(bRunCount).equal(2)
+		effect(() => {
+			if (!active.r()) return
+			effect(destroy => {
+				aRunCount++
+				aMessage = a.r()
+				destroy(() => { aDestructorRunCount++; aMessage = '' })
 
-	active(false)
-	expect(aRunCount).equal(2)
-	expect(bRunCount).equal(2)
+				effect(destroy => {
+					bRunCount++
+					bMessage = b.r()
+					destroy(() => { bDestructorRunCount++; bMessage = '' })
+				})
+			})
+		})
 
-	batch(() => { a('a'); b('b') })
-	expect(aRunCount).equal(2)
-	expect(bRunCount).equal(2)
+		expect(aRunCount === 1).true
+		expect(aDestructorRunCount === 0).true
+		expect(aMessage === 'a').true
+		expect(bRunCount === 1).true
+		expect(bDestructorRunCount === 0).true
+		expect(bMessage === 'b').true
 
-	active(true)
-	expect(aRunCount).equal(3)
-	expect(bRunCount).equal(3)
-}))
+		a.s('aa')
+		expect(aRunCount === 2).true
+		expect(aDestructorRunCount === 1).true
+		expect(aMessage === 'aa').true
+		expect(bRunCount === 2).true
+		expect(bDestructorRunCount === 1).true
+		expect(bMessage === 'b').true
+
+		b.s('bb')
+		expect(aRunCount === 2).true
+		expect(aDestructorRunCount === 1).true
+		expect(aMessage === 'aa').true
+		expect(bRunCount === 3).true
+		expect(bDestructorRunCount === 2).true
+		expect(bMessage === 'bb').true
+
+		batch(() => { a.s('a'); b.s('b') })
+		expect(aRunCount === 3).true
+		expect(aDestructorRunCount === 2).true
+		expect(aMessage === 'a').true
+		expect(bRunCount === 4).true
+		expect(bDestructorRunCount === 3).true
+		expect(bMessage === 'b').true
+
+		active.s(false)
+		expect(aRunCount === 3).true
+		expect(aDestructorRunCount === 3).true
+		expect(aMessage === '').true
+		expect(bRunCount === 4).true
+		expect(bDestructorRunCount === 4).true
+		expect(bMessage === '').true
+
+		batch(() => { a.s('aa'); b.s('bb') })
+		expect(aRunCount === 3).true
+		expect(aDestructorRunCount === 3).true
+		expect(aMessage === '').true
+		expect(bRunCount === 4).true
+		expect(bDestructorRunCount === 4).true
+		expect(bMessage === '').true
+
+		active.s(true)
+		expect(aRunCount === 4).true
+		expect(aDestructorRunCount === 3).true
+		expect(aMessage === 'aa').true
+		expect(bRunCount === 5).true
+		expect(bDestructorRunCount === 4).true
+		expect(bMessage === 'bb').true
+	})
+})
+
+
+describe('WatchableWatcher', () => {
+	// it('derived', () => {
+	// 	const str = primitive('a')
+	// 	expect(str.r() === 'a').true
+	// 	assert.same<typeof str, Mutable<string>>(true)
+	// 	assert.assignable<keyof typeof str, 'r' | 's'>(true)
+
+	// 	const strLength = derived(str, str => str.length)
+	// 	assert.assignable<keyof typeof strLength, 'r'>(true)
+	// 	assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
+	// 	assert.same<typeof strLength, Immutable<number>>(true)
+
+	// 	expect(str.r() === 'a').true
+	// 	expect(strLength.r() === 1).true
+
+	// 	str.s('ab')
+	// 	expect(str.r() === 'ab').true
+	// 	expect(strLength.r() === 2).true
+	// })
+	// it('driftingDerived', () => {
+	// 	//
+	// })
+	// - `multi`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
+	// - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
+	// - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
+
+	it('computed', () => {
+		const str = primitive('a')
+		let runCount = 0
+		const upper = computed(() => {
+			runCount++
+			return str.r().toUpperCase()
+		})
+		assert.same<typeof upper, Mutable<string>>(false)
+		assert.same<typeof upper, Immutable<string>>(true)
+
+		expect(upper.r() === 'A').true
+		expect(runCount === 1).true
+
+		str.s('b')
+		expect(upper.r() === 'B').true
+		expect(runCount === 2).true
+
+		str.s('b')
+		expect(upper.r() === 'B').true
+		expect(runCount === 2).true
+	})
+
+	it('only computed diamond', () => {
+		const str = primitive('a')
+		const evenLetters = computed(() => str.r().length % 2 === 0)
+		const upperStr = computed(() => str.r().toUpperCase())
+
+		expect(str.r() === 'a').true
+		expect(evenLetters.r() === false).true
+		expect(upperStr.r() === 'A').true
+
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = evenLetters.r() ? `${upperStr.r()} even` : upperStr.r()
+		})
+
+		expect(runCount === 1).true
+		expect(currentMessage === 'A').true
+
+		str.s('aa')
+		expect(runCount === 2).true
+		expect(currentMessage === 'AA even').true
+	})
+
+	it('complex computed diamond', () => {
+		const append = primitive('append')
+		const str = primitive('a')
+
+		let evenLettersRunCount = 0
+		const evenLetters = computed(() => {
+			evenLettersRunCount++
+			return str.r().length % 2 === 0
+		})
+		let transformedStrRunCount = 0
+		const transformedStr = computed(() => {
+			transformedStrRunCount++
+			const app = ` ${append.r()}`
+			return evenLetters.r()
+				? str.r().toUpperCase() + app
+				: str.r() + app
+		})
+
+		expect(append.r() === 'append').true
+		expect(str.r() === 'a').true
+		expect(evenLetters.r() === false).true
+		expect(transformedStr.r() === 'a append').true
+		expect(evenLettersRunCount === 1).true
+		expect(transformedStrRunCount === 1).true
+
+		let runCount = 0
+		let currentMessage = ''
+		effect(() => {
+			runCount++
+			currentMessage = evenLetters.r() ? `${transformedStr.r()} even` : transformedStr.r()
+		})
+
+		expect(runCount === 1).true
+		expect(currentMessage === 'a append').true
+		expect(evenLettersRunCount === 1).true
+		expect(transformedStrRunCount === 1).true
+
+		str.s('aa')
+		expect(runCount === 2).true
+		expect(currentMessage === 'AA append even').true
+		expect(evenLettersRunCount === 2).true
+		expect(transformedStrRunCount === 2).true
+	})
+
+	it('computed circular reference', () => {
+		const str = primitive('a')
+		const upperStr: Immutable<string> = computed(() => {
+			return str.r() === str.r().toUpperCase()
+				? alreadyUpper.r() ? str.r() : str.r()
+				: str.r().toUpperCase()
+		})
+		const alreadyUpper: Immutable<boolean> = computed(() => {
+			return upperStr.r() === str.r()
+		})
+
+		expect(() => str.s('A')).throw('circular reference')
+	})
+
+	// it('thunk', () => {
+	// 	const str = primitive('a')
+	// 	let runCount = 0
+	// 	const upperStr = thunk(() => {
+	// 		runCount++
+	// 		return str.r().toUpperCase()
+	// 	})
+
+	// 	expect(runCount === 0).true
+	// 	expect(upperStr.r() === 'A').true
+	// 	expect(runCount === 1).true
+	// })
+
+	it('nested computed', () => {
+		const active = primitive(true)
+		const a = primitive('a')
+		const b = primitive('b')
+
+		let aRunCount = 0
+		let bRunCount = 0
+
+		effect(() => {
+			if (!active.r()) return
+			computed(() => {
+				aRunCount++
+				return a.r()
+			})
+			computed(() => {
+				bRunCount++
+				return b.r()
+			})
+		})
+
+		expect(aRunCount === 1).true
+		expect(bRunCount === 1).true
+
+		a.s('aa')
+		expect(aRunCount === 2).true
+		expect(bRunCount === 1).true
+		b.s('bb')
+		expect(aRunCount === 2).true
+		expect(bRunCount === 2).true
+
+		active.s(false)
+		expect(aRunCount === 2).true
+		expect(bRunCount === 2).true
+
+		batch(() => { a.s('a'); b.s('b') })
+		expect(aRunCount === 2).true
+		expect(bRunCount === 2).true
+
+		active.s(true)
+		expect(aRunCount === 3).true
+		expect(bRunCount === 3).true
+	})
+
+	// it('driftingComputed', () => {
+	// 	//
+	// })
+})
