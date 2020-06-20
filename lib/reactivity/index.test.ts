@@ -5,8 +5,8 @@ import { assert_type as assert, tuple as t } from '@ts-std/types'
 import {
 	Immutable, Mutable, batch,
 	signal, channel, primitive, pointer, distinct, borrow,
-	/*derived, driftingDerived,*/ computed, /*driftingComputed,*/ /*thunk,*/
-	effect, statefulEffect
+	derived, driftingDerived, computed, driftingComputed, /*thunk,*/
+	effect, statefulEffect,
 } from './index'
 
 
@@ -508,27 +508,29 @@ describe('OnlyWatcher', () => {
 
 
 describe('WatchableWatcher', () => {
-	// it('derived', () => {
-	// 	const str = primitive('a')
-	// 	expect(str.r() === 'a').true
-	// 	assert.same<typeof str, Mutable<string>>(true)
-	// 	assert.assignable<keyof typeof str, 'r' | 's'>(true)
+	// derived, driftingDerived, computed, driftingComputed
 
-	// 	const strLength = derived(str, str => str.length)
-	// 	assert.assignable<keyof typeof strLength, 'r'>(true)
-	// 	assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
-	// 	assert.same<typeof strLength, Immutable<number>>(true)
+	it('derived', () => {
+		const str = primitive('a')
+		expect(str.r() === 'a').true
+		assert.same<typeof str, Mutable<string>>(true)
+		assert.assignable<keyof typeof str, 'r' | 's'>(true)
 
-	// 	expect(str.r() === 'a').true
-	// 	expect(strLength.r() === 1).true
+		const strLength = derived(str, str => str.length)
+		assert.assignable<keyof typeof strLength, 'r'>(true)
+		assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
+		assert.same<typeof strLength, Immutable<number>>(true)
 
-	// 	str.s('ab')
-	// 	expect(str.r() === 'ab').true
-	// 	expect(strLength.r() === 2).true
-	// })
-	// it('driftingDerived', () => {
-	// 	//
-	// })
+		expect(str.r() === 'a').true
+		expect(strLength.r() === 1).true
+
+		str.s('ab')
+		expect(str.r() === 'ab').true
+		expect(strLength.r() === 2).true
+	})
+	it('driftingDerived', () => {
+		//
+	})
 	// - `multi`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
 	// - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
 	// - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field

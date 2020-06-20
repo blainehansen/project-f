@@ -78,14 +78,16 @@ const REACTIVITY_CONTEXT = {
 	runWithin<T>(fn: () => T, pushWatcher: Watcher, useWatcher: boolean) {
 		// TODO if useWatcher is true, and after running the fn no Watchables were actually gathered,
 		// then that Watcher will *never be run again*, since it has no way of being triggered
-		const { owner, watcher, mutationAllowed } = this
+		// const { owner, watcher, mutationAllowed } = this
+		const { owner, watcher } = this
 		this.owner = pushWatcher
 		this.watcher = useWatcher ? pushWatcher : null
 		this.mutationAllowed = false
 		const value = fn()
 		this.owner = owner
 		this.watcher = watcher
-		this.mutationAllowed = mutationAllowed
+		// this.mutationAllowed = mutationAllowed
+		this.mutationAllowed = true
 		if (owner !== null)
 			owner.addChild(pushWatcher)
 		return value
@@ -239,13 +241,26 @@ export abstract class OnlyWatcher implements Watcher {
 	abstract reset(final: boolean): void
 	abstract run(): void
 }
-abstract class FixedDependencyWatcher extends OnlyWatcher {
-	constructor(protected readonly destructor: Fn) { super() }
+abstract class FixedDependencyWatcher<L extends NonEmpty<Watchable>> extends OnlyWatcher {
+	constructor(protected readonly destructor: Fn, protected readonly watchables: L) { super() }
 	addDependency(_watchable: Watchable) {}
-	abstract ready(): boolean
+	ready(): boolean {
+		for (const watchable of this.watchables)
+			if (watchable.pending()) return false
+		return true
+	}
 	abstract reset(final: boolean): void
 	abstract run(): void
 }
+
+class StatelessWatch extends FixedDependencyWatcher {
+	constructor(protected readonly watchables: NonEmpty<Watchable>) {}
+
+	ready(): boolean
+	reset(final: boolean): void
+	run(): void
+}
+
 abstract class VariableDependencyWatcher extends OnlyWatcher {
 	constructor(protected readonly destructor: Fn) { super() }
 	protected readonly _dependencies = new Set<Watchable>()
