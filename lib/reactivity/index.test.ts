@@ -5,7 +5,7 @@ import { assert_type as assert, tuple as t } from '@ts-std/types'
 import {
 	Immutable, Mutable, batch,
 	signal, channel, primitive, pointer, distinct, borrow,
-	derived, driftingDerived, computed, driftingComputed, /*thunk,*/
+	/*derived, driftingDerived,*/ computed, /*driftingComputed,*/ /*thunk,*/
 	effect, statefulEffect,
 } from './index'
 
@@ -437,11 +437,13 @@ describe('OnlyWatcher', () => {
 		effect(() => {
 			if (!active.r()) return
 			effect(destroy => {
+				console.log('a effect')
 				aRunCount++
 				aMessage = a.r()
 				destroy(() => { aDestructorRunCount++; aMessage = '' })
 
 				effect(destroy => {
+					console.log('b effect')
 					bRunCount++
 					bMessage = b.r()
 					destroy(() => { bDestructorRunCount++; bMessage = '' })
@@ -472,7 +474,8 @@ describe('OnlyWatcher', () => {
 		expect(bDestructorRunCount === 2).true
 		expect(bMessage === 'bb').true
 
-		batch(() => { a.s('a'); b.s('b') })
+		// batch(() => { a.s('a'); b.s('b') })
+		batch(() => { b.s('b'); a.s('a') })
 		expect(aRunCount === 3).true
 		expect(aDestructorRunCount === 2).true
 		expect(aMessage === 'a').true
@@ -480,28 +483,36 @@ describe('OnlyWatcher', () => {
 		expect(bDestructorRunCount === 3).true
 		expect(bMessage === 'b').true
 
+		batch(() => { a.s('aaa'); b.s('bbb') })
+		expect(aRunCount === 4).true
+		expect(aDestructorRunCount === 3).true
+		expect(aMessage === 'aaa').true
+		expect(bRunCount === 5).true
+		expect(bDestructorRunCount === 4).true
+		expect(bMessage === 'bbb').true
+
 		active.s(false)
-		expect(aRunCount === 3).true
+		expect(aRunCount === 4).true
 		expect(aDestructorRunCount === 3).true
 		expect(aMessage === '').true
-		expect(bRunCount === 4).true
+		expect(bRunCount === 5).true
 		expect(bDestructorRunCount === 4).true
 		expect(bMessage === '').true
 
 		batch(() => { a.s('aa'); b.s('bb') })
-		expect(aRunCount === 3).true
+		expect(aRunCount === 4).true
 		expect(aDestructorRunCount === 3).true
 		expect(aMessage === '').true
-		expect(bRunCount === 4).true
+		expect(bRunCount === 5).true
 		expect(bDestructorRunCount === 4).true
 		expect(bMessage === '').true
 
 		active.s(true)
-		expect(aRunCount === 4).true
-		expect(aDestructorRunCount === 3).true
+		expect(aRunCount === 5).true
+		expect(aDestructorRunCount === 4).true
 		expect(aMessage === 'aa').true
-		expect(bRunCount === 5).true
-		expect(bDestructorRunCount === 4).true
+		expect(bRunCount === 6).true
+		expect(bDestructorRunCount === 5).true
 		expect(bMessage === 'bb').true
 	})
 })
@@ -510,32 +521,32 @@ describe('OnlyWatcher', () => {
 describe('WatchableWatcher', () => {
 	// derived, driftingDerived, computed, driftingComputed
 
-	it('derived', () => {
-		const str = primitive('a')
-		expect(str.r() === 'a').true
-		assert.same<typeof str, Mutable<string>>(true)
-		assert.assignable<keyof typeof str, 'r' | 's'>(true)
+	// it('derived', () => {
+	// 	const str = primitive('a')
+	// 	expect(str.r() === 'a').true
+	// 	assert.same<typeof str, Mutable<string>>(true)
+	// 	assert.assignable<keyof typeof str, 'r' | 's'>(true)
 
-		const strLength = derived(str, str => str.length)
-		assert.assignable<keyof typeof strLength, 'r'>(true)
-		assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
-		assert.same<typeof strLength, Immutable<number>>(true)
+	// 	const strLength = derived(str, str => str.length)
+	// 	assert.assignable<keyof typeof strLength, 'r'>(true)
+	// 	assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
+	// 	assert.same<typeof strLength, Immutable<number>>(true)
 
-		expect(str.r() === 'a').true
-		expect(strLength.r() === 1).true
+	// 	expect(str.r() === 'a').true
+	// 	expect(strLength.r() === 1).true
 
-		str.s('ab')
-		expect(str.r() === 'ab').true
-		expect(strLength.r() === 2).true
-	})
-	it('driftingDerived', () => {
-		//
-	})
-	// - `multi`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
-	// - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
-	// - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
+	// 	str.s('ab')
+	// 	expect(str.r() === 'ab').true
+	// 	expect(strLength.r() === 2).true
+	// })
+	// it('driftingDerived', () => {
+	// 	//
+	// })
+	// // - `multi`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
+	// // - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
+	// // - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
 
-	it('computed', () => {
+	it('just computed by itself', () => {
 		const str = primitive('a')
 		let runCount = 0
 		const upper = computed(() => {
