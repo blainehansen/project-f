@@ -28,13 +28,15 @@ const REACTIVITY_CONTEXT = {
 	batch: null as null | Batch,
 	owner: null as null | Watcher,
 	watcher: null as null | Watcher,
-	// what is runWithin really for?
-	// it's for any Watcher to capture children Watchers to ensure they're cleaned up properly
-	// and it's for variable dependency
+
+	getCurrentChildDepth() {
+		return this.owner ? this.owner.childDepth + 1 : 0
+	},
+
+	// this function is for any Watcher to capture children Watchers to ensure they're cleaned up properly
 	runWithin<T>(fn: () => T, pushWatcher: Watcher, useWatcher: boolean) {
 		// TODO if useWatcher is true, and after running the fn no Watchables were actually gathered,
 		// then that Watcher will *never be performed again*, since it has no way of being triggered
-		// const { owner, watcher, mutationAllowed } = this
 		const { owner, watcher } = this
 		this.owner = pushWatcher
 		this.watcher = useWatcher ? pushWatcher : null
@@ -42,7 +44,6 @@ const REACTIVITY_CONTEXT = {
 		const value = fn()
 		this.owner = owner
 		this.watcher = watcher
-		// this.mutationAllowed = mutationAllowed
 		this.mutationAllowed = true
 		if (owner !== null)
 			owner.addChild(pushWatcher)
@@ -83,13 +84,13 @@ class Batch {
 	}
 
 	perform() {
-		console.log()
-		console.log()
-		console.log('beginning batch')
+		// console.log()
+		// console.log()
+		// console.log('beginning batch')
 		while (this.watchables.size > 0 || this.watchers.size > 0) {
 			for (const watchable of this.watchables) {
-				console.log('watchable: ', watchable)
-				console.log()
+				// console.log('watchable: ', watchable)
+				// console.log()
 				// we're making an assumption that this won't mutate this.watchables
 				watchable.finish()
 				for (const watcher of watchable.watchers()) {
@@ -101,18 +102,21 @@ class Batch {
 
 			let runCount = 0
 			const notReadyWatchers = new Set<Watcher>()
-			for (const watcher of this.watchers) {
+			for (const watcher of [...this.watchers].sort((a, b) => a.childDepth - b.childDepth)) {
 				if (!watcher.triggered()) continue
-				console.log('watcher: ', watcher)
-				console.log()
+				// console.log('watcher: ', watcher)
+				// console.log('watcher.deps.ready(): ', watcher.deps.ready())
 				if (!watcher.deps.ready()) {
 					notReadyWatchers.add(watcher)
+					// console.log()
 					continue
 				}
 
 				runCount++
 				// this action can place more Watchables into the queue
+				// console.log('running')
 				watcher.run()
+				// console.log()
 			}
 			this.watchers.clear()
 			this.watchers = notReadyWatchers
@@ -120,9 +124,9 @@ class Batch {
 			if (this.watchers.size > 0 && runCount === 0)
 				throw new ReactivityPanic('circular reference')
 		}
-		console.log('ending batch')
-		console.log()
-		console.log()
+		// console.log('ending batch')
+		// console.log()
+		// console.log()
 	}
 }
 export function batch(fn: Fn) {
@@ -153,7 +157,7 @@ export type Watcher = SinkWatcher | ReactivePipe<unknown>
 // 	sample(): T,
 // }
 
-export abstract class SourceWatchable<T> implements Mutable<T>/*, WatchableLike<T>*/ {
+export abstract class SourceWatchable<T> implements Mutable<T> {
 	protected readonly REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
 
 	// readonly isSource = true as const
@@ -168,7 +172,11 @@ export abstract class SourceWatchable<T> implements Mutable<T>/*, WatchableLike<
 	}
 
 	protected _pending = false
-	pend() { this._pending = true }
+	pend() {
+		this._pending = true
+		for (const watcher of this._watchers)
+			watcher.trigger()
+	}
 	abstract pending(): boolean
 	abstract finish(): void
 
@@ -218,21 +226,18 @@ class VariableDependencyManager extends DependencyManager {
 	}
 }
 
-// interface WatcherLike<T> {
-// 	readonly deps: DependencyManager,
-// 	addChild(watcher: Watcher): void,
-// 	trigger(): void
-// 	run(): T,
-// 	reset(): void,
-// }
-
 export abstract class SinkWatcher {
 	protected readonly REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
+	readonly childDepth: number
+	constructor() {
+		this.childDepth = this.REACTIVITY_CONTEXT.getCurrentChildDepth()
+	}
 
 	// readonly isSink = true as const
 	abstract readonly deps: DependencyManager
 
 	protected readonly children = new Set<Watcher>()
+	// TODO possibly placing the
 	addChild(watcher: Watcher) { this.children.add(watcher) }
 
 	protected _triggered = false
@@ -306,7 +311,6 @@ class StatefulWatch<L extends NonEmpty<any>, T> extends Watch<L> {
 }
 
 abstract class Effect extends LeafWatcher {
-	constructor() { super() }
 	readonly deps = new VariableDependencyManager()
 	abstract run(): void
 }
@@ -453,7 +457,12 @@ abstract class ReactivePipe<T> extends SinkWatcher implements Immutable<T> {
 		super.trigger()
 		this.internalWatchable.pend()
 	}
-	abstract run(): void
+	abstract runInternal(): T
+	run() {
+		this.globalReset()
+		const value = this.runInternal()
+		this.internalWatchable.s(value)
+	}
 	reset() { this.globalReset() }
 
 	watchers() { return this.internalWatchable.watchers() }
@@ -489,10 +498,6 @@ class FixedDependencyReactivePipe<L extends NonEmpty<any>, T> extends ReactivePi
 		}
 		return this.REACTIVITY_CONTEXT.runWithin(() => this.fn(...gathered), this, true)
 	}
-	run() {
-		this.reset()
-		this.internalWatchable.s(this.runInternal())
-	}
 }
 
 class VariableDependencyReactivePipe<T> extends ReactivePipe<T> {
@@ -507,11 +512,6 @@ class VariableDependencyReactivePipe<T> extends ReactivePipe<T> {
 	}
 	runInternal() {
 		return this.REACTIVITY_CONTEXT.runWithin(this.fn, this, true)
-	}
-	run() {
-		this.reset()
-		const value = this.runInternal()
-		this.internalWatchable.s(value)
 	}
 }
 

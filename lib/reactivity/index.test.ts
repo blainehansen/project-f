@@ -10,7 +10,7 @@ import {
 } from './index'
 
 
-describe('OnlyWatchable', () => {
+describe('SourceWatchable', () => {
 	it('signal', () => {
 		const s = signal()
 		s.r()
@@ -31,23 +31,23 @@ describe('OnlyWatchable', () => {
 			currentMessage = a.r().join(', ')
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === '1, 2, 3').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('1, 2, 3')
 
 		a.s([1])
-		expect(runCount === 2).true
-		expect(currentMessage === '1').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('1')
 
 		a.s([0])
-		expect(runCount === 3).true
-		expect(currentMessage === '0').true
+		expect(runCount).equal(3)
+		expect(currentMessage).equal('0')
 	})
 
 	it('primitive', () => {
 		const a = primitive('a')
-		expect(a.r() === 'a').true
+		expect(a.r()).equal('a')
 		a.s('b')
-		expect(a.r() === 'b').true
+		expect(a.r()).equal('b')
 
 		let bad: never = primitive([])
 		bad = primitive({})
@@ -63,10 +63,10 @@ describe('OnlyWatchable', () => {
 	it('pointer', () => {
 		const arrOne = [] as number[]
 		const a = pointer(arrOne)
-		expect(a.r() === arrOne).true
+		expect(a.r()).equal(arrOne)
 		const arrTwo = [1, 2, 3]
 		a.s(arrTwo)
-		expect(a.r() === arrTwo).true
+		expect(a.r()).equal(arrTwo)
 	})
 
 	it('distinct', () => {
@@ -85,16 +85,16 @@ describe('OnlyWatchable', () => {
 			currentMessage = a.r().join(', ')
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === '0, 0, 0').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('0, 0, 0')
 
 		a.s([1])
-		expect(runCount === 2).true
-		expect(currentMessage === '1').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('1')
 
 		a.s([0])
-		expect(runCount === 2).true
-		expect(currentMessage === '1').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('1')
 	})
 
 	it('immutable borrow', () => {
@@ -104,7 +104,7 @@ describe('OnlyWatchable', () => {
 		assert.same<typeof r, Mutable<string>>(false)
 		assert.same<typeof r, Immutable<string>>(true)
 
-		expect(r.r() === 'a').true
+		expect(r.r()).equal('a')
 
 		let runCount = 0
 		let currentMessage = ''
@@ -113,21 +113,21 @@ describe('OnlyWatchable', () => {
 			currentMessage = r.r()
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === 'a').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('a')
 
 		a.s('b')
-		expect(runCount === 2).true
-		expect(currentMessage === 'b').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('b')
 
 		a.s('b')
-		expect(runCount === 2).true
-		expect(currentMessage === 'b').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('b')
 	})
 })
 
 
-describe('OnlyWatcher', () => {
+describe('SinkWatcher', () => {
 	it('signal effect', () => {
 		const s = signal()
 		let runCount = 0
@@ -136,11 +136,11 @@ describe('OnlyWatcher', () => {
 			runCount++
 		})
 
-		expect(runCount === 1).true
+		expect(runCount).equal(1)
 		s.s()
-		expect(runCount === 2).true
+		expect(runCount).equal(2)
 		s.s()
-		expect(runCount === 3).true
+		expect(runCount).equal(3)
 	})
 
 	it('simple effect', () => {
@@ -152,21 +152,21 @@ describe('OnlyWatcher', () => {
 			currentMessage = a.r()
 		})
 
-		expect(currentMessage === 'a').true
-		expect(runCount === 1).true
+		expect(currentMessage).equal('a')
+		expect(runCount).equal(1)
 
 		a.s('b')
-		expect(currentMessage === 'b').true
-		expect(runCount === 2).true
+		expect(currentMessage).equal('b')
+		expect(runCount).equal(2)
 
 		// checking for non repetition
 		a.s('b')
-		expect(currentMessage === 'b').true
-		expect(runCount === 2).true
+		expect(currentMessage).equal('b')
+		expect(runCount).equal(2)
 
 		a.s('c')
-		expect(currentMessage === 'c').true
-		expect(runCount === 3).true
+		expect(currentMessage).equal('c')
+		expect(runCount).equal(3)
 	})
 
 	it('statefulEffect', () => {
@@ -185,33 +185,33 @@ describe('OnlyWatcher', () => {
 			return ++b
 		}, 0)
 
-		expect(n === 0).true
-		expect(runCount === 1).true
-		expect(destructorRunCount === 0).true
+		expect(n).equal(0)
+		expect(runCount).equal(1)
+		expect(destructorRunCount).equal(0)
 
 		a.s(0)
-		expect(a.r() === 0).true
-		expect(n === 1).true
-		expect(runCount === 2).true
-		expect(destructorRunCount === 1).true
+		expect(a.r()).equal(0)
+		expect(n).equal(1)
+		expect(runCount).equal(2)
+		expect(destructorRunCount).equal(1)
 
 		a.s(0)
-		expect(a.r() === 0).true
-		expect(n === 2).true
-		expect(runCount === 3).true
-		expect(destructorRunCount === 2).true
+		expect(a.r()).equal(0)
+		expect(n).equal(2)
+		expect(runCount).equal(3)
+		expect(destructorRunCount).equal(2)
 
 		a.s(1)
-		expect(a.r() === 1).true
-		expect(n === 4).true
-		expect(runCount === 4).true
-		expect(destructorRunCount === 3).true
+		expect(a.r()).equal(1)
+		expect(n).equal(4)
+		expect(runCount).equal(4)
+		expect(destructorRunCount).equal(3)
 
 		stop()
-		expect(a.r() === 1).true
-		expect(n === 0).true
-		expect(runCount === 4).true
-		expect(destructorRunCount === 4).true
+		expect(a.r()).equal(1)
+		expect(n).equal(0)
+		expect(runCount).equal(4)
+		expect(destructorRunCount).equal(4)
 	})
 
 	it('effect disallows mutation', () => {
@@ -236,25 +236,25 @@ describe('OnlyWatcher', () => {
 				currentMessage = message.r()
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === 'initial').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('initial')
 
 		shouldRepeat.s(false)
-		expect(runCount === 2).true
-		expect(currentMessage === 'message').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('message')
 
 		// deregistered signals
 		count.s(2)
-		expect(runCount === 2).true
-		expect(currentMessage === 'message').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('message')
 
 		shouldRepeat.s(true)
-		expect(runCount === 3).true
-		expect(currentMessage === 'initialinitial').true
+		expect(runCount).equal(3)
+		expect(currentMessage).equal('initialinitial')
 
 		count.s(1)
-		expect(runCount === 4).true
-		expect(currentMessage === 'initial').true
+		expect(runCount).equal(4)
+		expect(currentMessage).equal('initial')
 	})
 
 
@@ -270,23 +270,23 @@ describe('OnlyWatcher', () => {
 			currentMessage = str.r().repeat(count.r())
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === 'initial').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('initial')
 
 		batch(() => {
 			count.s(4)
-			expect(count.r() === 1).true
-			expect(runCount === 1).true
-			expect(currentMessage === 'initial').true
+			expect(count.r()).equal(1)
+			expect(runCount).equal(1)
+			expect(currentMessage).equal('initial')
 
 			str.s('blah')
-			expect(str.r() === 'initial').true
-			expect(runCount === 1).true
-			expect(currentMessage === 'initial').true
+			expect(str.r()).equal('initial')
+			expect(runCount).equal(1)
+			expect(currentMessage).equal('initial')
 		})
 
-		expect(runCount === 2).true
-		expect(currentMessage === 'blahblahblahblah').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('blahblahblahblah')
 	})
 
 	it('destructors', () => {
@@ -305,35 +305,35 @@ describe('OnlyWatcher', () => {
 			})
 		})
 
-		expect(runCount === 1).true
-		expect(totalRunCount === 1).true
-		expect(destructorRunCount === 0).true
+		expect(runCount).equal(1)
+		expect(totalRunCount).equal(1)
+		expect(destructorRunCount).equal(0)
 
 		s.s(false)
-		expect(runCount === 1).true
-		expect(totalRunCount === 2).true
-		expect(destructorRunCount === 1).true
+		expect(runCount).equal(1)
+		expect(totalRunCount).equal(2)
+		expect(destructorRunCount).equal(1)
 
 		s.s(true)
-		expect(runCount === 1).true
-		expect(totalRunCount === 3).true
-		expect(destructorRunCount === 2).true
+		expect(runCount).equal(1)
+		expect(totalRunCount).equal(3)
+		expect(destructorRunCount).equal(2)
 
 		stop()
-		expect(runCount === 0).true
-		expect(totalRunCount === 3).true
-		expect(destructorRunCount === 3).true
+		expect(runCount).equal(0)
+		expect(totalRunCount).equal(3)
+		expect(destructorRunCount).equal(3)
 
 		// all watching should have stopped
 		s.s(false)
-		expect(runCount === 0).true
-		expect(totalRunCount === 3).true
-		expect(destructorRunCount === 3).true
+		expect(runCount).equal(0)
+		expect(totalRunCount).equal(3)
+		expect(destructorRunCount).equal(3)
 
 		s.s(true)
-		expect(runCount === 0).true
-		expect(totalRunCount === 3).true
-		expect(destructorRunCount === 3).true
+		expect(runCount).equal(0)
+		expect(totalRunCount).equal(3)
+		expect(destructorRunCount).equal(3)
 	})
 
 
@@ -349,24 +349,24 @@ describe('OnlyWatcher', () => {
 	// 		currentMessage = `${sample(a)} ${b.r()}`
 	// 	})
 
-	// 	expect(runCount === 1).true
-	// 	expect(currentMessage === 'a b').true
+	// 	expect).equal(=== 1)
+	// 	expect).equal(=== 'a b')
 
 	// 	a.s('aa')
-	// 	expect(runCount === 1).true
-	// 	expect(currentMessage === 'a b').true
+	// 	expect).equal(=== 1)
+	// 	expect).equal(=== 'a b')
 
 	// 	b.s('bb')
-	// 	expect(runCount === 2).true
-	// 	expect(currentMessage === 'aa bb').true
+	// 	expect).equal(=== 2)
+	// 	expect).equal(=== 'aa bb')
 
 	// 	a.s('a')
-	// 	expect(runCount === 2).true
-	// 	expect(currentMessage === 'aa bb').true
+	// 	expect).equal(=== 2)
+	// 	expect).equal(=== 'aa bb')
 
 	// 	b.s('b')
-	// 	expect(runCount === 3).true
-	// 	expect(currentMessage === 'a b').true
+	// 	expect).equal(=== 3)
+	// 	expect).equal(=== 'a b')
 	// })
 
 
@@ -393,34 +393,34 @@ describe('OnlyWatcher', () => {
 			})
 		})
 
-		expect(aRunCount === 1).true
-		expect(aMessage === 'a').true
-		expect(bRunCount === 1).true
-		expect(bMessage === 'b').true
+		expect(aRunCount).equal(1)
+		expect(aMessage).equal('a')
+		expect(bRunCount).equal(1)
+		expect(bMessage).equal('b')
 
 		batch(() => { a.s('aa'); b.s('bb') })
-		expect(aRunCount === 2).true
-		expect(aMessage === 'aa').true
-		expect(bRunCount === 2).true
-		expect(bMessage === 'bb').true
+		expect(aRunCount).equal(2)
+		expect(aMessage).equal('aa')
+		expect(bRunCount).equal(2)
+		expect(bMessage).equal('bb')
 
 		active.s(false)
-		expect(aRunCount === 2).true
-		expect(aMessage === '').true
-		expect(bRunCount === 2).true
-		expect(bMessage === '').true
+		expect(aRunCount).equal(2)
+		expect(aMessage).equal('')
+		expect(bRunCount).equal(2)
+		expect(bMessage).equal('')
 
 		batch(() => { a.s('a'); b.s('b') })
-		expect(aRunCount === 2).true
-		expect(aMessage === '').true
-		expect(bRunCount === 2).true
-		expect(bMessage === '').true
+		expect(aRunCount).equal(2)
+		expect(aMessage).equal('')
+		expect(bRunCount).equal(2)
+		expect(bMessage).equal('')
 
 		active.s(true)
-		expect(aRunCount === 3).true
-		expect(aMessage === 'a').true
-		expect(bRunCount === 3).true
-		expect(bMessage === 'b').true
+		expect(aRunCount).equal(3)
+		expect(aMessage).equal('a')
+		expect(bRunCount).equal(3)
+		expect(bMessage).equal('b')
 	})
 
 	it('deep nested computations', () => {
@@ -437,13 +437,11 @@ describe('OnlyWatcher', () => {
 		effect(() => {
 			if (!active.r()) return
 			effect(destroy => {
-				console.log('a effect')
 				aRunCount++
 				aMessage = a.r()
 				destroy(() => { aDestructorRunCount++; aMessage = '' })
 
 				effect(destroy => {
-					console.log('b effect')
 					bRunCount++
 					bMessage = b.r()
 					destroy(() => { bDestructorRunCount++; bMessage = '' })
@@ -451,79 +449,78 @@ describe('OnlyWatcher', () => {
 			})
 		})
 
-		expect(aRunCount === 1).true
-		expect(aDestructorRunCount === 0).true
-		expect(aMessage === 'a').true
-		expect(bRunCount === 1).true
-		expect(bDestructorRunCount === 0).true
-		expect(bMessage === 'b').true
+		expect(aRunCount).equal(1)
+		expect(aDestructorRunCount).equal(0)
+		expect(aMessage).equal('a')
+		expect(bRunCount).equal(1)
+		expect(bDestructorRunCount).equal(0)
+		expect(bMessage).equal('b')
 
 		a.s('aa')
-		expect(aRunCount === 2).true
-		expect(aDestructorRunCount === 1).true
-		expect(aMessage === 'aa').true
-		expect(bRunCount === 2).true
-		expect(bDestructorRunCount === 1).true
-		expect(bMessage === 'b').true
+		expect(aRunCount).equal(2)
+		expect(aDestructorRunCount).equal(1)
+		expect(aMessage).equal('aa')
+		expect(bRunCount).equal(2)
+		expect(bDestructorRunCount).equal(1)
+		expect(bMessage).equal('b')
 
 		b.s('bb')
-		expect(aRunCount === 2).true
-		expect(aDestructorRunCount === 1).true
-		expect(aMessage === 'aa').true
-		expect(bRunCount === 3).true
-		expect(bDestructorRunCount === 2).true
-		expect(bMessage === 'bb').true
+		expect(aRunCount).equal(2)
+		expect(aDestructorRunCount).equal(1)
+		expect(aMessage).equal('aa')
+		expect(bRunCount).equal(3)
+		expect(bDestructorRunCount).equal(2)
+		expect(bMessage).equal('bb')
 
-		// batch(() => { a.s('a'); b.s('b') })
 		batch(() => { b.s('b'); a.s('a') })
-		expect(aRunCount === 3).true
-		expect(aDestructorRunCount === 2).true
-		expect(aMessage === 'a').true
-		expect(bRunCount === 4).true
-		expect(bDestructorRunCount === 3).true
-		expect(bMessage === 'b').true
+		expect(aRunCount).equal(3)
+		expect(aDestructorRunCount).equal(2)
+		expect(aMessage).equal('a')
+		expect(bRunCount).equal(4)
+		expect(bDestructorRunCount).equal(3)
+		expect(bMessage).equal('b')
 
 		batch(() => { a.s('aaa'); b.s('bbb') })
-		expect(aRunCount === 4).true
-		expect(aDestructorRunCount === 3).true
-		expect(aMessage === 'aaa').true
-		expect(bRunCount === 5).true
-		expect(bDestructorRunCount === 4).true
-		expect(bMessage === 'bbb').true
+		expect(aRunCount).equal(4)
+		expect(aDestructorRunCount).equal(3)
+		expect(aMessage).equal('aaa')
+		expect(bRunCount).equal(5)
+		expect(bDestructorRunCount).equal(4)
+		expect(bMessage).equal('bbb')
 
 		active.s(false)
-		expect(aRunCount === 4).true
-		expect(aDestructorRunCount === 3).true
-		expect(aMessage === '').true
-		expect(bRunCount === 5).true
-		expect(bDestructorRunCount === 4).true
-		expect(bMessage === '').true
+		expect(aRunCount).equal(4)
+		expect(aDestructorRunCount).equal(4)
+		expect(aMessage).equal('')
+		expect(bRunCount).equal(5)
+		expect(bDestructorRunCount).equal(5)
+		expect(bMessage).equal('')
 
 		batch(() => { a.s('aa'); b.s('bb') })
-		expect(aRunCount === 4).true
-		expect(aDestructorRunCount === 3).true
-		expect(aMessage === '').true
-		expect(bRunCount === 5).true
-		expect(bDestructorRunCount === 4).true
-		expect(bMessage === '').true
+		expect(aRunCount).equal(4)
+		expect(aDestructorRunCount).equal(4)
+		expect(aMessage).equal('')
+		expect(bRunCount).equal(5)
+		expect(bDestructorRunCount).equal(5)
+		expect(bMessage).equal('')
 
 		active.s(true)
-		expect(aRunCount === 5).true
-		expect(aDestructorRunCount === 4).true
-		expect(aMessage === 'aa').true
-		expect(bRunCount === 6).true
-		expect(bDestructorRunCount === 5).true
-		expect(bMessage === 'bb').true
+		expect(aRunCount).equal(5)
+		expect(aDestructorRunCount).equal(4)
+		expect(aMessage).equal('aa')
+		expect(bRunCount).equal(6)
+		expect(bDestructorRunCount).equal(5)
+		expect(bMessage).equal('bb')
 	})
 })
 
 
-describe('WatchableWatcher', () => {
+describe('ReactivePipe', () => {
 	// derived, driftingDerived, computed, driftingComputed
 
 	// it('derived', () => {
 	// 	const str = primitive('a')
-	// 	expect(str.r() === 'a').true
+	// 	expect).equal(r() === 'a')
 	// 	assert.same<typeof str, Mutable<string>>(true)
 	// 	assert.assignable<keyof typeof str, 'r' | 's'>(true)
 
@@ -532,12 +529,12 @@ describe('WatchableWatcher', () => {
 	// 	assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
 	// 	assert.same<typeof strLength, Immutable<number>>(true)
 
-	// 	expect(str.r() === 'a').true
-	// 	expect(strLength.r() === 1).true
+	// 	expect).equal(r() === 'a')
+	// 	expect).equal(r() === 1)
 
 	// 	str.s('ab')
-	// 	expect(str.r() === 'ab').true
-	// 	expect(strLength.r() === 2).true
+	// 	expect).equal(r() === 'ab')
+	// 	expect).equal(r() === 2)
 	// })
 	// it('driftingDerived', () => {
 	// 	//
@@ -546,7 +543,7 @@ describe('WatchableWatcher', () => {
 	// // - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
 	// // - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
 
-	it('just computed by itself', () => {
+	it('computed', () => {
 		const str = primitive('a')
 		let runCount = 0
 		const upper = computed(() => {
@@ -556,26 +553,26 @@ describe('WatchableWatcher', () => {
 		assert.same<typeof upper, Mutable<string>>(false)
 		assert.same<typeof upper, Immutable<string>>(true)
 
-		expect(upper.r() === 'A').true
-		expect(runCount === 1).true
+		expect(upper.r()).equal('A')
+		expect(runCount).equal(1)
 
 		str.s('b')
-		expect(upper.r() === 'B').true
-		expect(runCount === 2).true
+		expect(upper.r()).equal('B')
+		expect(runCount).equal(2)
 
 		str.s('b')
-		expect(upper.r() === 'B').true
-		expect(runCount === 2).true
+		expect(upper.r()).equal('B')
+		expect(runCount).equal(2)
 	})
 
-	it('only computed diamond', () => {
+	it('computed diamond', () => {
 		const str = primitive('a')
 		const evenLetters = computed(() => str.r().length % 2 === 0)
 		const upperStr = computed(() => str.r().toUpperCase())
 
-		expect(str.r() === 'a').true
-		expect(evenLetters.r() === false).true
-		expect(upperStr.r() === 'A').true
+		expect(str.r()).equal('a')
+		expect(evenLetters.r()).equal(false)
+		expect(upperStr.r()).equal('A')
 
 		let runCount = 0
 		let currentMessage = ''
@@ -584,12 +581,12 @@ describe('WatchableWatcher', () => {
 			currentMessage = evenLetters.r() ? `${upperStr.r()} even` : upperStr.r()
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === 'A').true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('A')
 
 		str.s('aa')
-		expect(runCount === 2).true
-		expect(currentMessage === 'AA even').true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('AA even')
 	})
 
 	it('complex computed diamond', () => {
@@ -610,12 +607,12 @@ describe('WatchableWatcher', () => {
 				: str.r() + app
 		})
 
-		expect(append.r() === 'append').true
-		expect(str.r() === 'a').true
-		expect(evenLetters.r() === false).true
-		expect(transformedStr.r() === 'a append').true
-		expect(evenLettersRunCount === 1).true
-		expect(transformedStrRunCount === 1).true
+		expect(append.r()).equal('append')
+		expect(str.r()).equal('a')
+		expect(evenLetters.r()).equal(false)
+		expect(transformedStr.r()).equal('a append')
+		expect(evenLettersRunCount).equal(1)
+		expect(transformedStrRunCount).equal(1)
 
 		let runCount = 0
 		let currentMessage = ''
@@ -624,16 +621,16 @@ describe('WatchableWatcher', () => {
 			currentMessage = evenLetters.r() ? `${transformedStr.r()} even` : transformedStr.r()
 		})
 
-		expect(runCount === 1).true
-		expect(currentMessage === 'a append').true
-		expect(evenLettersRunCount === 1).true
-		expect(transformedStrRunCount === 1).true
+		expect(runCount).equal(1)
+		expect(currentMessage).equal('a append')
+		expect(evenLettersRunCount).equal(1)
+		expect(transformedStrRunCount).equal(1)
 
 		str.s('aa')
-		expect(runCount === 2).true
-		expect(currentMessage === 'AA append even').true
-		expect(evenLettersRunCount === 2).true
-		expect(transformedStrRunCount === 2).true
+		expect(runCount).equal(2)
+		expect(currentMessage).equal('AA append even')
+		expect(evenLettersRunCount).equal(2)
+		expect(transformedStrRunCount).equal(2)
 	})
 
 	it('computed circular reference', () => {
@@ -650,6 +647,60 @@ describe('WatchableWatcher', () => {
 		expect(() => str.s('A')).throw('circular reference')
 	})
 
+	it('computed chain race', () => {
+		const base = primitive('')
+		let oneRunCount = 0
+		const one = computed(() => {
+			oneRunCount++
+			return base.r() + 'a'
+		})
+		let twoRunCount = 0
+		const two = computed(() => {
+			twoRunCount++
+			return one.r() + 'a'
+		})
+		let threeRunCount = 0
+		const three = computed(() => {
+			threeRunCount++
+			return two.r() + 'a'
+		})
+		const head = primitive('b')
+		let fourRunCount = 0
+		const four = computed(() => {
+			fourRunCount++
+			return three.r() + head.r()
+		})
+
+		expect(oneRunCount).equal(1)
+		expect(twoRunCount).equal(1)
+		expect(threeRunCount).equal(1)
+		expect(fourRunCount).equal(1)
+		expect(one.r()).equal('a')
+		expect(two.r()).equal('aa')
+		expect(three.r()).equal('aaa')
+		expect(four.r()).equal('aaab')
+
+		batch(() => { head.s('c'); base.s('b') })
+		expect(oneRunCount).equal(2)
+		expect(twoRunCount).equal(2)
+		expect(threeRunCount).equal(2)
+		expect(fourRunCount).equal(2)
+		expect(one.r()).equal('ba')
+		expect(two.r()).equal('baa')
+		expect(three.r()).equal('baaa')
+		expect(four.r()).equal('baaac')
+
+		batch(() => { base.s('x'); head.s('y') })
+		expect(oneRunCount).equal(3)
+		expect(twoRunCount).equal(3)
+		expect(threeRunCount).equal(3)
+		expect(fourRunCount).equal(3)
+		expect(one.r()).equal('xa')
+		expect(two.r()).equal('xaa')
+		expect(three.r()).equal('xaaa')
+		expect(four.r()).equal('xaaay')
+	})
+
 	// it('thunk', () => {
 	// 	const str = primitive('a')
 	// 	let runCount = 0
@@ -658,9 +709,9 @@ describe('WatchableWatcher', () => {
 	// 		return str.r().toUpperCase()
 	// 	})
 
-	// 	expect(runCount === 0).true
-	// 	expect(upperStr.r() === 'A').true
-	// 	expect(runCount === 1).true
+	// 	expect).equal(=== 0)
+	// 	expect).equal(r() === 'A')
+	// 	expect).equal(=== 1)
 	// })
 
 	it('nested computed', () => {
@@ -683,27 +734,27 @@ describe('WatchableWatcher', () => {
 			})
 		})
 
-		expect(aRunCount === 1).true
-		expect(bRunCount === 1).true
+		expect(aRunCount).equal(1)
+		expect(bRunCount).equal(1)
 
 		a.s('aa')
-		expect(aRunCount === 2).true
-		expect(bRunCount === 1).true
+		expect(aRunCount).equal(2)
+		expect(bRunCount).equal(1)
 		b.s('bb')
-		expect(aRunCount === 2).true
-		expect(bRunCount === 2).true
+		expect(aRunCount).equal(2)
+		expect(bRunCount).equal(2)
 
 		active.s(false)
-		expect(aRunCount === 2).true
-		expect(bRunCount === 2).true
+		expect(aRunCount).equal(2)
+		expect(bRunCount).equal(2)
 
 		batch(() => { a.s('a'); b.s('b') })
-		expect(aRunCount === 2).true
-		expect(bRunCount === 2).true
+		expect(aRunCount).equal(2)
+		expect(bRunCount).equal(2)
 
 		active.s(true)
-		expect(aRunCount === 3).true
-		expect(bRunCount === 3).true
+		expect(aRunCount).equal(3)
+		expect(bRunCount).equal(3)
 	})
 
 	// it('driftingComputed', () => {
