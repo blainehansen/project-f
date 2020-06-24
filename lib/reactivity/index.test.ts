@@ -5,7 +5,7 @@ import { assert_type as assert, tuple as t } from '@ts-std/types'
 import {
 	Immutable, Mutable, batch,
 	signal, channel, primitive, pointer, distinct, borrow,
-	/*derived, driftingDerived,*/ computed, /*driftingComputed,*/ /*thunk,*/
+	derived, computed, /*thunk,*/
 	effect, statefulEffect,
 } from './index'
 
@@ -516,31 +516,26 @@ describe('SinkWatcher', () => {
 
 
 describe('ReactivePipe', () => {
-	// derived, driftingDerived, computed, driftingComputed
+	it('derived', () => {
+		const str = primitive('a')
+		assert.same<typeof str, Mutable<string>>(true)
+		assert.assignable<keyof typeof str, 'r' | 's'>(true)
 
-	// it('derived', () => {
-	// 	const str = primitive('a')
-	// 	expect).equal(r() === 'a')
-	// 	assert.same<typeof str, Mutable<string>>(true)
-	// 	assert.assignable<keyof typeof str, 'r' | 's'>(true)
+		// const strLength = derived(str, str => str.length)
+		const strLength = derived(str => str.length, str)
+		assert.assignable<keyof typeof strLength, 'r'>(true)
+		assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
+		assert.same<typeof strLength, Immutable<number>>(true)
 
-	// 	const strLength = derived(str, str => str.length)
-	// 	assert.assignable<keyof typeof strLength, 'r'>(true)
-	// 	assert.assignable<keyof typeof strLength, 'r' | 's'>(false)
-	// 	assert.same<typeof strLength, Immutable<number>>(true)
+		expect(str.r()).equal('a')
+		expect(strLength.r()).equal(1)
 
-	// 	expect).equal(r() === 'a')
-	// 	expect).equal(r() === 1)
-
-	// 	str.s('ab')
-	// 	expect).equal(r() === 'ab')
-	// 	expect).equal(r() === 2)
-	// })
-	// it('driftingDerived', () => {
-	// 	//
-	// })
-	// // - `multi`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
+		str.s('ab')
+		expect(str.r()).equal('ab')
+		expect(strLength.r()).equal(2)
+	})
 	// // - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
+	// // - `splitComputed`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
 	// // - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
 
 	it('computed', () => {

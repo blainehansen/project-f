@@ -7,16 +7,21 @@ export interface Mutable<T> extends Immutable<T> {
 	s(next: T): void,
 }
 
-// export class FakeMutable<T> implements Mutable<T> {
-// 	protected readonly value: T
-// 	r() { return this.value }
-// 	s(_next: T) {}
-// }
-// export class RelayMutable<T> implements Mutable<T> {
-// 	protected readonly value: T
-// 	r() { return this.value }
-// 	s(_next: T) {}
-// }
+class InitialMutable<T> implements Mutable<T> {
+	constructor(protected readonly value: T) {}
+	r() { return this.value }
+	s(_next: T) {}
+}
+class NonReactiveMutable<T> implements Mutable<T> {
+	constructor(protected value: T) {}
+	r() { return this.value }
+	s(next: T) { this.value = next }
+}
+class RelayMutable<T> implements Mutable<T> {
+	constructor(protected readonly value: T, protected readonly relayFn: (next: T) => void) {}
+	r() { return this.value }
+	s(next: T) { this.relayFn(next) }
+}
 
 export function borrow<T>(ref: Immutable<T> | Mutable<T>): Immutable<T> {
 	return ref
@@ -261,7 +266,7 @@ export abstract class SinkWatcher {
 abstract class LeafWatcher extends SinkWatcher {
 	abstract readonly deps: DependencyManager
 	protected destructor: Fn | undefined = undefined
-	readonly registrar = (destructor: Fn) => { this.destructor = destructor }
+	protected readonly registrar = (destructor: Fn) => { this.destructor = destructor }
 	abstract run(): void
 	reset() {
 		this.globalReset()
@@ -362,9 +367,6 @@ class Signal extends SourceWatchable<void> {
 }
 export function signal(): Mutable<void> {
 	return new Signal()
-}
-export function derivedSignal<L extends NonEmpty<any>>(...dependencies: WatchableTuple<L>): Immutable<void> {
-	return new FixedDependencyReactivePipe(() => new Signal(), () => {}, dependencies)
 }
 
 const EMPTY: unique symbol = Symbol()
@@ -475,6 +477,36 @@ abstract class ReactivePipe<T> extends SinkWatcher implements Immutable<T> {
 	sample() { return this.internalWatchable.sample() }
 }
 
+// abstract class ReactiveSplitterPipe<O> extends SinkWatcher {
+// 	abstract readonly deps: DependencyManager
+
+// 	// protected abstract readonly internalWatchable: SourceWatchable<T>
+// 	abstract readonly internalWatchables: { [K in keyof O]: SourceWatchable<O[K]> }
+// 	trigger() {
+// 		super.trigger()
+// 		for (const key in this.internalWatchables)
+// 			this.internalWatchables[key].pend()
+// 	}
+// 	abstract runInternal(): O
+// 	run() {
+// 		this.globalReset()
+// 		const obj = this.runInternal()
+// 		for (const key in this.internalWatchables)
+// 			this.internalWatchables[key].s(obj[key])
+// 	}
+// 	reset() { this.globalReset() }
+
+// 	watchers() { return this.internalWatchable.watchers() }
+// 	addWatcher(watcher: Watcher) { this.internalWatchable.addWatcher(watcher) }
+// 	removeWatcher(watcher: Watcher) { this.internalWatchable.removeWatcher(watcher) }
+// 	pend() { this.internalWatchable.pend() }
+// 	pending() { return this.internalWatchable.pending() }
+// 	finish() { this.internalWatchable.finish() }
+// 	// r() { return this.internalWatchable.r() }
+// 	// sample() { return this.internalWatchable.sample() }
+// }
+
+
 type WatchableTuple<L extends any[]> = { [K in keyof L]: Watchable<L[K]> }
 
 class FixedDependencyReactivePipe<L extends NonEmpty<any>, T> extends ReactivePipe<T> {
@@ -515,35 +547,61 @@ class VariableDependencyReactivePipe<T> extends ReactivePipe<T> {
 	}
 }
 
+export function derivedSignal<L extends NonEmpty<any>>(...dependencies: WatchableTuple<L>): Immutable<void> {
+	return new FixedDependencyReactivePipe(() => new Signal(), () => {}, dependencies)
+}
 
-
-
-
-
-// class ReactivePipeSplitWatcher {
-// 	//
-// }
-
-// export class ReactiveMulti<L extends NonEmpty<any>, W> {
-// 	//
-// }
-
-// export function split<T>(obj: Immutable<T>): { [K in T]: Immutable<T[K]> } {
-// 	if (!(obj instanceof SourceWatchable || obj instanceof ReactivePipe)) {
-// 		//
-// 	}
-
-// 	// create the watcher
-// 	// call the function once initially, getting the T that will be destructured
-// 	// create the structure of Watchables, initializing with the
-// }
+export function derived<T, L extends NonEmpty<any>>(transformer: (...args: L) => T, ...dependencies: WatchableTuple<L>): Immutable<T> {
+	return new FixedDependencyReactivePipe(value => new ValueChannel(value), transformer, dependencies)
+}
 
 export function computed<T>(transformer: () => T, comparator?: Comparator<T>): Immutable<T> {
 	return new VariableDependencyReactivePipe(
 		value => comparator ? new DistinctChannel(value, comparator) : new ValueChannel(value),
-		transformer
+		transformer,
 	)
 }
 
 
-// this.value = this.REACTIVITY_CONTEXT.runWithin(() => this.transformer(this.watchable.sample()), this, false)
+// class SplitterWatchable<O> extends Channel<O> {
+// 	readonly watchables: { [K in keyof O]: SourceWatchable<O[K]> }
+// 	constructor(
+// 		watchableFns: { [K in keyof O]: (initial: O[K]) => SourceWatchable<O[K]> },
+// 		initial: O,
+// 	) {
+// 		super(initial)
+// 		const watchables = {} as { [K in keyof O]: SourceWatchable<O[K]> }
+// 		for (const key in watchableFns) {
+// 			const watchableFn = watchableFns[key]
+// 			watchables[key] = watchableFn(initial[key])
+// 		}
+// 		this.watchables = watchables
+// 	}
+
+// 	s(next: O) {
+// 		if (next === this.value) return
+// 		for (const key in this.watchables) {
+// 			const value = next[key]
+// 			this.watchables[key].s(value)
+// 		}
+// 		super.s(next)
+// 	}
+// }
+
+// export function split<O>(obj: Immutable<O>): { [K in keyof O]: Immutable<O[K]> } {
+// 	if (!(obj instanceof SourceWatchable || obj instanceof ReactivePipe)) {
+// 		const initial = obj.r()
+// 		const watchables = {} as { [K in keyof O]: Immutable<O[K]> }
+// 		for (const key in initial)
+// 			watchables[key] = new NonReactiveMutable(initial[key])
+// 		return watchables
+// 	}
+
+// 	const initial = (obj as SourceWatchable<O> | ReactivePipe<O>).sample()
+// 	const watchableFns = {} as { [K in keyof O]: (initial: O[K]) => SourceWatchable<O[K]> }
+// 	for (const key in initial)
+// 		watchableFns[key] = value => new ValueChannel(value)
+// 	const watcher = new FixedDependencyReactivePipe(() => {})
+// 	const splitter = new SplitterWatchable(watchableFns, initial)
+// 	return splitter.watchables
+// }
