@@ -5,7 +5,8 @@ import { assert_type as assert, tuple as t } from '@ts-std/types'
 import {
 	Immutable, Mutable, batch,
 	signal, channel, primitive, pointer, distinct, borrow,
-	derived, computed, /*thunk,*/
+	derivedSignal, derived,
+	computed, /*thunk,*/
 	effect, statefulEffect,
 } from './index'
 
@@ -530,12 +531,54 @@ describe('ReactivePipe', () => {
 		expect(str.r()).equal('a')
 		expect(strLength.r()).equal(1)
 
+		let runCount = 0
+		effect(() => { strLength.r(); runCount++ })
+		expect(runCount).equal(1)
+
 		str.s('ab')
 		expect(str.r()).equal('ab')
 		expect(strLength.r()).equal(2)
+		expect(runCount).equal(2)
 	})
+	it('derivedSignal', () => {
+		const side = primitive(true)
+		const a = primitive('a')
+		const b = computed(() => { console.log('b'); return a.r() + 'b' })
+		const c = derived((a, b) => { console.log('c'); return a.length + b.length }, a, b)
+		const d = computed(() => { console.log('d'); return b.r() + c.r() + 'd' })
+		const e = derived((a, b, c, d) => { console.log('e'); return a.length + b.length + c + d.length }, a, b, c, d)
+
+		expect(a.r()).equal('a')
+		expect(b.r()).equal('ab')
+		expect(c.r()).equal(3)
+		expect(d.r()).equal('ab3d')
+		expect(e.r()).equal(10)
+
+		console.log('signal')
+		const s = derivedSignal(side, e)
+		assert.same<typeof s, Immutable<void>>(true)
+
+		let runCount = 0
+		effect(() => { s.r(); runCount++ })
+
+		expect(runCount).equal(1)
+
+		side.s(false)
+		expect(runCount).equal(2)
+
+		console.log()
+		console.log('mutating')
+		a.s('')
+		expect(runCount).equal(3)
+		expect(a.r()).equal('')
+		expect(b.r()).equal('b')
+		expect(c.r()).equal(1)
+		expect(d.r()).equal('b3d')
+		expect(e.r()).equal(4)
+	})
+
 	// // - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
-	// // - `splitComputed`: fixed dependencies, and a function that returns multiple things which will each become their own `Watchable`
+	// // - `splitComputed`: variable dependencies from a function that returns multiple things which will each become their own `Watchable`
 	// // - `splitTuple`: fixed dependency on a tuple, merely creates `Watchable`s for each field
 
 	it('computed', () => {

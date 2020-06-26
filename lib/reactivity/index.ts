@@ -7,21 +7,21 @@ export interface Mutable<T> extends Immutable<T> {
 	s(next: T): void,
 }
 
-class InitialMutable<T> implements Mutable<T> {
-	constructor(protected readonly value: T) {}
-	r() { return this.value }
-	s(_next: T) {}
-}
-class NonReactiveMutable<T> implements Mutable<T> {
-	constructor(protected value: T) {}
-	r() { return this.value }
-	s(next: T) { this.value = next }
-}
-class RelayMutable<T> implements Mutable<T> {
-	constructor(protected readonly value: T, protected readonly relayFn: (next: T) => void) {}
-	r() { return this.value }
-	s(next: T) { this.relayFn(next) }
-}
+// class InitialMutable<T> implements Mutable<T> {
+// 	constructor(protected readonly value: T) {}
+// 	r() { return this.value }
+// 	s(_next: T) {}
+// }
+// class NonReactiveMutable<T> implements Mutable<T> {
+// 	constructor(protected value: T) {}
+// 	r() { return this.value }
+// 	s(next: T) { this.value = next }
+// }
+// class RelayMutable<T> implements Mutable<T> {
+// 	constructor(protected readonly value: T, protected readonly relayFn: (next: T) => void) {}
+// 	r() { return this.value }
+// 	s(next: T) { this.relayFn(next) }
+// }
 
 export function borrow<T>(ref: Immutable<T> | Mutable<T>): Immutable<T> {
 	return ref
@@ -89,13 +89,13 @@ class Batch {
 	}
 
 	perform() {
-		// console.log()
-		// console.log()
-		// console.log('beginning batch')
+		console.log()
+		console.log()
+		console.log('beginning batch')
 		while (this.watchables.size > 0 || this.watchers.size > 0) {
 			for (const watchable of this.watchables) {
-				// console.log('watchable: ', watchable)
-				// console.log()
+				console.log('watchable: ', watchable)
+				console.log()
 				// we're making an assumption that this won't mutate this.watchables
 				watchable.finish()
 				for (const watcher of watchable.watchers()) {
@@ -109,19 +109,19 @@ class Batch {
 			const notReadyWatchers = new Set<Watcher>()
 			for (const watcher of [...this.watchers].sort((a, b) => a.childDepth - b.childDepth)) {
 				if (!watcher.triggered()) continue
-				// console.log('watcher: ', watcher)
-				// console.log('watcher.deps.ready(): ', watcher.deps.ready())
+				console.log('watcher: ', watcher)
+				console.log('watcher.deps.ready(): ', watcher.deps.ready())
 				if (!watcher.deps.ready()) {
 					notReadyWatchers.add(watcher)
-					// console.log()
+					console.log()
 					continue
 				}
 
 				runCount++
 				// this action can place more Watchables into the queue
-				// console.log('running')
+				console.log('running')
 				watcher.run()
-				// console.log()
+				console.log()
 			}
 			this.watchers.clear()
 			this.watchers = notReadyWatchers
@@ -129,9 +129,9 @@ class Batch {
 			if (this.watchers.size > 0 && runCount === 0)
 				throw new ReactivityPanic('circular reference')
 		}
-		// console.log('ending batch')
-		// console.log()
-		// console.log()
+		console.log('ending batch')
+		console.log()
+		console.log()
 	}
 }
 export function batch(fn: Fn) {
@@ -145,27 +145,54 @@ export function batch(fn: Fn) {
 
 
 
-
-
-
-export type Watchable<T = unknown> = SourceWatchable<T> | ReactivePipe<T>
+export type Watchable<T = unknown> = BaseWatchable<T> | ReactivePipe<T>
 export type Watcher = SinkWatcher | ReactivePipe<unknown>
 
-// interface WatchableLike<T> {
-// 	readonly isSource: boolean,
-// 	watchers(): Set<WatcherLike<unknown>>,
-// 	addWatcher(watcher: Watcher): void,
-// 	removeWatcher(watcher: Watcher): void,
-// 	pend(): void,
-// 	pending(): boolean,
-// 	finish(): void,
-// 	sample(): T,
+abstract class BaseWatchable<T> implements Immutable<T> {
+	abstract watchers(): Set<Watcher>
+	abstract addWatcher(watcher: Watcher): void
+	abstract removeWatcher(watcher: Watcher): void
+	abstract pend(): void
+	abstract pending(): boolean
+	abstract finish(): void
+	abstract r(): T
+	abstract sample(): T
+
+	protected abstract readonly __isreactive: boolean
+	static isBase<T>(immutable: Immutable<T>): immutable is BaseWatchable<T> {
+		return '__isreactive' in immutable
+	}
+}
+
+const emptySet = new Set()
+abstract class InertWatchable<T> extends BaseWatchable<T> {
+	watchers() { return emptySet as Set<Watcher> }
+	addWatcher(watcher: Watcher) {}
+	removeWatcher(watcher: Watcher) {}
+	pend() {}
+	pending() { return false }
+	finish() {}
+	abstract r(): T
+	abstract sample(): T
+}
+class InertImmutable<T> extends InertWatchable<T> {
+	constructor(protected readonly value: T) { super() }
+	r() { return this.value }
+	sample() { return this.value }
+}
+// class InertMutable<T> extends InertMutable<T> implements Mutable<T> {
+// 	s(next: T) { this.value = next }
 // }
+class InertWrapper<T> extends InertWatchable<T> {
+	constructor(protected readonly immutable: Immutable<T>) { super() }
+	r() { return this.immutable.r() }
+	sample() { return this.immutable.r() }
+}
+
 
 export abstract class SourceWatchable<T> implements Mutable<T> {
 	protected readonly REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
 
-	// readonly isSource = true as const
 	protected readonly _watchers = new Set<Watcher>()
 	watchers() { return this._watchers }
 	addWatcher(watcher: Watcher) {
@@ -238,7 +265,6 @@ export abstract class SinkWatcher {
 		this.childDepth = this.REACTIVITY_CONTEXT.getCurrentChildDepth()
 	}
 
-	// readonly isSink = true as const
 	abstract readonly deps: DependencyManager
 
 	protected readonly children = new Set<Watcher>()
@@ -357,7 +383,6 @@ export function statefulEffect<T>(fn: (state: T, registrar: Registrar) => T, ini
 
 
 
-
 class Signal extends SourceWatchable<void> {
 	pending() { return this._pending }
 	finish() { this._pending = false }
@@ -447,11 +472,7 @@ export function distinct<T>(initial: T, comparator: Comparator<T>): Mutable<T> {
 
 
 
-
-
 abstract class ReactivePipe<T> extends SinkWatcher implements Immutable<T> {
-	// readonly isSource = false as const
-	// readonly isSink = false as const
 	abstract readonly deps: DependencyManager
 
 	protected abstract readonly internalWatchable: SourceWatchable<T>
@@ -508,6 +529,7 @@ abstract class ReactivePipe<T> extends SinkWatcher implements Immutable<T> {
 
 
 type WatchableTuple<L extends any[]> = { [K in keyof L]: Watchable<L[K]> }
+type ImmutableTuple<L extends any[]> = { [K in keyof L]: Immutable<L[K]> }
 
 class FixedDependencyReactivePipe<L extends NonEmpty<any>, T> extends ReactivePipe<T> {
 	readonly deps: FixedDependencyManager<L>
@@ -522,6 +544,7 @@ class FixedDependencyReactivePipe<L extends NonEmpty<any>, T> extends ReactivePi
 		this.internalWatchable = watchableFn(this.runInternal())
 	}
 	runInternal() {
+		// UNSAFE
 		const gathered = [] as unknown as L
 		for (const dependency of this.deps.dependencies) {
 			// taking the opportunity to do what regainDependencies does
@@ -547,12 +570,39 @@ class VariableDependencyReactivePipe<T> extends ReactivePipe<T> {
 	}
 }
 
-export function derivedSignal<L extends NonEmpty<any>>(...dependencies: WatchableTuple<L>): Immutable<void> {
-	return new FixedDependencyReactivePipe(() => new Signal(), () => {}, dependencies)
+
+// UNSAFE
+function immutablesToWatchables<L extends any[]>(immutables: ImmutableTuple<L>) {
+	const give = [] as unknown as WatchableTuple<L>
+	let someReactive = false
+	for (const immutable of immutables) {
+		if (BaseWatchable.isBase(immutable)) {
+			someReactive = someReactive || immutable.__isreactive
+			give.push(immutable)
+			continue
+		}
+		give.push(immutable instanceof BaseWatchable ? immutable : new InertWrapper(immutable))
+	}
+	return [someReactive, someReactive ? give : immutables] as [true, WatchableTuple<L>] | [false, ImmutableTuple<L>]
 }
 
-export function derived<T, L extends NonEmpty<any>>(transformer: (...args: L) => T, ...dependencies: WatchableTuple<L>): Immutable<T> {
-	return new FixedDependencyReactivePipe(value => new ValueChannel(value), transformer, dependencies)
+function gatherCall<T, L extends any[]>(fn: (...args: L) => T, immutables: ImmutableTuple<L>): T {
+	const args = immutables.map(immutable => immutable.r()) as L
+	return fn(...args)
+}
+
+export function derivedSignal<L extends NonEmpty<any>>(...dependencies: ImmutableTuple<L>): Immutable<void> {
+	const possibleWatchables = immutablesToWatchables(dependencies)
+	return possibleWatchables[0]
+		? new FixedDependencyReactivePipe(() => new Signal(), () => {}, possibleWatchables[1])
+		: new InertImmutable(undefined as void)
+}
+
+export function derived<T, L extends NonEmpty<any>>(transformer: (...args: L) => T, ...dependencies: ImmutableTuple<L>): Immutable<T> {
+	const possibleWatchables = immutablesToWatchables(dependencies)
+	return possibleWatchables[0]
+		? new FixedDependencyReactivePipe(value => new ValueChannel(value), transformer, possibleWatchables[1])
+		: new InertImmutable(gatherCall(transformer, possibleWatchables[1]))
 }
 
 export function computed<T>(transformer: () => T, comparator?: Comparator<T>): Immutable<T> {
