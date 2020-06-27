@@ -5,11 +5,13 @@ import { assert_type as assert, tuple as t } from '@ts-std/types'
 import {
 	Immutable, Mutable, batch,
 	signal, channel, primitive, pointer, distinct, borrow,
-	derivedSignal, derived,
-	computed, /*thunk,*/
+	derivedSignal, derived, computed, /*thunk,*/
 	effect, statefulEffect,
 } from './index'
 
+
+import fc from 'fast-check'
+import { Command } from '../utils.test'
 
 describe('SourceWatchable', () => {
 	it('signal', () => {
@@ -182,7 +184,6 @@ describe('SinkWatcher', () => {
 				destructorRunCount++
 				n = 0
 			})
-
 			return ++b
 		}, 0)
 
@@ -540,13 +541,13 @@ describe('ReactivePipe', () => {
 		expect(strLength.r()).equal(2)
 		expect(runCount).equal(2)
 	})
-	it('derivedSignal', () => {
+	it('complex derived', () => {
 		const side = primitive(true)
 		const a = primitive('a')
-		const b = computed(() => { console.log('b'); return a.r() + 'b' })
-		const c = derived((a, b) => { console.log('c'); return a.length + b.length }, a, b)
-		const d = computed(() => { console.log('d'); return b.r() + c.r() + 'd' })
-		const e = derived((a, b, c, d) => { console.log('e'); return a.length + b.length + c + d.length }, a, b, c, d)
+		const b = computed(() => a.r() + 'b')
+		const c = derived((a, b) => a.length + b.length, a, b)
+		const d = computed(() => b.r() + c.r() + 'd')
+		const e = derived((a, b, c, d) => a.length + b.length + c + d.length, a, b, c, d)
 
 		expect(a.r()).equal('a')
 		expect(b.r()).equal('ab')
@@ -554,7 +555,6 @@ describe('ReactivePipe', () => {
 		expect(d.r()).equal('ab3d')
 		expect(e.r()).equal(10)
 
-		console.log('signal')
 		const s = derivedSignal(side, e)
 		assert.same<typeof s, Immutable<void>>(true)
 
@@ -566,15 +566,13 @@ describe('ReactivePipe', () => {
 		side.s(false)
 		expect(runCount).equal(2)
 
-		console.log()
-		console.log('mutating')
 		a.s('')
 		expect(runCount).equal(3)
 		expect(a.r()).equal('')
 		expect(b.r()).equal('b')
 		expect(c.r()).equal(1)
-		expect(d.r()).equal('b3d')
-		expect(e.r()).equal(4)
+		expect(d.r()).equal('b1d')
+		expect(e.r()).equal(5)
 	})
 
 	// // - `split`: fixed dependency on an object, merely creates `Watchable`s for each field
@@ -747,9 +745,11 @@ describe('ReactivePipe', () => {
 	// 		return str.r().toUpperCase()
 	// 	})
 
-	// 	expect).equal(=== 0)
-	// 	expect).equal(r() === 'A')
-	// 	expect).equal(=== 1)
+	// 	expect(runCount).equal(0)
+	// 	expect(upperStr.r()).equal('A')
+	// 	expect(runCount).equal(1)
+	// 	expect(upperStr.r()).equal('A')
+	// 	expect(runCount).equal(1)
 	// })
 
 	it('nested computed', () => {
@@ -798,4 +798,68 @@ describe('ReactivePipe', () => {
 	// it('driftingComputed', () => {
 	// 	//
 	// })
+})
+
+
+describe('reactivity properties', () => {
+	const EffectContext = () => {
+		const a = signal()
+		const b = signal()
+		const ctx = { a, b, runCount: 0, destructorRunCount: 0, stop: () => {} }
+		ctx.stop = effect(destroy => {
+			a.r(); b.r(); ctx.runCount++
+			destroy(() => { ctx.destructorRunCount++ })
+		})
+		return ctx
+	}
+	type EffectContext = ReturnType<typeof EffectContext>
+	const EffectModel = () => ({ stopped: false, runCount: 1, destructorRunCount: 0 })
+	type EffectModel = ReturnType<typeof EffectModel>
+
+	const effectCommands = [
+		fc.boolean().map(a => Command<EffectContext, EffectModel>(() => `MutateCommand(${a ? 'a' : 'b'})`, () => true, (model, eff) => {
+			const savedRunCount = eff.runCount
+			const savedDestructorRunCount = eff.destructorRunCount
+			expect(eff.runCount).equal(model.runCount)
+			expect(eff.destructorRunCount).equal(model.destructorRunCount)
+
+			if (model.stopped) { expect(eff.runCount).equal(eff.destructorRunCount) }
+			else { expect(eff.runCount).equal(eff.destructorRunCount + 1) }
+			a ? eff.a.s() : eff.b.s()
+			if (model.stopped) { expect(eff.runCount).equal(savedRunCount); expect(eff.destructorRunCount).equal(savedDestructorRunCount) }
+			else {
+				model.runCount++
+				model.destructorRunCount++
+				expect(eff.runCount).equal(savedRunCount + 1); expect(eff.destructorRunCount).equal(savedDestructorRunCount + 1)
+			}
+		})),
+
+		fc.constant(Command<EffectContext, EffectModel>(() => 'StopCommand', () => true, (model, eff) => {
+			eff.stop()
+			if (!model.stopped)
+				model.destructorRunCount++
+			model.stopped = true
+		})),
+
+		fc.boolean().map(a => Command<EffectContext, EffectModel>(() => `BatchCommand(${a ? 'a': 'b'})`, () => true, (model, eff) => {
+			batch(() => {
+				if (a) { eff.a.s(); eff.b.s() }
+				else { eff.b.s(); eff.a.s() }
+			})
+			if (!model.stopped) {
+				model.runCount++
+				model.destructorRunCount++
+			}
+		})),
+	]
+	it('at all times, the runCount should be one higher than the destructorCount, unless the stop handle has been called', () => {
+		fc.assert(
+		  fc.property(fc.commands(effectCommands, 2500), cmds => {
+		    const s = () => ({ model: EffectModel(), real: EffectContext() })
+		    fc.modelRun(s, cmds)
+		  })
+		)
+	})
+
+	// for any combination of sources at the bottom, and reactive pipes, the reactive pipes should equal the transformation on their dependencies,
 })

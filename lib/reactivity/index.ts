@@ -89,13 +89,13 @@ class Batch {
 	}
 
 	perform() {
-		console.log()
-		console.log()
-		console.log('beginning batch')
+		// console.log()
+		// console.log()
+		// console.log('beginning batch')
 		while (this.watchables.size > 0 || this.watchers.size > 0) {
 			for (const watchable of this.watchables) {
-				console.log('watchable: ', watchable)
-				console.log()
+				// console.log('watchable: ', watchable)
+				// console.log()
 				// we're making an assumption that this won't mutate this.watchables
 				watchable.finish()
 				for (const watcher of watchable.watchers()) {
@@ -109,19 +109,19 @@ class Batch {
 			const notReadyWatchers = new Set<Watcher>()
 			for (const watcher of [...this.watchers].sort((a, b) => a.childDepth - b.childDepth)) {
 				if (!watcher.triggered()) continue
-				console.log('watcher: ', watcher)
-				console.log('watcher.deps.ready(): ', watcher.deps.ready())
+				// console.log('watcher: ', watcher)
+				// console.log('watcher.deps.ready(): ', watcher.deps.ready())
 				if (!watcher.deps.ready()) {
 					notReadyWatchers.add(watcher)
-					console.log()
+					// console.log()
 					continue
 				}
 
 				runCount++
 				// this action can place more Watchables into the queue
-				console.log('running')
+				// console.log('running')
 				watcher.run()
-				console.log()
+				// console.log()
 			}
 			this.watchers.clear()
 			this.watchers = notReadyWatchers
@@ -129,9 +129,9 @@ class Batch {
 			if (this.watchers.size > 0 && runCount === 0)
 				throw new ReactivityPanic('circular reference')
 		}
-		console.log('ending batch')
-		console.log()
-		console.log()
+		// console.log('ending batch')
+		// console.log()
+		// console.log()
 	}
 }
 export function batch(fn: Fn) {
@@ -157,11 +157,6 @@ abstract class BaseWatchable<T> implements Immutable<T> {
 	abstract finish(): void
 	abstract r(): T
 	abstract sample(): T
-
-	protected abstract readonly __isreactive: boolean
-	static isBase<T>(immutable: Immutable<T>): immutable is BaseWatchable<T> {
-		return '__isreactive' in immutable
-	}
 }
 
 const emptySet = new Set()
@@ -190,7 +185,7 @@ class InertWrapper<T> extends InertWatchable<T> {
 }
 
 
-export abstract class SourceWatchable<T> implements Mutable<T> {
+export abstract class SourceWatchable<T> extends BaseWatchable<T> implements Mutable<T> {
 	protected readonly REACTIVITY_CONTEXT = REACTIVITY_CONTEXT
 
 	protected readonly _watchers = new Set<Watcher>()
@@ -576,8 +571,8 @@ function immutablesToWatchables<L extends any[]>(immutables: ImmutableTuple<L>) 
 	const give = [] as unknown as WatchableTuple<L>
 	let someReactive = false
 	for (const immutable of immutables) {
-		if (BaseWatchable.isBase(immutable)) {
-			someReactive = someReactive || immutable.__isreactive
+		if (immutable instanceof SourceWatchable || immutable instanceof ReactivePipe) {
+			someReactive = true
 			give.push(immutable)
 			continue
 		}
