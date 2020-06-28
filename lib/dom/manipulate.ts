@@ -1,4 +1,8 @@
-// import { statefulEffect, Mutable, Immutable } from '../reactivity'
+import { statefulEffect } from '../reactivity'
+
+export function isText(node: Node): node is Text {
+	return node.nodeType === Node.TEXT_NODE
+}
 
 export function clearContent(node: Node) {
 	node.textContent = ''
@@ -25,7 +29,7 @@ export function reconcileNodes(parent: Node, fragment: DocumentFragment) {
 	// let parentCurrent = parent.firstChild
 	// let fragmentCurrent = fragment.firstChild
 	// while (parentCurrent && fragmentCurrent) {
-	// 	//
+	// 	// ...
 	// }
 }
 
@@ -60,18 +64,22 @@ export class Content {
 	}
 }
 
-// export function contentEffect(fn: (realParent: Node, fragment: DocumentFragment) => void, realParent: Node) {
-// 	const content = new Content(realParent, { type: DisplayType.empty, content: undefined })
+export function isContentText(content: ContentState): content is Text {
+	return typeof content === 'object' && content.nodeType === Node.TEXT_NODE
+}
 
-// 	const destructor = statefulEffect((content, destroy) => {
-// 		const fragment = document.createDocumentFragment()
-// 		fn(content.parent, fragment)
+export function contentEffect(fn: (realParent: Node, fragment: DocumentFragment) => void, realParent: Node) {
+	const content = new Content(realParent, DisplayType.empty)
 
-// 		return replaceContent(content, fragment)
-// 	}, content)
+	const destructor = statefulEffect((content, destroy) => {
+		const fragment = document.createDocumentFragment()
+		fn(content.parent, fragment)
 
-// 	return destructor
-// }
+		return replaceContent(content, fragment)
+	}, content)
+
+	return destructor
+}
 
 export function replaceContent(
 	content: Content,
@@ -89,11 +97,9 @@ export function replaceContent(
 
 	case 1: {
 		const inputNode = nodes[0]
-		// inputNode.nodeType = TEXT_NODE = 3
-		if (inputNode instanceof Text) {
+		if (isContentText(inputNode)) {
 			const text = inputNode.data
-			// if (current === DisplayType.text) {
-			if (current instanceof Text) {
+			if (isContentText(current)) {
 				current.data = text
 				return content
 			}
@@ -159,32 +165,31 @@ export class Range {
 	}
 }
 
-// export function rangeEffect(
-// 	fn: (realParent: Node, fragment: DocumentFragment) => void,
-// 	realParent: Node,
-// 	fragment: DocumentFragment,
-// ) {
-// 	const placeholder = new Comment()
-// 	const range = new Range(realParent, fragment, { type: DisplayType.empty, item: placeholder })
-// 	fragment.appendChild(placeholder)
+export function rangeEffect(
+	fn: (realParent: Node, fragment: DocumentFragment) => void,
+	realParent: Node,
+	fragment: DocumentFragment,
+) {
+	const placeholder = new Comment()
+	const range = new Range(realParent, fragment, { type: DisplayType.empty, item: placeholder })
+	fragment.appendChild(placeholder)
 
-// 	// TODO it might be worth inlining the creation of the actual StatefulComputation here
-// 	const destructor = statefulEffect((range, destroy) => {
-// 		const fragment = document.createDocumentFragment()
-// 		fn(range.realParent, fragment)
+	const destructor = statefulEffect((range, destroy) => {
+		const fragment = document.createDocumentFragment()
+		fn(range.realParent, fragment)
 
-// 		return replaceRange(range, fragment)
-// 	}, range)
+		return replaceRange(range, fragment)
+	}, range)
 
-// 	// after initializing the effect, from this point on it will be safe to give it real access to the parent
-// 	// since this whole render cycle is synchronous, the reactive updates can't happen until we've finished the tree
-// 	// and performed the final append to put the tree into the real parent
-// 	// this nicely prevents wasteful operations, since we only have to perform this "flattening" once
-// 	// and don't have to maintain some allocated collection to do so
-// 	range.parent = realParent
+	// after initializing the effect, from this point on it will be safe to give it real access to the parent
+	// since this whole render cycle is synchronous, the reactive updates can't happen until we've finished the tree
+	// and performed the final append to put the tree into the real parent
+	// this nicely prevents wasteful operations, since we only have to perform this "flattening" once
+	// and don't have to maintain some allocated collection to do so
+	range.parent = realParent
 
-// 	return destructor
-// }
+	return destructor
+}
 
 export function replaceRange(
 	range: Range,

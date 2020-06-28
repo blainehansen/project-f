@@ -1,6 +1,12 @@
-import { effect, statefulEffect, Mutable, Immutable } from '../reactivity'
+import { effect, Mutable, Immutable } from '../reactivity'
 import { NonEmpty, NonLone, Overwrite, KeysOfType, Falsey } from '../utils'
 
+export function makeDocumentFragment(nodes: NonLone<Node>) {
+	const fragment = document.createDocumentFragment()
+	for (const node of nodes)
+		fragment.appendChild(node)
+	return fragment
+}
 
 export function createElement<K extends keyof HTMLElementTagNameMap>(
 	parent: Node,
