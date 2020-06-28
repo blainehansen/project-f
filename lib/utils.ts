@@ -23,6 +23,8 @@ export type Comparator<T> = (left: T, right: T) => boolean
 export type Reducer<T> = (left: T, right: T) => T
 
 export const noop = () => {}
+export const eq = <T>(left: T, right: T) => left === right
+export const alwaysFalse = () => false
 export function exhaustive(v: never) {}
 
 export type Fn = () => unknown
