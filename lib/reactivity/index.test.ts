@@ -861,5 +861,8 @@ describe('reactivity properties', () => {
 		)
 	})
 
-	// for any combination of sources at the bottom, and reactive pipes, the reactive pipes should equal the transformation on their dependencies,
+	// you can use fc.letrec or fc.memo:
+	// https://dubzzz.github.io/fast-check/#/1-Guides/Arbitraries?id=recursive-structures
+	// to produce various `ReactiveTree` objects, who create some random number of base sources, pipes, and sinks, and add them all to some tree structure that acts as the model. the `(Effect/Watch)Context` can recursively produce some random number of sub effects/watchers
+	// then you can produce commands that randomly mutate the base sources, possibly in batches, and assert properties over the whole tree
 })
