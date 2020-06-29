@@ -3,12 +3,12 @@
 	"version": "1.0.0",
 	"description": "",
 	"scripts": {
+		"lab": "ts-node lab/main.ts",
 		"dev": "ts-node lib/dom/manipulate.ts",
-		"test:dev": "mocha lib/dom/manipulate.test.ts",
+		"test:dev": "mocha -r jsdom-global/register lib/dom/manipulate.test.ts",
 
 		"todos": "tsc -w -p examples/todos/tsconfig.json",
 		"dom": "tsc -w -p lib/dom/tsconfig.json",
-		"lab": "ts-node lab/main.ts",
 		"macros": "rm -rf lab/macros/transformed/ && ts-node ./lab/macros/transformer.ts && ttsc -P ./lab/macros/tsconfig.json",
 		"macros:dev": "ts-node lab/macros/index.ts",
 		"kreia:wolf": "kreia ./lib/templating/wolf.grammar.peg ./lib/templating/wolf.grammar.staging.ts && eslint --fix --ext .ts lib/templating/wolf.grammar.staging.ts",

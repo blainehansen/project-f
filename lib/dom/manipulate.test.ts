@@ -1,15 +1,21 @@
 import 'mocha'
+import fc from 'fast-check'
 import { expect } from 'chai'
-import { boilString } from '../utils.spec'
+import { Command } from '../utils.test'
 
-import { NonLone } from '../utils'
-import { replaceContent, replaceRange, appendAll, clearContent, Displayable, DisplayType, ContentState, Range } from './index'
-
-beforeEach(() => {
-	document.body.textContent = ''
-})
+import { NonLone, tuple as t } from '../utils'
+import { makeDocumentFragment, createElement, createTextNode } from './nodes'
+import {
+	clearContent, DisplayType,
+	replaceContent, ContentState, Content,
+	replaceRange, RangeState, Range,
+} from './manipulate'
 
 const body = document.body
+beforeEach(() => {
+	body.textContent = ''
+})
+
 export function makeDiv(text?: string) {
 	const d = document.createElement('div')
 	if (text !== undefined)
@@ -36,244 +42,247 @@ function toArray<T>(thing: null | undefined | T | T[]): T[] {
 	return Array.isArray(thing) ? thing : [thing]
 }
 
-function intoContentState(content: undefined | string | Node | NonLone<Node>): ContentState {
-	return content === undefined ? { type: DisplayType.empty, content }
-		: Array.isArray(content) ? { type: DisplayType.many, content }
-		: typeof content === 'string' ? { type: DisplayType.text, content: makeText(content) }
-		: content.nodeType === Node.TEXT_NODE ? { type: DisplayType.text, content: content as Text }
-		: { type: DisplayType.node, content }
-}
-function intoNodeArray(state: ContentState) {
-	switch (state.type) {
-	case DisplayType.empty: return []
-	case DisplayType.many: return state.content
-	default: return [state.content]
-	}
-}
-function setupState(state: ContentState) {
-	for (const item of intoNodeArray(state))
-		body.appendChild(item)
-}
+// function intoContentState(content: undefined | string | Node | NonLone<Node>): ContentState {
+// 	return content === undefined ? { type: DisplayType.empty, content }
+// 		: Array.isArray(content) ? { type: DisplayType.many, content }
+// 		: typeof content === 'string' ? { type: DisplayType.text, content: makeText(content) }
+// 		: content.nodeType === Node.TEXT_NODE ? { type: DisplayType.text, content: content as Text }
+// 		: { type: DisplayType.node, content }
+// }
+// function intoNodeArray(state: ContentState) {
+// 	switch (state.type) {
+// 	case DisplayType.empty: return []
+// 	case DisplayType.many: return state.content
+// 	default: return [state.content]
+// 	}
+// }
+// function setupState(state: ContentState) {
+// 	for (const item of intoNodeArray(state))
+// 		body.appendChild(item)
+// }
 
-const cases: [Displayable, string][] = [
-	[null, ''],
-	[undefined, ''],
-	[[], ''],
-	['', ''],
-	['yoyo', 'yoyo'],
+// const cases: [Displayable, string][] = [
+// 	[null, ''],
+// 	[undefined, ''],
+// 	[[], ''],
+// 	['', ''],
+// 	['yoyo', 'yoyo'],
 
-	[makeDiv(), divText()],
-	[[makeDiv()], divText()],
-	[makeDiv('stuff'), divText('stuff')],
-	[[makeDiv('stuff')], divText('stuff')],
+// 	[makeDiv(), divText()],
+// 	[[makeDiv()], divText()],
+// 	[makeDiv('stuff'), divText('stuff')],
+// 	[[makeDiv('stuff')], divText('stuff')],
 
-	[[makeDiv(), makeDiv()], `${divText()}${divText()}`],
-	[[makeDiv('something'), makeDiv(), makeDiv()], `${divText('something')}${divText()}${divText()}`],
-	[[makeDiv('something'), makeDiv(), makeText('a'), makeText('b'), makeDiv()], `${divText('something')}${divText()}ab${divText()}`],
-]
+// 	[[makeDiv(), makeDiv()], `${divText()}${divText()}`],
+// 	[[makeDiv('something'), makeDiv(), makeDiv()], `${divText('something')}${divText()}${divText()}`],
+// 	[[makeDiv('something'), makeDiv(), makeText('a'), makeText('b'), makeDiv()], `${divText('something')}${divText()}ab${divText()}`],
+// ]
 
 
-describe('replaceContent', () => {
+const DomTree: fc.Memo<DocumentFragment> = fc.memo(n => {
+	return fc.array(fc.oneof(DomNode(n), DomLeaf())).map(makeDocumentFragment)
+})
+const DomNode: fc.Memo<Node> = fc.memo(n => {
+	if (n <= 1) return DomLeaf()
+	return DomTree().map(f => {
+		const tag: Node = document.createElement('div')
+		tag.appendChild(f)
+		return tag
+	})
+})
+const DomLeaf: fc.Memo<Text> = fc.memo(() => {
+	return fc.string().filter(s => s !== '').map(s => makeText(s))
+})
+
+
+describe('theorems', () => {
+	it('for any tree, `replaceContent` is correct', function() {
+		this.timeout(0)
+
+		const ContentContext = () => {
+			body.textContent = ''
+			const content = new Content(body, DisplayType.empty)
+			return { content, original: content }
+		}
+		type ContentContext = ReturnType<typeof ContentContext>
+		const ContentModel = () => ({ html: '', current: DisplayType.empty as ContentState })
+		type ContentModel = ReturnType<typeof ContentModel>
+
+		function escapeHtml(text: string) {
+			const p = document.createElement('p')
+			p.textContent = text
+			return p.innerHTML
+		}
+
+		function htmlOfFragment(fragment: DocumentFragment) {
+			return ([...fragment.childNodes] as (HTMLElement | Text)[])
+				.map(n => n instanceof Text ? escapeHtml(n.data) : n.outerHTML).join('')
+		}
+		function updateContentModel(model: ContentModel, fragment: DocumentFragment) {
+			model.html = htmlOfFragment(fragment)
+			switch (fragment.childNodes.length) {
+				case 0: model.current = DisplayType.empty; break
+				case 1: model.current = fragment.childNodes[0]; break
+				default: model.current = DisplayType.many; break
+			}
+		}
+
+		const replaceContentCommands = [
+			DomTree(5).map(f => Command<ContentModel, ContentContext>(() => 'ReplaceContentCommand', () => true, (model, ctx) => {
+				const previous = ctx.content.current
+				const previousWasText = previous instanceof Text
+
+				updateContentModel(model, f)
+				ctx.content = replaceContent(ctx.content, f)
+
+				expect(ctx.content).equal(ctx.original)
+				expect(body.innerHTML).equal(model.html)
+				const currentIsText = model.current instanceof Text
+				if (previousWasText && currentIsText)
+					expect(ctx.content.current).equal(previous)
+				else if (currentIsText)
+					expect(ctx.content.current).instanceof(Text)
+				else
+					expect(ctx.content.current).equal(model.current)
+			})),
+		]
+
+		fc.assert(fc.property(fc.commands(replaceContentCommands, { maxCommands: 6, /*replayPath: "BAB:F"*/ }), cmds => {
+			fc.modelRun(() => ({ model: ContentModel(), real: ContentContext() }), cmds)
+		})/*, { seed: 1339403506, path: "34:1:1", endOnFailure: true }*/)
+	})
+})
+
+describe('just replaceContent', () => {
 	it('replacing nothing with nothing', () => {
-		let s
-		s = replaceContent(body, { type: DisplayType.empty, content: undefined }, null)
-		expect(s.content).undefined
-		s = replaceContent(body, { type: DisplayType.empty, content: undefined }, undefined)
-		expect(s.content).undefined
-		s = replaceContent(body, { type: DisplayType.empty, content: undefined }, '')
-		expect(s.content).undefined
+		const original = new Content(body, DisplayType.empty)
+		let s = original
+		s = replaceContent(s, document.createDocumentFragment())
+		expect(s).equal(original)
+		expect(s.current).equal(DisplayType.empty)
 	})
 
 	it('replacing text with text', () => {
 		const t = makeText('initial')
 		body.appendChild(t)
-		let s
-		s = replaceContent(body, { type: DisplayType.text, content: t }, 'a')
+		const original = new Content(body, t)
+		let s = original
+		s = replaceContent(s, makeDocumentFragment([makeText('a')]))
 		expect(body.innerHTML).equal('a')
-		expect(s.content).equal(t)
+		expect(s.current).equal(t)
 
-		s = replaceContent(body, { type: DisplayType.text, content: t }, 'b')
+		s = replaceContent(s, makeDocumentFragment([makeText('b')]))
 		expect(body.innerHTML).equal('b')
-		expect(s.content).equal(t)
+		expect(s.current).equal(t)
 	})
 
-	it('replacing nontext with text', () => {
-		const d = makeDiv()
-		body.appendChild(d)
-		const s = replaceContent(body, { type: DisplayType.node, content: d }, 'a')
-		expect(body.innerHTML).equal('a')
-		expect(s.content instanceof Text).true
+	it('replacing node with itself', () => {
+		const n = makeDiv('a')
+		body.appendChild(n)
+		expect(body.innerHTML).equal(divText('a'))
+		const original = new Content(body, n)
+		let s = original
+		s = replaceContent(s, makeDocumentFragment([n]))
+		expect(body.innerHTML).equal(divText('a'))
+		expect(s.current).equal(n)
 	})
-
-	const states = ([
-		undefined, makeText(''),
-		makeText('initial'),
-		makeDiv(), makeDiv(''), makeDiv('initial'),
-		[makeDiv('initial'), makeDiv()],
-		[makeDiv('initial'), makeText('yo'), makeDiv()],
-	] as (undefined | Node | NonLone<Node>)[])
-		.map(intoContentState)
-
-	for (const state of states)
-		it(`replacing ${displayState(state)} with element`, () => {
-			setupState(state)
-
-			const d = makeDiv('hello')
-			const s = replaceContent(body, state, d)
-			expect(s.content).equal(d)
-			expect(body.innerHTML).equal(divText('hello'))
-		})
-
-	for (const state of states)
-		it(`replacing ${displayState(state)} with array`, () => {
-			setupState(state)
-
-			const s = replaceContent(body, state, [makeDiv('hello'), makeDiv('dude')])
-			if (!Array.isArray(s.content)) throw new Error("bad outcoming state: " + displayState(s))
-			expect(s.content.length).equal(2)
-			expect(s.content.every(n => n instanceof HTMLDivElement)).true
-			expect(body.innerHTML).equal(`${divText('hello')}${divText('dude')}`)
-		})
-
-
-	function displayState(state: ContentState): string {
-		switch (state.type) {
-		case DisplayType.empty: return 'empty'
-		case DisplayType.text: return `text ${state.content.data}`
-		case DisplayType.node: return `node ${(state.content as HTMLElement).outerHTML}`
-		case DisplayType.many: return `array ${state.content.map(n => displayState(n as unknown as ContentState)).join(', ')}`
-		}
-	}
-
-	for (const [displayable, html] of cases)
-		for (const state of states)
-			it(`replacing: ${displayState(state)} with: ${html}`, () => {
-				setupState(state)
-
-				replaceContent(body, state, displayable)
-				expect(body.innerHTML).equal(html)
-			})
 })
 
-describe('replaceRange', () => {
-	it('replacing empty with nothing', () => {
+describe('just replaceRange', () => {
+	function emptyRange() {
+		createElement(body, 'div')
 		const placeholder = new Comment()
 		body.appendChild(placeholder)
+		createElement(body, 'div')
+		expect(body.innerHTML).equal(`${divText()}<!---->${divText()}`)
+		return t(placeholder, new Range(body, body, { type: DisplayType.empty, item: placeholder }))
+	}
 
-		replaceRange({ parent: undefined, type: DisplayType.empty, item: placeholder }, undefined)
-		expect(body.innerHTML).equal('<!---->')
-		expect(body.childNodes.length).equal(1)
-		expect(body.firstChild).equal(placeholder)
+	it('replacing empty with nothing', () => {
+		const [placeholder, original] = emptyRange()
+		const s = replaceRange(original, makeDocumentFragment([]))
+		expect(s).equal(original)
+		expect(body.innerHTML).equal(`${divText()}<!---->${divText()}`)
+		expect(body.childNodes.length).equal(3)
+		expect(body.childNodes[1]).equal(placeholder)
 	})
 
 	it('replacing empty with single', () => {
-		const placeholder = new Comment()
-		body.appendChild(placeholder)
-
-		replaceRange({ parent: undefined, type: DisplayType.empty, item: placeholder }, 'yoyo')
-		expect(body.innerHTML).equal('yoyo')
-		expect(body.childNodes.length).equal(1)
-	})
-
-	it('replacing empty with multiple', () => {
-		const placeholder = new Comment()
-		body.appendChild(placeholder)
-
-		replaceRange({ parent: undefined, type: DisplayType.empty, item: placeholder }, [makeDiv('stuff'), makeText('dudes')])
-		expect(body.innerHTML).equal(`${divText('stuff')}dudes`)
-		expect(body.childNodes.length).equal(2)
+		const [placeholder, original] = emptyRange()
+		const s = replaceRange(original, makeDocumentFragment([makeText('yoyo')]))
+		expect(s).equal(original)
+		expect(body.innerHTML).equal(`${divText()}yoyo${divText()}`)
+		expect(body.childNodes.length).equal(3)
 	})
 
 	it('replacing text with text', () => {
+		createElement(body, 'div')
 		const node = makeText('wassup')
 		body.appendChild(node)
+		createElement(body, 'div')
 
-		replaceRange({ parent: undefined, type: DisplayType.text, item: node }, 'wassup dudes')
-		expect(body.innerHTML).equal('wassup dudes')
-		expect(body.firstChild).equal(node)
+		const original = new Range(body, body, { type: DisplayType.node, item: node })
+		const s = replaceRange(original, makeDocumentFragment([makeText('wassup dudes')]))
+		expect(s).equal(original)
+		expect(original.current.item).equal(node)
+		expect(body.innerHTML).equal(`${divText()}wassup dudes${divText()}`)
+		expect(body.childNodes[1]).equal(node)
 		expect(node.data).equal('wassup dudes')
 	})
 
 	it('replacing single with itself', () => {
+		createElement(body, 'div')
 		const d = makeDiv('stuff')
 		body.appendChild(d)
+		createElement(body, 'div')
 
-		const r = d
-		replaceRange({ parent: undefined, type: DisplayType.node, item: d }, r)
-		expect(body.innerHTML).equal(divText('stuff'))
-		expect(body.firstChild).equal(d)
+		const original = new Range(body, body, { type: DisplayType.node, item: d })
+		const s = replaceRange(original, makeDocumentFragment([d]))
+		expect(body.innerHTML).equal(divText() + divText('stuff') + divText())
+		expect(body.childNodes[1]).equal(d)
 	})
 
-	const ranges: Range[] = [
-		{ parent: undefined, type: DisplayType.empty, item: new Comment() },
-		{ parent: undefined, type: DisplayType.node, item: makeText('') },
-		{ parent: undefined, type: DisplayType.node, item: makeText('some text') },
-		{ parent: undefined, type: DisplayType.node, item: makeDiv() },
-		{ parent: undefined, type: DisplayType.node, item: makeDiv('') },
-		{ parent: undefined, type: DisplayType.node, item: makeDiv('single node div') },
-		{ parent: undefined, type: DisplayType.many, item: [makeText(''), makeText('other')] },
-		{ parent: undefined, type: DisplayType.many, item: [makeText(''), makeDiv(), makeText('other')] },
-		{ parent: undefined, type: DisplayType.many, item: [makeText('dudes'), makeDiv('something'), makeText('other')] },
-	]
+	// const ranges: Range[] = [
+	// 	{ parent: undefined, type: DisplayType.empty, item: new Comment() },
+	// 	{ parent: undefined, type: DisplayType.node, item: makeText('') },
+	// 	{ parent: undefined, type: DisplayType.node, item: makeText('some text') },
+	// 	{ parent: undefined, type: DisplayType.node, item: makeDiv() },
+	// 	{ parent: undefined, type: DisplayType.node, item: makeDiv('') },
+	// 	{ parent: undefined, type: DisplayType.node, item: makeDiv('single node div') },
+	// 	{ parent: undefined, type: DisplayType.many, item: [makeText(''), makeText('other')] },
+	// 	{ parent: undefined, type: DisplayType.many, item: [makeText(''), makeDiv(), makeText('other')] },
+	// 	{ parent: undefined, type: DisplayType.many, item: [makeText('dudes'), makeDiv('something'), makeText('other')] },
+	// ]
 
-	function displayRange(range: Range) {
-		const d = (n: Text | Element) => n instanceof Text ? n.data : n.outerHTML
-		switch (range.type) {
-		case DisplayType.empty: return 'empty'
-		case DisplayType.text: return `text ${d(range.item)}`
-		case DisplayType.node: return `single ${d(range.item as Element)}`
-		case DisplayType.many: return `array ${range.item.map(n => d(n as Element)).join('')}`
-		}
-	}
+	// function displayRange(range: Range) {
+	// 	const d = (n: Text | Element) => n instanceof Text ? n.data : n.outerHTML
+	// 	switch (range.type) {
+	// 	case DisplayType.empty: return 'empty'
+	// 	case DisplayType.text: return `text ${d(range.item)}`
+	// 	case DisplayType.node: return `single ${d(range.item as Element)}`
+	// 	case DisplayType.many: return `array ${range.item.map(n => d(n as Element)).join('')}`
+	// 	}
+	// }
 
-	for (const [displayable, html] of cases)
-		for (const range of ranges)
-			it(`replacing ${displayRange(range)} with ${html}`, () => {
-				body.appendChild(makeText('begin'))
-				switch (range.type) {
-					case DisplayType.many: appendAll(body, range.item); break
-					default: body.appendChild(range.item); break
-				}
-				body.appendChild(makeText('end'))
+	// for (const [displayable, html] of cases)
+	// 	for (const range of ranges)
+	// 		it(`replacing ${displayRange(range)} with ${html}`, () => {
+	// 			body.appendChild(makeText('begin'))
+	// 			switch (range.type) {
+	// 				case DisplayType.many: appendAll(body, range.item); break
+	// 				default: body.appendChild(range.item); break
+	// 			}
+	// 			body.appendChild(makeText('end'))
 
-				replaceRange(range, displayable)
-				const baseHtml = html === '' ? '<!---->' : html
-				expect(body.innerHTML).equal(`begin${baseHtml}end`)
-			})
+	// 			replaceRange(range, displayable)
+	// 			const baseHtml = html === '' ? '<!---->' : html
+	// 			expect(body.innerHTML).equal(`begin${baseHtml}end`)
+	// 		})
 })
 
 // describe('reconcileContent', () => {
 // 	//
 // })
-
-describe('appendAll', () => {
-	it('all text nodes', () => {
-		const d = makeDiv()
-		const r = appendAll(d, [makeText('a'), makeText('b')])
-		expect(r.length).equal(2)
-		expect(r.every(n => n instanceof Text)).true
-		expect(d.childNodes.length).equal(2)
-		expect(d.innerHTML).equal('ab')
-	})
-
-	it('all normal nodes', () => {
-		const d = makeDiv()
-		const r = appendAll(d, [makeDiv('yo'), makeDiv('dude')])
-		expect(r.length).equal(2)
-		expect(r.every(n => n instanceof HTMLDivElement)).true
-		expect(d.childNodes.length).equal(2)
-		expect(d.innerHTML).equal(`${divText('yo')}${divText('dude')}`)
-	})
-
-	it('mixed', () => {
-		const d = makeDiv()
-		const r = appendAll(d, [makeDiv('yo'), makeText('stuff'), makeDiv('dude')])
-		expect(r.length).equal(3)
-		expect(r.every(n => n instanceof Node)).true
-		expect(d.childNodes.length).equal(3)
-		expect(d.innerHTML).equal(`${divText('yo')}stuff${divText('dude')}`)
-	})
-})
 
 describe('clearContent', () => it('works', () => {
 	body.appendChild(makeText('a'))

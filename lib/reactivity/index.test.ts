@@ -817,7 +817,7 @@ describe('reactivity properties', () => {
 	type EffectModel = ReturnType<typeof EffectModel>
 
 	const effectCommands = [
-		fc.boolean().map(a => Command<EffectContext, EffectModel>(() => `MutateCommand(${a ? 'a' : 'b'})`, () => true, (model, eff) => {
+		fc.boolean().map(a => Command<EffectModel, EffectContext>(() => `MutateCommand(${a ? 'a' : 'b'})`, () => true, (model, eff) => {
 			const savedRunCount = eff.runCount
 			const savedDestructorRunCount = eff.destructorRunCount
 			expect(eff.runCount).equal(model.runCount)
@@ -834,14 +834,14 @@ describe('reactivity properties', () => {
 			}
 		})),
 
-		fc.constant(Command<EffectContext, EffectModel>(() => 'StopCommand', () => true, (model, eff) => {
+		fc.constant(Command<EffectModel, EffectContext>(() => 'StopCommand', () => true, (model, eff) => {
 			eff.stop()
 			if (!model.stopped)
 				model.destructorRunCount++
 			model.stopped = true
 		})),
 
-		fc.boolean().map(a => Command<EffectContext, EffectModel>(() => `BatchCommand(${a ? 'a': 'b'})`, () => true, (model, eff) => {
+		fc.boolean().map(a => Command<EffectModel, EffectContext>(() => `BatchCommand(${a ? 'a': 'b'})`, () => true, (model, eff) => {
 			batch(() => {
 				if (a) { eff.a.s(); eff.b.s() }
 				else { eff.b.s(); eff.a.s() }
@@ -854,10 +854,10 @@ describe('reactivity properties', () => {
 	]
 	it('at all times, the runCount should be one higher than the destructorCount, unless the stop handle has been called', () => {
 		fc.assert(
-		  fc.property(fc.commands(effectCommands, 2500), cmds => {
-		    const s = () => ({ model: EffectModel(), real: EffectContext() })
-		    fc.modelRun(s, cmds)
-		  })
+			fc.property(fc.commands(effectCommands, 2500), cmds => {
+				const s = () => ({ model: EffectModel(), real: EffectContext() })
+				fc.modelRun(s, cmds)
+			})
 		)
 	})
 

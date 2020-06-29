@@ -107,6 +107,7 @@ export function replaceContent(
 			parent.textContent = text
 			// UNSAFE: we assume here that after setting textContent to a string,
 			// that immediately afterwards the firstChild will be a Text
+			// note: this assumption is only valid if the above `text` is nonempty
 			return content.swap(parent.firstChild as Text)
 		}
 
@@ -119,8 +120,11 @@ export function replaceContent(
 			parent.appendChild(inputNode)
 			return content.swap(inputNode)
 		default:
-			if (inputNode === current)
+			if (inputNode === current) {
+				// have to put the node back, since placing it in the fragment removed it from the dom
+				parent.appendChild(inputNode)
 				return content
+			}
 			parent.replaceChild(inputNode, current)
 			return content.swap(inputNode)
 		}
@@ -217,7 +221,7 @@ export function replaceRange(
 
 	case 1: {
 		const node = nodes[0]
-		if (node instanceof Text) {
+		if (isText(node)) {
 			const str = node.data
 			switch (current.type) {
 			case DisplayType.text:
@@ -242,6 +246,10 @@ export function replaceRange(
 			replaceManyWithSingle(parent, current.item, node)
 			return range
 		}
+
+		// AHHH
+		// if (node === current.item)
+		// 	return range
 
 		parent.replaceChild(node, current.item)
 		return range
