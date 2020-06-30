@@ -8,24 +8,24 @@ export function clearContent(node: Node) {
 	node.textContent = ''
 }
 
-export function removeAllAfter(start: Node, end: Node) {
+export function removeAllUntil(start: Node, end: Node) {
 	const range = document.createRange()
-	range.setStartAfter(start)
-	range.setEndAfter(end)
+	range.setStartBefore(start)
+	range.setEndBefore(end)
 	range.deleteContents()
 }
 
-export function replaceManyWithSingle(parent: Node, { begin, end }: RangeMarker, node: Node) {
-	removeAllAfter(begin, end)
-	parent.replaceChild(node, begin)
+export function replaceManyWithSingle(parent: Node, begin: Node, end: Node, node: Node) {
+	removeAllUntil(begin, end)
+	parent.insertBefore(node, end)
 }
 
 // TODO this is a dumb version for now
 export function reconcileNodes(parent: Node, fragment: DocumentFragment) {
 	const begin = parent.childNodes[0]
 	const end = parent.childNodes[parent.childNodes.length - 1]
-	removeAllAfter(begin, end)
-	parent.replaceChild(fragment, begin)
+	removeAllUntil(begin, end)
+	parent.replaceChild(fragment, end)
 	// let parentCurrent = parent.firstChild
 	// let fragmentCurrent = fragment.firstChild
 	// while (parentCurrent && fragmentCurrent) {
@@ -37,10 +37,10 @@ export function reconcileNodes(parent: Node, fragment: DocumentFragment) {
 export function reconcileRanges(
 	parent: Node,
 	fragment: DocumentFragment,
-	{ begin, end }: RangeMarker,
+	begin: Node, end: Node,
 ) {
-	removeAllAfter(begin, end)
-	parent.replaceChild(fragment, begin)
+	removeAllUntil(begin, end)
+	parent.insertBefore(fragment, end)
 }
 
 
@@ -89,8 +89,9 @@ export function replaceContent(
 	const nodes = fragment.childNodes
 	switch (nodes.length) {
 	case 0: {
-		// do nothing
-		if (current === DisplayType.empty) return content
+		if (current === DisplayType.empty)
+			// do nothing
+			return content
 		clearContent(parent)
 		return content.swap(DisplayType.empty)
 	}
@@ -148,17 +149,21 @@ export function replaceContent(
 
 
 
+// export type RangeState =
+// 	| { type: DisplayType.empty, item: Comment }
+// 	| { type: DisplayType.text, item: Text }
+// 	| { type: DisplayType.node, item: Node }
+// 	| { type: DisplayType.many, item: Node }
 export type RangeState =
-	| { type: DisplayType.empty, item: Comment }
+	| { type: DisplayType.empty }
 	| { type: DisplayType.text, item: Text }
 	| { type: DisplayType.node, item: Node }
-	| { type: DisplayType.many, item: RangeMarker }
-
-export type RangeMarker = { begin: Node, end: Node }
+	| { type: DisplayType.many, item: Node }
 
 export class Range {
 	constructor(
-		public realParent: Node,
+		readonly endAnchor: Comment,
+		readonly realParent: Node,
 		public parent: Node,
 		public current: RangeState,
 	) {}
@@ -174,14 +179,13 @@ export function rangeEffect(
 	realParent: Node,
 	fragment: DocumentFragment,
 ) {
-	const placeholder = new Comment()
-	const range = new Range(realParent, fragment, { type: DisplayType.empty, item: placeholder })
-	fragment.appendChild(placeholder)
+	const endAnchor = new Comment()
+	fragment.appendChild(endAnchor)
+	const range = new Range(endAnchor, realParent, fragment, { type: DisplayType.empty })
 
 	const destructor = statefulEffect((range, destroy) => {
 		const fragment = document.createDocumentFragment()
 		fn(range.realParent, fragment)
-
 		return replaceRange(range, fragment)
 	}, range)
 
@@ -199,42 +203,43 @@ export function replaceRange(
 	range: Range,
 	fragment: DocumentFragment,
 ): Range {
-	const { parent, current } = range
+	const { endAnchor, parent, current } = range
 	const nodes = fragment.childNodes
 	switch (nodes.length) {
 	case 0:
 		switch (current.type) {
 		case DisplayType.empty:
 			return range
-
-		case DisplayType.many: {
-			const placeholder = new Comment()
-			replaceManyWithSingle(parent, current.item, placeholder)
-			return range.swap({ type: DisplayType.empty, item: placeholder })
-		}
-
+		case DisplayType.many:
+			removeAllUntil(current.item, endAnchor)
+			break
 		default:
-			const placeholder = new Comment()
-			parent.replaceChild(placeholder, current.item)
-			return range.swap({ type: DisplayType.empty, item: placeholder })
+			parent.removeChild(current.item)
 		}
+		return range.swap({ type: DisplayType.empty })
 
 	case 1: {
 		const node = nodes[0]
 		if (isText(node)) {
 			const str = node.data
 			switch (current.type) {
+			case DisplayType.empty: {
+				const text = document.createTextNode(str)
+				parent.insertBefore(text, endAnchor)
+				return range.swap({ type: DisplayType.text, item: text })
+			}
+
 			case DisplayType.text:
 				current.item.data = str
 				return range
 
 			case DisplayType.many: {
 				const text = document.createTextNode(str)
-				replaceManyWithSingle(parent, current.item, text)
+				replaceManyWithSingle(parent, current.item, endAnchor, text)
 				return range.swap({ type: DisplayType.text, item: text })
 			}
 
-			default:
+			case DisplayType.node:
 				const text = document.createTextNode(str)
 				parent.replaceChild(text, current.item)
 				return range.swap({ type: DisplayType.text, item: text })
@@ -242,26 +247,36 @@ export function replaceRange(
 		}
 
 		range.swap({ type: DisplayType.node, item: node })
-		if (current.type === DisplayType.many) {
-			replaceManyWithSingle(parent, current.item, node)
-			return range
+		switch (current.type) {
+		case DisplayType.empty:
+			parent.insertBefore(node, endAnchor)
+			break
+		case DisplayType.many:
+			replaceManyWithSingle(parent, current.item, endAnchor, node)
+			break
+		case DisplayType.node:
+			if (node === current.item) {
+				parent.insertBefore(node, endAnchor)
+				break
+			}
+		case DisplayType.text:
+			parent.replaceChild(node, current.item)
 		}
-
-		// AHHH
-		// if (node === current.item)
-		// 	return range
-
-		parent.replaceChild(node, current.item)
 		return range
 	}
 
 	default:
-		range.swap({ type: DisplayType.many, item: { begin: nodes[0], end: nodes[nodes.length - 1] } })
+		range.swap({ type: DisplayType.many, item: nodes[0] })
 		if (current.type === DisplayType.many) {
-			reconcileRanges(parent, fragment, current.item)
+			reconcileRanges(parent, fragment, current.item, endAnchor)
+			return range
+		}
+		if (current.type === DisplayType.empty) {
+			parent.insertBefore(fragment, endAnchor)
 			return range
 		}
 
+		// either a Text or a Node
 		parent.replaceChild(fragment, current.item)
 		return range
 	}
