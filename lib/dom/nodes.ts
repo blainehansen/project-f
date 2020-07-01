@@ -168,13 +168,22 @@ export function syncSelectElement(select: HTMLSelectElement, mutable: Mutable<st
 	}
 	effect(() => {
 		const value = mutable.r()
-		for (const child of select.children)
-			if (child instanceof HTMLOptionElement)
-				child.selected = value === child.value
-			else if (child instanceof HTMLOptGroupElement)
-				for (const groupChild of child.children)
-					if (groupChild instanceof HTMLOptionElement)
-						groupChild.selected = value === groupChild.value
+		console.log('value:', value)
+		console.log('beginning loop')
+		console.log('select.options.length:', select.options.length)
+		for (let index = 0; index < select.options.length; index++) {
+			const child = select.options.item(index)!
+			console.log('child:', child)
+			console.log('child.value:', child.value)
+			console.log('value === child.value:', value === child.value)
+			console.log('child.selected:', child.selected)
+			const selected = value === child.value
+			if (selected)
+				select.selectedIndex = index
+			child.selected = selected
+			console.log('child.selected:', child.selected)
+			console.log()
+		}
 	})
 }
 export function syncSelectMultipleElement(select: HTMLSelectElement, mutable: Mutable<string[]>) {

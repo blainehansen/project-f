@@ -122,7 +122,6 @@ export function replaceContent(
 			return content.swap(inputNode)
 		default:
 			if (inputNode === current) {
-				// have to put the node back, since placing it in the fragment removed it from the dom
 				parent.appendChild(inputNode)
 				return content
 			}
@@ -148,12 +147,6 @@ export function replaceContent(
 }
 
 
-
-// export type RangeState =
-// 	| { type: DisplayType.empty, item: Comment }
-// 	| { type: DisplayType.text, item: Text }
-// 	| { type: DisplayType.node, item: Node }
-// 	| { type: DisplayType.many, item: Node }
 export type RangeState =
 	| { type: DisplayType.empty }
 	| { type: DisplayType.text, item: Text }

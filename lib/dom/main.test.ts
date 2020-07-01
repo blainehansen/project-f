@@ -1,16 +1,16 @@
 import 'mocha'
 import { expect } from 'chai'
-import { boilString } from '../utils.spec'
-import { divText, tagText, inputText } from './index.spec'
+import { boilString } from '../utils.test'
+import { divText, tagText, inputText } from './manipulate.test'
 
 import { NonLone, exec } from '../utils'
 import {
-	Displayable, DisplayType, Range, ContentState,
-	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
+	DisplayType, Content, ContentState, Range, RangeState,
+	createElement, createTextNode, contentEffect, rangeEffect,
 	syncTextElement, syncCheckboxElement, syncElementAttribute,
 	syncRadioElement, syncRadioElementReactive, syncSelectElement, syncSelectMultipleElement
  } from './index'
-import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
+import { Immutable, Mutable, effect, statefulEffect, primitive, channel, computed } from '../reactivity'
 
 const body = document.body
 beforeEach(() => {
@@ -19,14 +19,12 @@ beforeEach(() => {
 
 
 const inputCheck = `<input type="checkbox">`
-const comment = '<!---->'
+const endAnchor = '<!---->'
 const begin = '<!--begin-->'
 const end = '<!--end-->'
 const someInput = (placeholder: string) => `<input type="text" placeholder="${placeholder}">`
 function eachText<T>(collection: T[], fn: (t: T) => string) {
-	return collection.length === 0 ? comment
-		: collection.length === 1 ? fn(collection[0])
-		: begin + collection.map(fn).join('') + end
+	return collection.map(fn).join('') + endAnchor
 }
 
 
@@ -37,18 +35,18 @@ export function switcher(parent: Node, checked: Mutable<boolean>) {
 	return input
 }
 describe('switcher', () => it('works', () => {
-	const checked = value(false)
+	const checked = primitive(false)
 	const checkbox = switcher(body, checked)
 
 	expect(checkbox.checked).false
-	expect(checked()).false
+	expect(checked.r()).false
 
 	checkbox.click()
 	expect(checkbox.checked).true
-	expect(checked()).true
+	expect(checked.r()).true
 
-	checked(false)
-	expect(checked()).false
+	checked.s(false)
+	expect(checked.r()).false
 	expect(checkbox.checked).false
 }))
 
@@ -62,9 +60,9 @@ export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) =>
 		const newLetter = ($event.target as typeof input).value
 		;($event.target as typeof input).value = ''
 
-		const currentList = list()
+		const currentList = list.r()
 		currentList.push(fn(newLetter))
-		list(currentList)
+		list.s(currentList)
 	}
 
 	return input
@@ -73,16 +71,16 @@ export function appender<T>(parent: Node, list: Mutable<T[]>, fn: (s: string) =>
 // 	const list = channel([])
 // 	const input = appender(body, list, s => s)
 
-// 	expect(list()).eql([])
+// 	expect(list.r()).eql([])
 // }))
 
 export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
 	const button = createElement(parent, 'button')
 	button.textContent = "delete"
 	button.onclick = $event => {
-		const currentList = list()
+		const currentList = list.r()
 		currentList.splice(index, 1)
-		list(currentList)
+		list.s(currentList)
 	}
 	return button
 }
@@ -99,27 +97,21 @@ export function deleter(parent: Node, list: Mutable<unknown[]>, index: number) {
 // div
 // 	input(type="checkbox", !sync=checked)
 // 	div
-// 		@if (checked()) hello checked world
+// 		@if (checked.r()) hello checked world
 // 		@else: b oh no!
 export function CheckboxIfElseBlock(realParent: Node, parent: DocumentFragment) {
 	const component = createElement(parent, 'div')
 
-	const checked = value(true)
+	const checked = primitive(true)
 	switcher(component, checked)
 
 	const div = createElement(component, 'div')
 	const b = document.createElement('b')
 	b.textContent = 'oh no!'
-	contentEffect(() => {
-		return checked()
-			? 'hello checked world'
-			: b
-			// undefined for a branch with no else
-			// and chain these ternaries for an else-if chain
+	contentEffect((realParent, parent) => {
+		if (checked.r()) createTextNode(parent, 'hello checked world')
+		else parent.appendChild(b)
 	}, div)
-	// effect(() => {
-	// 	div.textContent = checked() ? 'on' : 'off'
-	// })
 
 	return { checked }
 }
@@ -128,68 +120,62 @@ describe('CheckboxIfElseBlock', () => it('works', () => {
 
 	expect(body.innerHTML).equal(divText(`${inputCheck}${divText('hello checked world')}`))
 
-	checked(false)
+	checked.s(false)
 	expect(body.innerHTML).equal(divText(`${inputCheck}${divText(tagText('b', 'oh no!'))}`))
 }))
 
 
-// @if (letter() === 'a') raw text
-// @else-if (letter() === 'b')
+// @if (letter.r() === 'a') raw text
+// @else-if (letter.r() === 'b')
 // 	span multiple
 // 	div things
-// @else-if (letter() === 'c'): div the letter: {{ letter() }}
+// @else-if (letter.r() === 'c'): div the letter: {{ letter.r() }}
 export function ChainedIfElse(realParent: Node, parent: DocumentFragment) {
-	const letter = value('')
+	const letter = primitive('')
 
-	rangeEffect((realParent, parent) => {
-		if ((letter() === 'a')) {
+	contentEffect((realParent, parent) => {
+		if ((letter.r() === 'a')) {
 			createTextNode(parent, 'raw text')
 		}
-		else if (letter() === 'b') {
+		else if (letter.r() === 'b') {
 			const span = createElement(parent, 'span')
 			span.textContent = 'multiple'
 			const div = createElement(parent, 'div')
 			div.textContent = 'things'
 		}
-		else if (letter() === 'c') {
+		else if (letter.r() === 'c') {
 			const div = createElement(parent, 'div')
 			effect(() => {
-				div.textContent = `the letter: ${ letter() }`
+				div.textContent = `the letter: ${ letter.r() }`
 			})
 		}
-	}, realParent, parent)
+	}, realParent)
 
 	return letter
 }
 describe('ChainedIfElse', () => it('works', () => {
 	const letter = ChainedIfElse(body, body as unknown as DocumentFragment)
-
-	expect(body.innerHTML).equal(comment)
-
-	letter('a')
+	expect(body.innerHTML).equal('')
+	letter.s('a')
 	expect(body.innerHTML).equal('raw text')
-
-	letter('c')
+	letter.s('c')
 	expect(body.innerHTML).equal(divText('the letter: c'))
-
-	letter('b')
-	expect(body.innerHTML).equal(begin + tagText('span', 'multiple') + divText('things') + end)
-
-	letter('c')
+	letter.s('b')
+	expect(body.innerHTML).equal(tagText('span', 'multiple') + divText('things'))
+	letter.s('c')
 	expect(body.innerHTML).equal(divText('the letter: c'))
-
-	letter('d')
-	expect(body.innerHTML).equal(comment)
+	letter.s('d')
+	expect(body.innerHTML).equal('')
 }))
 
 
 // div
 // 	input(type="text", placeholder="yo yo", !sync=text)
-// 	| {{ text() }}
+// 	| {{ text.r() }}
 export function TextInput(realParent: Node, parent: DocumentFragment) {
 	const component = createElement(parent, 'div')
 
-	const text = value('')
+	const text = primitive('')
 	const input = createElement(component, 'input')
 	input.type = 'text'
 	input.placeholder = 'yo yo'
@@ -197,7 +183,7 @@ export function TextInput(realParent: Node, parent: DocumentFragment) {
 
 	const display = createTextNode(component, '')
 	effect(() => {
-		display.data = text()
+		display.data = text.r()
 	})
 
 	return { text, input }
@@ -209,16 +195,16 @@ describe('TextInput', () => it('works', () => {
 	expect(body.innerHTML).equal(divText(inputText))
 	expect(input.value).equal('')
 
-	text('stuff')
+	text.s('stuff')
 	expect(body.innerHTML).equal(divText(`${inputText}stuff`))
 	expect(input.value).equal('stuff')
 }))
 
 
 // textarea(placeholder="yo yo", !sync=text)
-// | {{ text() }}
+// | {{ text.r() }}
 export function TextareaInput(realParent: Node, parent: DocumentFragment) {
-	const text = value('')
+	const text = primitive('')
 
 	const textarea = createElement(parent, 'textarea')
 	textarea.placeholder = 'yo yo'
@@ -226,7 +212,7 @@ export function TextareaInput(realParent: Node, parent: DocumentFragment) {
 
 	const display = createTextNode(parent, '')
 	effect(() => {
-		display.data = text()
+		display.data = text.r()
 	})
 
 	return { text, textarea }
@@ -237,7 +223,7 @@ describe('TextareaInput', () => it('works', () => {
 	const textareaText = `<textarea placeholder="yo yo"></textarea>`
 	expect(body.innerHTML).equal(textareaText)
 
-	text('stuff')
+	text.s('stuff')
 	expect(body.innerHTML).equal(textareaText + 'stuff')
 }))
 
@@ -245,10 +231,10 @@ describe('TextareaInput', () => it('works', () => {
 // // input(type="checkbox", !sync=thing, value="some string")
 // // input(type="checkbox", !sync=thing, value={ [1, 2, 3] })
 // // input(type="checkbox", !sync=thing, :value=stringValue)
-// // | {{ '' + thing() }}
+// // | {{ '' + thing.r() }}
 // export function CheckboxGroupInput(realParent: Node, parent: DocumentFragment) {
 // 	const things = channel([] as (string | number[])[])
-// 	const stringValue = value("changes")
+// 	const stringValue = primitive("changes")
 
 // 	const one = createElement(parent, 'input')
 // 	one.type = 'checkbox'
@@ -292,7 +278,7 @@ describe('TextareaInput', () => it('works', () => {
 // 	expect([one.checked, two.checked, three.checked]).eql([true, true, true])
 // 	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
 
-// 	stringValue("not changes")
+// 	stringValue.s("not changes")
 // 	things(t)
 // 	expect([one.checked, two.checked, three.checked]).eql([true, true, false])
 // 	expect(body.innerHTML).equal(checkboxInputText("some string,1,2,3,changes"))
@@ -307,10 +293,10 @@ describe('TextareaInput', () => it('works', () => {
 // input(type="radio", !sync=thing, value="")
 // input(type="radio", !sync=thing, value="some string")
 // input(type="radio", !sync=thing, :value=stringValue)
-// | {{ '' + thing() }}
+// | {{ '' + thing.r() }}
 export function RadioInput(realParent: Node, parent: DocumentFragment) {
 	const thing = channel("blargh")
-	const stringValue = value("changes")
+	const stringValue = primitive("changes")
 
 	const one = createElement(parent, 'input')
 	one.type = 'radio'
@@ -324,7 +310,7 @@ export function RadioInput(realParent: Node, parent: DocumentFragment) {
 
 	const display = createTextNode(parent, '')
 	effect(() => {
-		display.data = '' + thing()
+		display.data = '' + thing.r()
 	})
 
 	return { thing, stringValue, one, two, three }
@@ -336,24 +322,24 @@ describe('RadioInput', () => it('works', () => {
 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
 	expect(body.innerHTML).equal(radioInputText('blargh'))
 
-	thing("")
+	thing.s("")
 	expect([one.checked, two.checked, three.checked]).eql([true, false, false])
 	expect(body.innerHTML).equal(radioInputText(""))
 
-	thing("some string")
+	thing.s("some string")
 	expect([one.checked, two.checked, three.checked]).eql([false, true, false])
 	expect(body.innerHTML).equal(radioInputText("some string"))
 
-	thing("changes")
+	thing.s("changes")
 	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
 	expect(body.innerHTML).equal(radioInputText("changes"))
 
-	stringValue("not changes")
+	stringValue.s("not changes")
 	// AGH
 	expect([one.checked, two.checked, three.checked]).eql([false, false, false])
 	expect(body.innerHTML).equal(radioInputText('changes'))
 
-	thing("not changes")
+	thing.s("not changes")
 	expect([one.checked, two.checked, three.checked]).eql([false, false, true])
 	expect(body.innerHTML).equal(radioInputText('not changes'))
 }))
@@ -366,67 +352,71 @@ describe('RadioInput', () => it('works', () => {
 //   option(:value=changingC) C
 // {{ '' + selected }}
 export function SelectInput(realParent: Node, parent: DocumentFragment) {
-	const selected = value("")
-	const changingC = value("C")
+	const selected = primitive("")
+	const changingC = primitive("C")
 
 	const select = createElement(parent, 'select')
 
 	const def = createElement(select, 'option')
+	;(def as any)._secret = 'def'
 	def.textContent = "Please select one"
 	def.disabled = true
 	def.value = ""
 	const A = createElement(select, 'option')
+	;(A as any)._secret = 'A'
 	A.textContent = 'A'
 	const B = createElement(select, 'option')
+	;(B as any)._secret = 'B'
 	B.textContent = 'B'
 	B.value = 'Basic'
 	const C = createElement(select, 'option')
+	;(C as any)._secret = 'C'
 	C.textContent = 'C'
 	effect(() => {
-		C.value = changingC()
+		C.value = changingC.r()
 	})
 	syncSelectElement(select, selected)
 
 	const display = createTextNode(parent, '')
 	effect(() => {
-		display.data = '' + selected()
+		display.data = '' + selected.r()
 	})
 
 	return { selected, select, changingC, def, A, B, C }
 }
-describe('SelectInput', () => it('works', () => {
+describe('only SelectInput', () => it('works', () => {
 	const { selected, select, changingC, def, A, B, C } = SelectInput(body, body as unknown as DocumentFragment)
 	const selectText = (v: string) => select.outerHTML + v
 
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([true, false, false, false])
 	expect(body.innerHTML).equal(selectText(''))
 
-	selected("some string")
+	selected.s("some string")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, false])
 	expect(body.innerHTML).equal(selectText("some string"))
 
-	selected("A")
+	selected.s("A")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, true, false, false])
 	expect(body.innerHTML).equal(selectText("A"))
 
-	selected("Basic")
+	selected.s("Basic")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, true, false])
 	expect(body.innerHTML).equal(selectText("Basic"))
 
-	selected("C")
+	selected.s("C")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
 	expect(body.innerHTML).equal(selectText("C"))
 
-	changingC("Casic")
+	changingC.s("Casic")
 	// AGH
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
 	expect(body.innerHTML).equal(selectText("C"))
 
-	selected("Casic")
+	selected.s("Casic")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([false, false, false, true])
 	expect(body.innerHTML).equal(selectText("Casic"))
 
-	selected("")
+	selected.s("")
 	expect([def.selected, A.selected, B.selected, C.selected]).eql([true, false, false, false])
 	expect(body.innerHTML).equal(selectText(''))
 }))
@@ -439,7 +429,7 @@ describe('SelectInput', () => it('works', () => {
 // {{ '' + selected }}
 export function SelectInputMultiple(realParent: Node, parent: DocumentFragment) {
 	const selected = channel([] as string [])
-	const changingC = value("C")
+	const changingC = primitive("C")
 
 	const select = createElement(parent, 'select')
 	select.multiple = true
@@ -452,13 +442,13 @@ export function SelectInputMultiple(realParent: Node, parent: DocumentFragment) 
 	const C = createElement(select, 'option')
 	C.textContent = 'C'
 	effect(() => {
-		C.value = changingC()
+		C.value = changingC.r()
 	})
 	syncSelectMultipleElement(select, selected)
 
 	const display = createTextNode(parent, '')
 	effect(() => {
-		display.data = '' + selected()
+		display.data = '' + selected.r()
 	})
 
 	return { selected, select, changingC, A, B, C }
@@ -470,35 +460,35 @@ describe('SelectInputMultiple', () => it('works', () => {
 	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
 	expect(body.innerHTML).equal(selectText(''))
 
-	selected(["some string"])
+	selected.s(["some string"])
 	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
 	expect(body.innerHTML).equal(selectText("some string"))
 
-	selected(["A", "Basic"])
+	selected.s(["A", "Basic"])
 	expect([A.selected, B.selected, C.selected]).eql([true, true, false])
 	expect(body.innerHTML).equal(selectText("A,Basic"))
 
-	selected(["C"])
+	selected.s(["C"])
 	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
 	expect(body.innerHTML).equal(selectText("C"))
 
-	changingC("Casic")
+	changingC.s("Casic")
 	// AGH
 	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
 	expect(body.innerHTML).equal(selectText("C"))
 
-	selected(["Casic"])
+	selected.s(["Casic"])
 	expect([A.selected, B.selected, C.selected]).eql([false, false, true])
 	expect(body.innerHTML).equal(selectText("Casic"))
 
-	selected([])
+	selected.s([])
 	expect([A.selected, B.selected, C.selected]).eql([false, false, false])
 	expect(body.innerHTML).equal(selectText(''))
 }))
 
 
 // h1 Letters:
-// @each ((letter, index) of list()): div
+// @each ((letter, index) of list.r()): div
 // 	i letter: {{ letter }}
 // 	button(@click={ deleteItem(index) }) delete this letter
 // input(type="text", placeholder="add a new letter", @keyup.enter=pushNewLetter)
@@ -508,7 +498,7 @@ export function BasicEach(realParent: Node, parent: DocumentFragment) {
 
 	const list = channel(['a', 'b', 'c'])
 	rangeEffect((realParent, parent) => {
-		for (const [index, letter] of list().entries()) {
+		for (const [index, letter] of list.r().entries()) {
 			const div = createElement(parent, 'div')
 			const item = createElement(div, 'i')
 			item.textContent = `letter: "${letter}"`
@@ -521,41 +511,40 @@ export function BasicEach(realParent: Node, parent: DocumentFragment) {
 }
 describe('BasicEach', () => it('works', () => {
 	const { list } = BasicEach(body, body as unknown as DocumentFragment)
-	const l = list()
+	const l = list.r()
 
 	const loop = (...s: string[]) => {
 		return tagText('h1', 'Letters:')
-			+ begin
 			+ s.map(s => divText(`${tagText('i', `letter: "${s}"`)}${tagText('button', 'delete')}`)).join('')
-			+ end
+			+ endAnchor
 			+ someInput('append')
 	}
 	expect(body.innerHTML).equal(loop('a', 'b', 'c'))
 
 	l.splice(1, 1)
-	list(l)
+	list.s(l)
 	expect(body.innerHTML).equal(loop('a', 'c'))
 
 	l.push('d')
-	list(l)
+	list.s(l)
 	expect(body.innerHTML).equal(loop('a', 'c', 'd'))
 }))
 
 
 // input(type="checkbox", !sync=condition)
-// @if (condition())
-//   @each ((item, index) of items()): div
+// @if (condition.r())
+//   @each ((item, index) of items.r()): div
 // 		| {{ item }}
 // 		button(@click={ delete(index) }) delete
 // input(type="text", @click.enter=append)
 export function IfThenEach(realParent: Node, parent: DocumentFragment) {
-	const condition = value(true)
+	const condition = primitive(true)
 	switcher(parent, condition)
 
 	const items = channel(['a', 'b', 'c'])
 	rangeEffect((realParent, parent) => {
-		if (condition()) {
-			for (const [index, item] of items().entries()) {
+		if (condition.r()) {
+			for (const [index, item] of items.r().entries()) {
 				const div = createElement(parent, 'div')
 				const text = createTextNode(div, item)
 				deleter(div, items, index)
@@ -569,54 +558,53 @@ export function IfThenEach(realParent: Node, parent: DocumentFragment) {
 describe('IfThenEach', () => it('works', () => {
 	const { condition, items } = IfThenEach(body, body as unknown as DocumentFragment)
 
-	const i = items()
+	const i = items.r()
 	const loop = (...s: string[]) => {
 		return inputCheck
-			+ begin
 			+ s.map(s => divText(`${s}${tagText('button', 'delete')}`)).join('')
-			+ end
+			+ endAnchor
 			+ someInput('append')
 	}
 	expect(body.innerHTML).equal(loop('a', 'b', 'c'))
 
-	condition(false)
-	expect(body.innerHTML).equal(inputCheck + comment + someInput('append'))
+	condition.s(false)
+	expect(body.innerHTML).equal(inputCheck + endAnchor + someInput('append'))
 
 	i.push('d')
-	items(i)
-	expect(body.innerHTML).equal(inputCheck + comment + someInput('append'))
+	items.s(i)
+	expect(body.innerHTML).equal(inputCheck + endAnchor + someInput('append'))
 
-	condition(true)
+	condition.s(true)
 	expect(body.innerHTML).equal(loop('a', 'b', 'c', 'd'))
 }))
 
 
-// @each (item of items())
-// 	@if (item.condition()): div
+// appender
+// @each (item of items.r())
+// 	@if (item.condition.r()): div
 // 		| {{ item.name }}
 // 		button(@click=delete)
-// @each (item of items())
+// @each (item of items.r())
 // 	input(type="checkbox", !sync={ item.condition })
-// appender
 export function EachThenIf(realParent: Node, parent: DocumentFragment) {
 	const items = channel([
-		{ name: 'a', condition: value(true) },
-		{ name: 'b', condition: value(false) },
-		{ name: 'c', condition: value(false) },
-		{ name: 'd', condition: value(true) },
+		{ name: 'a', condition: primitive(true) },
+		{ name: 'b', condition: primitive(false) },
+		{ name: 'c', condition: primitive(false) },
+		{ name: 'd', condition: primitive(true) },
 	])
 
-	appender(parent, items, name => ({ name, condition: value(Math.random() > 0.5) }))
+	appender(parent, items, name => ({ name, condition: primitive(Math.random() > 0.5) }))
 	rangeEffect((realParent, parent) => {
-		for (const item of items()) {
+		for (const item of items.r()) {
 			switcher(parent, item.condition)
 		}
 	}, realParent, parent)
 
 	rangeEffect((realParent, parent) => {
-		for (const [index, item] of items().entries()) {
+		for (const [index, item] of items.r().entries()) {
 			rangeEffect((realParent, parent) => {
-				if (item.condition()) {
+				if (item.condition.r()) {
 					const div = createElement(parent, 'div')
 					const text = createTextNode(div, item.name)
 					deleter(div, items, index)
@@ -630,15 +618,13 @@ export function EachThenIf(realParent: Node, parent: DocumentFragment) {
 describe('EachThenIf', () => it('works', () => {
 	const { items } = EachThenIf(body, body as unknown as DocumentFragment)
 
-	const i = items()
+	const i = items.r()
 	const loop = (...s: { name: string, condition: boolean }[]) => {
 		return someInput('append')
-			+ begin
 			+ s.map(() => inputCheck).join('')
-			+ end
-			+ begin
-			+ s.map(item => item.condition ? divText(`${item.name}${tagText('button', 'delete')}`) : comment).join('')
-			+ end
+			+ endAnchor
+			+ s.map(item => (item.condition ? divText(`${item.name}${tagText('button', 'delete')}`) : '') + endAnchor).join('')
+			+ endAnchor
 	}
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
@@ -647,9 +633,9 @@ describe('EachThenIf', () => it('works', () => {
 		{ name: 'd', condition: true },
 	))
 
-	const item = { name: 'e', condition: value(true) }
+	const item = { name: 'e', condition: primitive(true) }
 	i.push(item)
-	items(i)
+	items.s(i)
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
 		{ name: 'b', condition: false },
@@ -658,7 +644,7 @@ describe('EachThenIf', () => it('works', () => {
 		{ name: 'e', condition: true },
 	))
 
-	item.condition(false)
+	item.condition.s(false)
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
 		{ name: 'b', condition: false },
@@ -668,7 +654,7 @@ describe('EachThenIf', () => it('works', () => {
 	))
 
 	i.pop()
-	items(i)
+	items.s(i)
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
 		{ name: 'b', condition: false },
@@ -677,7 +663,7 @@ describe('EachThenIf', () => it('works', () => {
 	))
 
 	i.splice(2, 1)
-	items(i)
+	items.s(i)
 	expect(body.innerHTML).equal(loop(
 		{ name: 'a', condition: true },
 		{ name: 'b', condition: false },
@@ -689,30 +675,31 @@ describe('EachThenIf', () => it('works', () => {
 
 
 
-// @each (post of posts())
+// @each (post of posts.r())
 // 	@if (post.important): h1 {{ post.title }}
 // 	@else
 // 		p not important: {{ post.title }}
 // 	small {{ post.subscript }}
-// 	@each (tag of post.tags()): .tag
-// 		@if (tag.project()): .project-star
+// 	@each (tag of post.tags.r()): .tag
+// 		@if (tag.project.r()): .project-star
 // 		| {{ tag.name }}
 // 		@each (n of [1, 2, 3, 4, 5])
-// 			.star: @if (tag.stars() >= n) filled
+// 			.star: @if (tag.stars.r() >= n) filled
+// b Have a good day!
 export function ComplexIfEachNesting(realParent: Node, parent: DocumentFragment) {
 	const posts = channel([
 		{ important: false, title: 'A', subscript: 'a', tags: channel([
-			{ project: value(true), name: 't1', stars: value(3) },
+			{ project: primitive(true), name: 't1', stars: primitive(3) },
 		]) },
 		{ important: true, title: 'B', subscript: 'b', tags: channel([
-			{ project: value(false), name: 't2', stars: value(5) },
-			{ project: value(true), name: 't3', stars: value(0) },
+			{ project: primitive(false), name: 't2', stars: primitive(5) },
+			{ project: primitive(true), name: 't3', stars: primitive(0) },
 		]) },
 		{ important: false, title: 'C', subscript: 'c', tags: channel([]) },
 	])
 
 	rangeEffect((realParent, parent) => {
-		for (const post of posts()) {
+		for (const post of posts.r()) {
 			// first if/else
 			rangeEffect((realParent, parent) => {
 				if (post.important) {
@@ -737,14 +724,14 @@ export function ComplexIfEachNesting(realParent: Node, parent: DocumentFragment)
 
 			// nested each
 			rangeEffect((realParent, parent) => {
-				for (const tag of post.tags()) {
+				for (const tag of post.tags.r()) {
 					const tagDiv = createElement(parent, 'div')
 					tagDiv.className = 'tag'
 					const tagDivFragment = document.createDocumentFragment()
 
 					// project-star if block
 					rangeEffect((tagDiv, tagDivFragment) => {
-						if (tag.project()) {
+						if (tag.project.r()) {
 							const projectStarDiv = createElement(tagDivFragment, 'div')
 							projectStarDiv.className = 'project-star'
 						}
@@ -762,7 +749,7 @@ export function ComplexIfEachNesting(realParent: Node, parent: DocumentFragment)
 							starDiv.className = 'star'
 
 							effect(() => {
-								starDiv.textContent = tag.stars() >= n ? 'filled' : ''
+								starDiv.textContent = tag.stars.r() >= n ? 'filled' : ''
 							})
 						}
 					}, tagDiv, tagDivFragment)
@@ -775,20 +762,23 @@ export function ComplexIfEachNesting(realParent: Node, parent: DocumentFragment)
 
 	}, realParent, parent)
 
+	const b = createElement(parent, 'b')
+	b.textContent = 'Have a good day!'
+
 	return posts
 }
 describe('ComplexIfEachNesting', () => it('works', () => {
 	const postsChannel = ComplexIfEachNesting(body, body as unknown as DocumentFragment)
-	const posts = postsChannel()
+	const posts = postsChannel.r()
 
 	type Post = { important: boolean, title: string, subscript: string, tags: { project: boolean, name: string, stars: number }[] }
 	const loop = (...posts: Post[]) => {
 		return eachText(posts, post => {
-			return (post.important ? tagText('h1', post.title) : tagText('p', `not important: ${post.title}`))
+			return (post.important ? tagText('h1', post.title) : tagText('p', `not important: ${post.title}`)) + endAnchor
 				+ tagText('small', post.subscript)
 				+ eachText(post.tags, tag => {
 					return divText(
-						(tag.project ? divText('', 'project-star') : comment)
+						(tag.project ? divText('', 'project-star') : '') + endAnchor
 							+ tag.name
 							+ eachText([1, 2, 3, 4, 5], n => {
 								return divText(tag.stars >= n ? 'filled' : '', 'star')
@@ -797,6 +787,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 					)
 				})
 		})
+		+ tagText('b', 'Have a good day!')
 	}
 
 	expect(body.innerHTML).equal(loop(
@@ -810,9 +801,9 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 		{ important: false, title: 'C', subscript: 'c', tags: [] },
 	))
 
-	let tags = posts[1]!.tags()
+	let tags = posts[1]!.tags.r()
 	tags.splice(1, 1)
-	posts[1]!.tags(tags)
+	posts[1]!.tags.s(tags)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -824,7 +815,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 	))
 
 	tags[0]!.name = 'yoyo'
-	posts[1]!.tags(tags)
+	posts[1]!.tags.s(tags)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -835,7 +826,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 		{ important: false, title: 'C', subscript: 'c', tags: [] },
 	))
 
-	tags[0]!.project(true)
+	tags[0]!.project.s(true)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -846,7 +837,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 		{ important: false, title: 'C', subscript: 'c', tags: [] },
 	))
 
-	tags[0]!.stars(0)
+	tags[0]!.stars.s(0)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -857,7 +848,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 		{ important: false, title: 'C', subscript: 'c', tags: [] },
 	))
 
-	tags[0]!.stars(1)
+	tags[0]!.stars.s(1)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -868,8 +859,8 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 		{ important: false, title: 'C', subscript: 'c', tags: [] },
 	))
 
-	tags.unshift({ project: value(false), name: 'yello', stars: value(-1) })
-	posts[1]!.tags(tags)
+	tags.unshift({ project: primitive(false), name: 'yello', stars: primitive(-1) })
+	posts[1]!.tags.s(tags)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -882,10 +873,10 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 	))
 
 	posts.push({ important: false, title: 'C', subscript: 'c', tags: channel([
-		{ project: value(true), name: 'blah blah', stars: value(9) },
-		{ project: value(false), name: 'blah once', stars: value(0) },
+		{ project: primitive(true), name: 'blah blah', stars: primitive(9) },
+		{ project: primitive(false), name: 'blah once', stars: primitive(0) },
 	]) })
-	postsChannel(posts)
+	postsChannel.s(posts)
 	expect(body.innerHTML).equal(loop(
 		{ important: false, title: 'A', subscript: 'a', tags: [
 			{ project: true, name: 't1', stars: 3 },
@@ -902,8 +893,8 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 	))
 
 	posts.splice(0, posts.length)
-	postsChannel(posts)
-	expect(body.innerHTML).equal(comment)
+	postsChannel.s(posts)
+	expect(body.innerHTML).equal(endAnchor + tagText('b', 'Have a good day!'))
 }))
 
 
@@ -915,7 +906,7 @@ describe('ComplexIfEachNesting', () => it('works', () => {
 //   div Are you having a nice day?
 // @include (excitedGreeting)
 // @include (hello, 'Everybody')
-// @if (condition())
+// @if (condition.r())
 // 	@include (hello, 'Dudes')
 export function Templates(realParent: Node, parent: DocumentFragment) {
 	function excitedGreeting(realParent: Node, parent: DocumentFragment) {
@@ -926,21 +917,21 @@ export function Templates(realParent: Node, parent: DocumentFragment) {
 	function hello(realParent: Node, parent: DocumentFragment, name: Immutable<string>) {
 		const div1 = createElement(parent, 'div')
 		effect(() => {
-			div1.textContent = `How are you doing ${ name() }?`
+			div1.textContent = `How are you doing ${ name.r() }?`
 		})
 		const div2 = createElement(parent, 'div')
 		div2.textContent = 'Are you having a nice day?'
 	}
 
-	const everybody = value('Everybody')
+	const everybody = primitive('Everybody')
 	excitedGreeting(realParent, parent)
 	hello(realParent, parent, everybody)
 
-	const condition = value(false)
+	const condition = primitive(false)
 
-	const dudes = value('Dudes')
+	const dudes = primitive('Dudes')
 	rangeEffect((realParent, parent) => {
-		if (condition()) {
+		if (condition.r()) {
 			hello(realParent, parent, dudes)
 		}
 	}, realParent, parent)
@@ -956,63 +947,66 @@ describe('Templates', () => it('works', () => {
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('Everybody')
-		+ comment
+		+ endAnchor
 	)
 
-	condition(true)
+	condition.s(true)
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('Everybody')
-		+ begin + hello('Dudes') + end
+		+ hello('Dudes') + endAnchor
 	)
 
-	everybody('not everybody')
+	everybody.s('not everybody')
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('not everybody')
-		+ begin + hello('Dudes') + end
+		+ hello('Dudes') + endAnchor
 	)
 
-	dudes('not dudes')
+	dudes.s('not dudes')
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('not everybody')
-		+ begin + hello('not dudes') + end
+		+ hello('not dudes') + endAnchor
 	)
 
-	condition(false)
+	condition.s(false)
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('not everybody')
-		+ comment
+		+ endAnchor
 	)
 
-	dudes('invisible')
+	dudes.s('invisible')
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('not everybody')
-		+ comment
+		+ endAnchor
 	)
 
-	condition(true)
+	condition.s(true)
 	expect(body.innerHTML).equal(
 		strong
 		+ hello('not everybody')
-		+ begin + hello('invisible') + end
+		+ hello('invisible') + endAnchor
 	)
 }))
 
 
-// @:bind (weapon = weaponChannel())
-// @match (weapon.type)
+// h1 Weapon stats
+// @match (:weapon = weaponChannel; weapon.type)
 // 	@when ('blade')
-// 		h1 Watch out! It's sharp!
+// 		h2 Watch out! It's sharp!
 // 	@when ('projectile')
 // 		p This is a projectile weapon.
-// 		p It shoots {{ weapon.projectile() }}.
+// 		p It shoots {{: weapon.projectile }}.
 // 	@when ('blunt')
 // 	@default: span unknown weapon type
 export function MatchStatement(realParent: Node, parent: DocumentFragment) {
+	const h1 = createElement(parent, 'h1')
+	h1.textContent = 'Weapon stats'
+
 	type Weapon =
 		| { type: 'blade' }
 		| { type: 'projectile', projectile: Immutable<string> }
@@ -1021,18 +1015,18 @@ export function MatchStatement(realParent: Node, parent: DocumentFragment) {
 
 	const weaponChannel = channel({ type: 'blade' } as Weapon)
 	rangeEffect((realParent, parent) => {
-		const weapon = weaponChannel()
+		const weapon = weaponChannel.r()
 		switch (weapon.type) {
 			case 'blade':
-				const h1 = createElement(parent, 'h1')
-				h1.textContent = "Watch out! It's sharp!"
+				const h2 = createElement(parent, 'h2')
+				h2.textContent = "Watch out! It's sharp!"
 				break
 			case 'projectile':
 				const p1 = createElement(parent, 'p')
 				p1.textContent = 'This is a projectile weapon.'
 				const p2 = createElement(parent, 'p')
 				effect(() => {
-					p2.textContent = `It shoots ${ weapon.projectile() }.`
+					p2.textContent = `It shoots ${ weapon.projectile.r() }.`
 				})
 				break
 			case 'blunt':
@@ -1048,38 +1042,38 @@ export function MatchStatement(realParent: Node, parent: DocumentFragment) {
 }
 describe('MatchStatement', () => it('works', () => {
 	const weaponChannel = MatchStatement(body, body as unknown as DocumentFragment)
+	const h1 = tagText('h1', 'Weapon stats')
 
-	expect(body.innerHTML).equal(tagText('h1', "Watch out! It's sharp!"))
+	expect(body.innerHTML).equal(h1 + tagText('h2', "Watch out! It's sharp!") + endAnchor)
 
-	weaponChannel({ type: 'energy', voltage: 1 })
-	expect(body.innerHTML).equal(tagText('span', 'unknown weapon type'))
+	weaponChannel.s({ type: 'energy', voltage: 1 })
+	expect(body.innerHTML).equal(h1 + tagText('span', 'unknown weapon type') + endAnchor)
 
-	weaponChannel({ type: 'blunt' })
-	expect(body.innerHTML).equal(comment)
+	weaponChannel.s({ type: 'blunt' })
+	expect(body.innerHTML).equal(h1 + endAnchor)
 
-	weaponChannel({ type: 'blade' })
-	expect(body.innerHTML).equal(tagText('h1', "Watch out! It's sharp!"))
+	weaponChannel.s({ type: 'blade' })
+	expect(body.innerHTML).equal(h1 + tagText('h2', "Watch out! It's sharp!") + endAnchor)
 
-	const projectile = value('bullets')
-	weaponChannel({ type: 'projectile', projectile })
+	const projectile = primitive('bullets')
+	weaponChannel.s({ type: 'projectile', projectile })
 	expect(body.innerHTML).equal(
-		begin
+		h1
 		+ tagText('p', 'This is a projectile weapon.')
 		+ tagText('p', `It shoots bullets.`)
-		+ end
+		+ endAnchor
 	)
 
-	projectile('arrows')
+	projectile.s('arrows')
 	expect(body.innerHTML).equal(
-		begin
+		h1
 		+ tagText('p', 'This is a projectile weapon.')
 		+ tagText('p', `It shoots arrows.`)
-		+ end
+		+ endAnchor
 	)
 }))
 
-// @:bind (fruit = fruitChannel())
-// @switch (fruit)
+// @switch (:fruit = fruitChannel)
 // 	@case ('oranges')
 // 		| Oranges are $0.59 a pound.
 // 	@fallcase ('mangoes')
@@ -1090,9 +1084,9 @@ describe('MatchStatement', () => it('works', () => {
 // 	@default
 // 		| Sorry, we're out of {{ fruit }}.
 export function SwitchStatement(realParent: Node, parent: DocumentFragment) {
-	const fruitChannel = value('tomatoes')
-	rangeEffect((realParent, parent) => {
-		const fruit = fruitChannel()
+	const fruitChannel = primitive('tomatoes')
+	contentEffect((realParent, parent) => {
+		const fruit = fruitChannel.r()
 		// in generated code, we will *always* put each case in an enclosed block to prevent scope clashing
 		switch (fruit) {
 			case 'oranges':
@@ -1111,7 +1105,7 @@ export function SwitchStatement(realParent: Node, parent: DocumentFragment) {
 					createTextNode(parent, `Sorry, we're out of ${ fruit }.`)
 				})
 		}
-	}, realParent, parent)
+	}, realParent)
 
 	return fruitChannel
 }
@@ -1120,21 +1114,19 @@ describe('SwitchStatement', () => it('works', () => {
 
 	expect(body.innerHTML).equal(`Sorry, we're out of tomatoes.`)
 
-	fruitChannel('papayas')
+	fruitChannel.s('papayas')
 	expect(body.innerHTML).equal('Mangoes, guavas, and papayas are $2.79 a pound.')
 
-	fruitChannel('oranges')
+	fruitChannel.s('oranges')
 	expect(body.innerHTML).equal('Oranges are $0.59 a pound.')
 
-	fruitChannel('guavas')
+	fruitChannel.s('guavas')
 	expect(body.innerHTML).equal('Mangoes, guavas, and papayas are $2.79 a pound.')
 
-	fruitChannel('mangoes')
+	fruitChannel.s('mangoes')
 	expect(body.innerHTML).equal(
-		begin
-		+ tagText('h1', 'Oh I like mangoes too!')
+		tagText('h1', 'Oh I like mangoes too!')
 		+ 'Mangoes, guavas, and papayas are $2.79 a pound.'
-		+ end
 	)
 }))
 
@@ -1142,18 +1134,18 @@ describe('SwitchStatement', () => it('works', () => {
 // p((fn)=makeRed)
 // p((fn)={ p => { p.style.color = 'red' } })
 export function NodeReceiver(realParent: Node, parent: DocumentFragment) {
-	const p1Color = value('red')
+	const p1Color = primitive('red')
 	function makeRed(node: HTMLParagraphElement) {
 		effect(() => {
-			node.style.color = p1Color()
+			node.style.color = p1Color.r()
 		})
 	}
 
 	const p1 = createElement(parent, 'p')
-	nodeReceiver(p1, makeRed)
+	;(makeRed)(p1)
 
 	const p2 = createElement(parent, 'p')
-	nodeReceiver(p2, p => { p.style.color = p1Color() })
+	;(p => { p.style.color = p1Color.r() })(p2)
 
 	return p1Color
 }
@@ -1162,7 +1154,7 @@ describe('NodeReceiver', () => it('works', () => {
 
 	expect(body.innerHTML).equal('<p style="color: red;"></p><p style="color: red;"></p>')
 
-	p1Color('blue')
+	p1Color.s('blue')
 	expect(body.innerHTML).equal('<p style="color: blue;"></p><p style="color: red;"></p>')
 }))
 

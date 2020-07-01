@@ -2,46 +2,55 @@
 // file:///home/blaine/lab/project-f/lib/dom/main.html
 
 import {
-	Displayable, DisplayType, Range, ContentState,
-	nodeReceiver, createElement, createTextNode, contentEffect, rangeEffect,
+	DisplayType, Content, ContentState, Range, RangeState,
+	createElement, createTextNode, contentEffect, rangeEffect,
 	syncTextElement, syncCheckboxElement, syncElementAttribute,
 	syncRadioElement, syncRadioElementReactive, syncSelectElement, syncSelectMultipleElement
  } from './index'
-import { Immutable, Mutable, effect, statefulEffect, data, value, channel, computed, thunk, sample } from '../reactivity'
+import { Immutable, Mutable, effect, statefulEffect, primitive, channel, computed } from '../reactivity'
 
 export function SelectInput(realParent: Node, parent: DocumentFragment) {
-	const selected = value("")
-	const changingC = value("C")
+	const selected = primitive("")
+	const changingC = primitive("C")
 
 	const select = createElement(parent, 'select')
-	select.multiple = true
-	syncSelectElement(select, selected)
 
 	const def = createElement(select, 'option')
+	;(def as any)._secret = 'def'
 	def.textContent = "Please select one"
 	def.disabled = true
 	def.value = ""
 	const A = createElement(select, 'option')
+	;(A as any)._secret = 'A'
 	A.textContent = 'A'
 	const B = createElement(select, 'option')
+	;(B as any)._secret = 'B'
 	B.textContent = 'B'
 	B.value = 'Basic'
 	const C = createElement(select, 'option')
+	;(C as any)._secret = 'C'
 	C.textContent = 'C'
 	effect(() => {
-		C.value = changingC()
+		C.value = changingC.r()
 	})
+	syncSelectElement(select, selected)
 
 	const display = createTextNode(parent, '')
 	effect(() => {
-		display.data = '' + selected()
+		display.data = '' + selected.r()
 	})
 
-	return { selected, changingC, def, A, B, C }
+	const button = createElement(parent, 'button')
+	button.textContent = 'press'
+	button.onclick = () => {
+		selected.s('some string')
+	}
+
+	return { selected, select, changingC, def, A, B, C }
 }
 
 const parent = document.body
 const container = document.createDocumentFragment()
-SelectInput(parent, container)
+const { selected } = SelectInput(parent, container)
 parent.appendChild(container)
 
