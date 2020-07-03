@@ -4,8 +4,8 @@
 	"description": "",
 	"scripts": {
 		"lab": "ts-node lab/main.ts",
-		"dev": "ts-node lib/dom/main.ts",
-		"test:dev": "mocha -r jsdom-global/register lib/dom/main.test.ts",
+		"dev": "ts-node lib/compiler/codegen.ts",
+		"test:dev": "mocha lib/compiler/codegen.test.ts",
 
 		"todos": "tsc -w -p examples/todos/tsconfig.json",
 		"dom": "tsc -w -p lib/dom/tsconfig.json",

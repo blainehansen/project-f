@@ -2,31 +2,36 @@ import 'mocha'
 import { expect } from 'chai'
 import ts = require('typescript')
 
-import { boilEqual } from '../utils.spec'
+import { boilEqual } from '../utils.test'
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
-	Entity, Directive,
-	ComponentDefinition, Tag, Meta, Attribute, AttributeCode, TextSection, TextItem,
-	ComponentInclusion, IfBlock, EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
+	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
+	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
+	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
+	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
-} from './ast.spec'
+} from './ast.test'
 import {
-	BindingType, LivenessType, printNodes, printNodesArray, CodegenContext,
-	generateComponentDefinition, generateTag, generateText, generateComponentInclusion,
+	CodegenContext,
+	generateComponentDefinition, generateEntities, generateEntity, generateTagFromAttributes, generateTag,
+	generateSyncedTextInput, generateSyncedCheckboxInput, generateSyncedRadioInput, generateSyncedSelect,
+	generateText, generateSlotUsage, generateComponentInclusion,
 	generateIfBlock, generateEachBlock, generateMatchBlock, generateSwitchBlock, generateTemplateDefinition, generateTemplateInclusion,
+	printNodes, printNodesArray,
 } from './codegen'
 
 
 type ctx = CodegenContext
 function ctx() {
-	return new CodegenContext()
+	return new CodegenContext({})
 }
 
 export const realParent = ts.createIdentifier('___real')
 export const parent = ts.createIdentifier('___parent')
 const namedParentIdents = (real: string, parent: string) => t(ts.createIdentifier(`___${real}`), ts.createIdentifier(`___${parent}`))
 
-const empty = (tagName: string) => Tag(tagName, [], [], [])
+const empty = (tagName: string) => Tag(tagName, TagAttributes(undefined, [], {}, {}, []), [])
 const emptyDiv = () => empty('div')
 const emptyH1 = () => empty('h1')
 const emptyEm = () => empty('em')
@@ -35,7 +40,13 @@ const emptyStrong = () => empty('strong')
 
 describe('generateComponentDefinition', () => {
 	const cases: [string, ComponentDefinition, string][] = [
-		['no argument component', ComponentDefinition([], [], [], {}, [], [emptyDiv()]), `
+		// props: string[],
+		// syncs: string[],
+		// events: string[],
+		// slots: Dict<boolean>,
+		// createFn: NonEmpty<string> | CTXFN | undefined,
+		// entities: Entity[],
+		['no argument component', ComponentDefinition([], [], [], {}, undefined, [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -44,7 +55,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['all component args but no createFn', ComponentDefinition(['p'], ['y'], ['e'], { s: false }, [], [emptyDiv()]), `
+		['all component args but no createFn', ComponentDefinition(['p'], ['y'], ['e'], { s: false }, undefined, [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (
@@ -66,11 +77,11 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['createFn signaling to use ctx instead', ComponentDefinition([], [], [], {}, undefined, [emptyDiv()]), `
+		['createFn signaling to use ctx instead', ComponentDefinition([], [], [], {}, CTXFN, [emptyDiv()]), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
-				const ctx = create(({} as ___Args<Component>))
+				const ctx = createCtx(({} as ___Args<Component>))
 				___createElement(___parent, "div")
 			}
 			export default ___Component
@@ -91,7 +102,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot without args (default)', ComponentDefinition([], [], [], { def: false }, [], [
+		['usage of a required slot without args (default)', ComponentDefinition([], [], [], { def: false }, undefined, [
 			SlotUsage(undefined, undefined, undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -103,7 +114,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot without args (non-default)', ComponentDefinition([], [], [], { s: false }, [], [
+		['usage of a required slot without args (non-default)', ComponentDefinition([], [], [], { s: false }, undefined, [
 			SlotUsage('s', undefined, undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -115,7 +126,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot with args (default)', ComponentDefinition([], [], [], { def: false }, [], [
+		['usage of a required slot with args (default)', ComponentDefinition([], [], [], { def: false }, undefined, [
 			SlotUsage(undefined, 'complex.a(), hmm && something().e, ...rest', undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -127,7 +138,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot with args (non-default)', ComponentDefinition([], [], [], { s: false }, [], [
+		['usage of a required slot with args (non-default)', ComponentDefinition([], [], [], { s: false }, undefined, [
 			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -139,7 +150,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['mixed default and non-default required slot usages', ComponentDefinition([], [], [], { s: false, def: false }, [], [
+		['mixed default and non-default required slot usages', ComponentDefinition([], [], [], { s: false, def: false }, undefined, [
 			SlotUsage(undefined, 'complex.a(), hmm && something().e, ...rest', undefined),
 			emptyDiv(),
 			SlotUsage('s', undefined, undefined),
@@ -155,7 +166,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of the same required slot in multiple places, different args', ComponentDefinition([], [], [], { s: false }, [], [
+		['usage of the same required slot in multiple places, different args', ComponentDefinition([], [], [], { s: false }, undefined, [
 			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
 			emptyDiv(),
 			SlotUsage('s', 'a, b, c', undefined),
@@ -175,7 +186,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, no fallback', ComponentDefinition([], [], [], { s: true }, [], [
+		['optional slot, no fallback', ComponentDefinition([], [], [], { s: true }, undefined, [
 			SlotUsage('s', undefined, undefined),
 		]), `
 			import { noop as ___noop, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -187,7 +198,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, has fallback', ComponentDefinition([], [], [], { s: true }, [], [
+		['optional slot, has fallback', ComponentDefinition([], [], [], { s: true }, undefined, [
 			SlotUsage('s', undefined, [emptyDiv()]),
 		]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -201,7 +212,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, one without fallback and another with', ComponentDefinition([], [], [], { s: true }, [], [
+		['optional slot, one without fallback and another with', ComponentDefinition([], [], [], { s: true }, undefined, [
 			SlotUsage('s', undefined, undefined),
 			emptyDiv(),
 			SlotUsage('s', undefined, [emptyDiv()]),
@@ -227,116 +238,141 @@ describe('generateComponentDefinition', () => {
 			const generatedCode = generateComponentDefinition(definition)
 			boilEqual(generatedCode, generated)
 		})
-
-
-	const throwCases: [string, ComponentDefinition][] = [
-		['required slot, has fallback', ComponentDefinition([], [], [], { s: false }, [], [
-			emptyDiv(),
-			SlotUsage('s', undefined, [emptyDiv()]),
-		])],
-		['usage of an undefined slot', ComponentDefinition([], [], [], { s: false }, [], [
-			SlotUsage('a', undefined, undefined),
-		])],
-	]
-
-	for (const [description, definition] of throwCases)
-		it(description, () => {
-			expect(() => generateComponentDefinition(definition)).throw()
-		})
 })
 
 
 describe('generateComponentInclusion', () => {
 	const cases: [string, ComponentInclusion, string][] = [
-		['basic', ComponentInclusion('Comp', [], []), `
+		['basic', ComponentInclusion('Comp', {}, {}, {}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
 		// props
-		['prop empty', ComponentInclusion('Comp', [Attribute('on', undefined)], []), `
+		['prop empty', ComponentInclusion('Comp', { 'on': BindingAttribute('on', { type: 'empty' }) }, {}, {}, {}), `
 			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { on: ___fakeImmutable(true) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['prop static', ComponentInclusion('Comp', [Attribute('name', "dudes")], []), `
+		['prop static', ComponentInclusion('Comp', { 'name': BindingAttribute('name', { type: 'static', value: "dudes" }) }, {}, {}, {}), `
 			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { name: ___fakeImmutable("dudes") }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
-		['prop dynamic bare', ComponentInclusion('Comp', [Attribute('p', AttributeCode(true, "yo"))], []), `
-			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
-			Comp(___real, ___parent, { p: ___fakeImmutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		['prop dynamic bare', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'dynamic', code: AttributeCode(true, 'yo'), initialModifier: false }),
+		}, {}, {}, {}), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: yo }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['prop dynamic complex', ComponentInclusion('Comp', [Attribute('p', AttributeCode(false, " something.complex().s "))], []), `
-			import { fakeImmutable as ___fakeImmutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
-			Comp(___real, ___parent, { p: ___fakeImmutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		['prop dynamic complex', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'dynamic', code: AttributeCode(false, 'something.complex().s'), initialModifier: false }),
+		}, {}, {}, {}), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, { p: something.complex().s }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
-		['prop dynamic initial bare', ComponentInclusion('Comp', [Attribute('p|initial', AttributeCode(true, "yo"))], []), `
+		['prop dynamic initial bare', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'dynamic', code: AttributeCode(true, 'yo'), initialModifier: true }),
+		}, {}, {}, {}), `
 			import { fakeInitial as ___fakeInitial, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { p: ___fakeInitial(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['prop dynamic initial complex', ComponentInclusion('Comp', [Attribute('p|initial', AttributeCode(false, " something.complex().s "))], []), `
+		['prop dynamic initial complex', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'dynamic', code: AttributeCode(false, 'something.complex().s'), initialModifier: true }),
+		}, {}, {}, {}), `
 			import { fakeInitial as ___fakeInitial, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { p: ___fakeInitial(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
-		['prop reactive bare', ComponentInclusion('Comp', [Attribute(':p', AttributeCode(true, "yo"))], []), `
+		['prop reactive bare', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'reactive', reactiveCode: AttributeCode(true, 'yo') }),
+		}, {}, {}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { p: yo }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['prop reactive complex', ComponentInclusion('Comp', [Attribute(':p', AttributeCode(false, " something.complex().s "))], []), `
+		['prop reactive complex', ComponentInclusion('Comp', {
+			'p': BindingAttribute('p', { type: 'reactive', reactiveCode: AttributeCode(false, 'something.complex().s') }),
+		}, {}, {}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, { p: something.complex().s }, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
 		// syncs
-		['sync bare', ComponentInclusion('Comp', [Attribute('!y', AttributeCode(true, "yo"))], []), `
+		['sync bare', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', undefined, AttributeCode(true, "yo")),
+		}, {}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, { y: yo }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['sync complex', ComponentInclusion('Comp', [Attribute('!y', AttributeCode(false, " something.complex().s "))], []), `
+		['sync complex', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', undefined, AttributeCode(false, "something.complex().s")),
+		}, {}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, { y: something.complex().s }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
-		['sync fake bare', ComponentInclusion('Comp', [Attribute('!y|fake', AttributeCode(true, "yo"))], []), `
+		['sync fake bare', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', SyncModifier.fake, AttributeCode(true, "yo")),
+		}, {}, {}), `
 			import { fakeMutable as ___fakeMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeMutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['sync fake complex', ComponentInclusion('Comp', [Attribute('!y|fake', AttributeCode(false, " something.complex().s "))], []), `
+		['sync fake complex', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', SyncModifier.fake, AttributeCode(false, "something.complex().s")),
+		}, {}, {}), `
 			import { fakeMutable as ___fakeMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeMutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
-		['sync setter bare', ComponentInclusion('Comp', [Attribute('!y|setter', AttributeCode(true, "yo"))], []), `
-			import { setterMutable as ___setterMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
-			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___setterMutable(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		['sync setter bare', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', SyncModifier.setter, AttributeCode(true, "yo")),
+		}, {}, {}), `
+			import { fakeSetter as ___fakeSetter, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeSetter(yo) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
-		['sync setter complex', ComponentInclusion('Comp', [Attribute('!y|setter', AttributeCode(false, " something.complex().s "))], []), `
-			import { setterMutable as ___setterMutable, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
-			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___setterMutable(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
+		['sync setter complex', ComponentInclusion('Comp', {}, {
+			'y': SyncAttribute('y', SyncModifier.setter, AttributeCode(false, "something.complex().s")),
+		}, {}, {}), `
+			import { fakeSetter as ___fakeSetter, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, { y: ___fakeSetter(something.complex().s) }, ___EMPTYOBJECT, ___EMPTYOBJECT)
 		`],
 
 		// events
-		['event bare', ComponentInclusion('Comp', [Attribute('@e', AttributeCode(true, "yo"))], []), `
+		['event bare', ComponentInclusion('Comp', {}, {}, {
+			'e': [EventAttribute('e', 'bare', 'yo')],
+		}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: yo }, ___EMPTYOBJECT)
 		`],
-		['event complex', ComponentInclusion('Comp', [Attribute('@e', AttributeCode(false, " something.complex().s "))], []), `
+		['event complex', ComponentInclusion('Comp', {}, {}, {
+			'e': [EventAttribute('e', 'inline', 'something.complex().s')],
+		}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: () => something.complex().s }, ___EMPTYOBJECT)
 		`],
-
-		['event handler', ComponentInclusion('Comp', [Attribute('@e|handler', AttributeCode(false, " (a, b) => something(a).s += b "))], []), `
+		['event handler', ComponentInclusion('Comp', {}, {}, {
+			'e': [EventAttribute('e', 'handler', " (a, b) => something(a).s += b ")]
+		}, {}), `
 			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: (a, b) => something(a).s += b }, ___EMPTYOBJECT)
 		`],
+		['event multiple', ComponentInclusion('Comp', {}, {}, { 'e': [
+			EventAttribute('e', 'bare', 'yo'),
+			EventAttribute('e', 'inline', 'something.complex().s'),
+			EventAttribute('e', 'handler', " (a, b) => something(a).s += b "),
+		] }, {}), `
+			import { EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
+			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, { e: (...$args) => {
+				(yo)(...$args)
+				(() => something.complex().s)(...$args)
+				((a, b) => something(a).s += b)(...$args)
+			} }, ___EMPTYOBJECT)
+		`],
 
 		// slots
-		['only orphaned entities (single)', ComponentInclusion('Comp', [], [
-			emptyDiv(),
-		]), `
+		['only orphaned entities (single)', ComponentInclusion('Comp', {}, {}, {}, {
+			'def': SlotInsertion(undefined, undefined, [emptyDiv()]),
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				def: (___real, ___parent) => {
@@ -345,10 +381,9 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['only orphaned entities (multiple)', ComponentInclusion('Comp', [], [
-			emptyH1(),
-			emptyDiv(),
-		]), `
+		['only orphaned entities (multiple)', ComponentInclusion('Comp', {}, {}, {}, {
+			'def': SlotInsertion(undefined, undefined, [emptyH1(), emptyDiv()]),
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				def: (___real, ___parent) => {
@@ -358,9 +393,9 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['only explicit default (single)', ComponentInclusion('Comp', [], [
-			SlotInsertion(undefined, 'a: string', [emptyDiv()]),
-		]), `
+		['only explicit default (single)', ComponentInclusion('Comp', {}, {}, {}, {
+			'def': SlotInsertion(undefined, 'a: string', [emptyDiv()]),
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				def: (___real, ___parent, a: string) => {
@@ -369,12 +404,12 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['only explicit default (multiple)', ComponentInclusion('Comp', [], [
-			SlotInsertion(undefined, 'a: string', [
+		['only explicit default (multiple)', ComponentInclusion('Comp', {}, {}, {}, {
+			'def': SlotInsertion(undefined, 'a: string', [
 				emptyH1(),
 				emptyDiv(),
 			]),
-		]), `
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				def: (___real, ___parent, a: string) => {
@@ -384,15 +419,15 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['only explicit inserts', ComponentInclusion('Comp', [], [
-			SlotInsertion('first', 'name?: string', [
+		['only explicit inserts', ComponentInclusion('Comp', {}, {}, {}, {
+			'first': SlotInsertion('first', 'name?: string', [
 				emptyH1(),
 				emptyDiv(),
 			]),
-			SlotInsertion('second', 'a: string, b: boolean', [
+			'second': SlotInsertion('second', 'a: string, b: boolean', [
 				emptySpan(),
 			]),
-		]), `
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				first: (___real, ___parent, name?: string) => {
@@ -405,13 +440,15 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['mixed explicit inserts with orphaned', ComponentInclusion('Comp', [], [
-			emptyH1(),
-			SlotInsertion('second', 'a: string, b: boolean', [
+		['mixed explicit inserts with orphaned', ComponentInclusion('Comp', {}, {}, {}, {
+			'second': SlotInsertion('second', 'a: string, b: boolean', [
 				emptySpan(),
 			]),
-			emptyDiv(),
-		]), `
+			'def': SlotInsertion(undefined, undefined, [
+				emptyH1(),
+				emptyDiv(),
+			]),
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				second: (___real, ___parent, a: string, b: boolean) => {
@@ -424,18 +461,18 @@ describe('generateComponentInclusion', () => {
 			})
 		`],
 
-		['mixed explicit inserts with explicit default', ComponentInclusion('Comp', [], [
-			SlotInsertion('first', 'name?: string', [
+		['mixed explicit inserts with explicit default', ComponentInclusion('Comp', {}, {}, {}, {
+			'first': SlotInsertion('first', 'name?: string', [
 				emptyH1(),
 			]),
-			SlotInsertion(undefined, 'a: string', [
+			'def': SlotInsertion(undefined, 'a: string', [
 				emptyH1(),
 				emptyDiv(),
 			]),
-			SlotInsertion('second', undefined, [
+			'second': SlotInsertion('second', undefined, [
 				emptySpan(),
 			]),
-		]), `
+		}), `
 			import { createElement as ___createElement, EMPTYOBJECT as ___EMPTYOBJECT } from "project-f/runtime"
 			Comp(___real, ___parent, ___EMPTYOBJECT, ___EMPTYOBJECT, ___EMPTYOBJECT, {
 				first: (___real, ___parent, name?: string) => {
@@ -458,46 +495,21 @@ describe('generateComponentInclusion', () => {
 			const nodes = generateComponentInclusion(inclusion, context, realParent, parent)
 			boilEqual(context.finalize(nodes), generated)
 		})
-
-	const throwCases: [string, ComponentInclusion][] = [
-		['node receivers on components', ComponentInclusion('Comp', [
-			Attribute('(fn)', AttributeCode(true, 'doit')),
-		], [])],
-		['sync, fake and setter together', ComponentInclusion('Comp', [
-			Attribute('!y|fake|setter', AttributeCode(true, 'doit')),
-		], [])],
-		['duplicate event handlers on components', ComponentInclusion('Comp', [
-			Attribute('@msg', AttributeCode(true, 'first')),
-			Attribute('@msg', AttributeCode(true, 'second')),
-		], [])],
-		['mixing orphaned entities with an explicit default slot insert', ComponentInclusion('Comp', [], [
-			emptyDiv(),
-			SlotInsertion(undefined, undefined, [emptyH1()]),
-		])],
-		['duplicate slot insert', ComponentInclusion('Comp', [], [
-			emptyDiv(),
-			SlotInsertion('a', undefined, [emptyH1()]),
-			SlotInsertion('a', undefined, [emptySpan()]),
-		])],
-	]
-
-	for (const [description, inclusion] of throwCases)
-		it(description, () => {
-			expect(() => generateComponentInclusion(inclusion, ctx(), realParent, parent)).throw()
-		})
 })
 
 
 describe('generateTag', () => {
+	const emptyAttrs = () => TagAttributes(undefined, [], {}, {}, [])
+
 	const cases: [string, Tag, string][] = [
-		['div hello', Tag('div', [], [], [TextSection(TextItem(false, 'hello'))]), `
+		['div hello', Tag('div', emptyAttrs(), [TextSection(TextItem(LivenessType.static, 'hello'))]), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			const ___div0 = ___createElement(___parent, "div")
 			___div0.textContent = "hello"
 		`],
 
-		['div: span hello', Tag('div', [], [], [Tag('span', [], [], [TextSection(TextItem(false, 'hello'))])]), `
+		['div: span hello', Tag('div', emptyAttrs(), [Tag('span', emptyAttrs(), [TextSection(TextItem(LivenessType.static, 'hello'))])]), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			const ___div0 = ___createElement(___parent, "div")
@@ -506,8 +518,8 @@ describe('generateTag', () => {
 			___span0_0.textContent = "hello"
 		`],
 
-		[`div: [span hello, div]`, Tag('div', [], [], [
-			Tag('span', [], [], [TextSection(TextItem(false, 'hello'))]),
+		[`div: [span hello, div]`, Tag('div', emptyAttrs(), [
+			Tag('span', emptyAttrs(), [TextSection(TextItem(LivenessType.static, 'hello'))]),
 			emptyDiv(),
 		]), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -525,34 +537,40 @@ describe('generateTag', () => {
 
 		['#i.one.two(disabled=false, thing.children().stuff[0]="whatever", checked, :visible={ env.immutable })', Tag(
 			'div',
-			[Meta(false, false, 'i'), Meta(true, false, 'one'), Meta(true, false, 'two')],
-			[
-				Attribute('disabled', AttributeCode(true, 'false')),
-				Attribute('thing.children().stuff[0]', "whatever"),
-				Attribute('checked', undefined),
-				Attribute(':visible', AttributeCode(false, 'env.immutable')),
-			], [],
+			TagAttributes(
+				IdMeta(LivenessType.static, 'i'),
+				[ClassMeta(LivenessType.static, 'one'), ClassMeta(LivenessType.static, 'two')],
+				{
+					'disabled': BindingAttribute('disabled', { type: 'dynamic', code: AttributeCode(true, 'false'), initialModifier: false }),
+					'thing.children().stuff[0]': BindingAttribute('thing.children().stuff[0]', { type: 'static', value: "whatever" }),
+					'checked': BindingAttribute('checked', { type: 'empty' }),
+					'visible': BindingAttribute('visible', { type: 'reactive', reactiveCode: AttributeCode(false, 'env.immutable') }),
+				},
+				{}, [],
+			),
+			[],
 		), `
-			import { createElement as ___createElement, effect as ___effect } from "project-f/runtime"
-
-			const ___div0 = ___createElement(___parent, "div")
+			import { createElementClass as ___createElementClass, bindProperty as ___bindProperty } from "project-f/runtime"
+			const ___div0 = ___createElementClass(___parent, "div", "one two")
 			___div0.id = "i"
-			___div0.className = "one two"
 			___div0.disabled = false
 			___div0.thing.children().stuff[0] = "whatever"
 			___div0.checked = true
-			___effect(() => {
-			    ___div0.visible = env.immutable()
-			})
+			___bindProperty(___div0, "visible", env.immutable)
 		`],
 
 		['div(@click=doit, @keyup={ mutable(1) }, @keydown|handler={ e => handle(e) })', Tag(
-			'div', [],
-			[
-				Attribute('@click', AttributeCode(true, 'doit')),
-				Attribute('@keyup', AttributeCode(false, ' mutable(1) ')),
-				Attribute('@keydown|handler', AttributeCode(false, ' e => handle(e) ')),
-			], [],
+			'div',
+			TagAttributes(
+				undefined, [], {},
+				{
+					'click': [EventAttribute('click', 'bare', 'doit')],
+					'keyup': [EventAttribute('keyup', 'inline', ' mutable(1) ')],
+					'keydown': [EventAttribute('keydown', 'handler', ' e => handle(e) ')],
+				},
+				[],
+			),
+			[],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
@@ -563,11 +581,15 @@ describe('generateTag', () => {
 		`],
 
 		['two handlers for the same event', Tag(
-			'div', [],
-			[
-				Attribute('@click', AttributeCode(true, 'doit')),
-				Attribute('@click', AttributeCode(false, ' mutable(1) ')),
-			], [],
+			'div',
+			TagAttributes(
+				undefined, [], {},
+				{
+					'click': [EventAttribute('click', 'bare', 'doit'), EventAttribute('click', 'inline', ' mutable(1) ')],
+				},
+				[],
+			),
+			[],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
@@ -579,12 +601,16 @@ describe('generateTag', () => {
 		`],
 
 		['three handlers for the same event', Tag(
-			'div', [],
-			[
-				Attribute('@click', AttributeCode(true, 'doit')),
-				Attribute('@click', AttributeCode(false, ' mutable(1) ')),
-				Attribute('@click|handler', AttributeCode(false, ' e => handle(e) ')),
-			], [],
+			'div',
+			TagAttributes(
+				undefined, [], {}, { 'click': [
+					EventAttribute('click', 'bare', 'doit'),
+					EventAttribute('click', 'inline', ' mutable(1) '),
+					EventAttribute('click', 'handler', ' e => handle(e) '),
+				] },
+				[],
+			),
+			[],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
@@ -597,95 +623,51 @@ describe('generateTag', () => {
 		`],
 
 		['node receivers', Tag(
-			'div', [],
-			[
-				Attribute('(fn)', AttributeCode(true, 'doit')),
-				Attribute('(fn)', AttributeCode(false, ' d => handle(d) ')),
-			], [],
+			'div',
+			TagAttributes(
+				undefined, [], {}, {},
+				[ReceiverAttribute(AttributeCode(true, 'doit')), ReceiverAttribute(AttributeCode(false, ' d => handle(d) '))],
+			),
+			[],
 		), `
-			import { createElement as ___createElement, nodeReceiver as ___nodeReceiver } from "project-f/runtime"
-
+			import {createElement as ___createElement} from "project-f/runtime"
 			const ___div0 = ___createElement(___parent, "div")
-			___nodeReceiver(___div0, doit)
-			___nodeReceiver(___div0,  d => handle(d) )
+			(doit)(___div0)
+			(d => handle(d))(___div0)
 		`],
 
-		['input text without sync', Tag('input', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+		['input text without sync', Tag(
+			'input',
+			TagAttributes(undefined, [], {
+				'disabled': BindingAttribute('disabled', { type: 'empty' }),
+			}, {}, []),
+			[],
+		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 			const ___input0 = ___createElement(___parent, "input")
 			___input0.disabled = true
 		`],
-		['textarea without sync', Tag('textarea', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+		['textarea without sync', Tag(
+			'textarea',
+			TagAttributes(undefined, [], {
+				'disabled': BindingAttribute('disabled', { type: 'empty' }),
+			}, {}, []),
+			[],
+		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 			const ___textarea0 = ___createElement(___parent, "textarea")
 			___textarea0.disabled = true
 		`],
-		['select without sync', Tag('select', [], [Attribute('disabled', AttributeCode(true, "true"))], []), `
+		['select without sync', Tag(
+			'select',
+			TagAttributes(undefined, [], {
+				'disabled': BindingAttribute('disabled', { type: 'empty' }),
+			}, {}, []),
+			[],
+		), `
 			import { createElement as ___createElement } from "project-f/runtime"
 			const ___select0 = ___createElement(___parent, "select")
 			___select0.disabled = true
-		`],
-
-		['input(type="radio", !sync=textValue, value="a")', Tag(
-			'input', [],
-			[
-				Attribute('type', "radio"),
-				Attribute('!sync', AttributeCode(true, 'textValue')),
-				Attribute('value', 'a'),
-			], [],
-		), `
-			import { createElement as ___createElement, syncRadioElement as ___syncRadioElement } from "project-f/runtime"
-
-			const ___input0 = ___createElement(___parent, "input")
-			___input0.type = "radio"
-			___syncRadioElement(___input0, textValue, "a")
-			___input0.value = "a"
-		`],
-		['input(type="radio", !sync=textValue, :value=changing)', Tag(
-			'input', [],
-			[
-				Attribute('type', "radio"),
-				Attribute('!sync', AttributeCode(true, 'textValue')),
-				Attribute(':value', AttributeCode(true, 'changing')),
-			], [],
-		), `
-			import { createElement as ___createElement, syncRadioElementReactive as ___syncRadioElementReactive, effect as ___effect } from "project-f/runtime"
-
-			const ___input0 = ___createElement(___parent, "input")
-			___input0.type = "radio"
-			___syncRadioElementReactive(___input0, textValue, changing)
-			___effect(() => {
-				___input0.value = changing()
-			})
-		`],
-
-		// TODO select
-
-		['input(!sync=textValue)', Tag(
-			'input', [],
-			[
-				Attribute('!sync', AttributeCode(true, 'textValue')),
-				Attribute('placeholder', 'hello'),
-			], [],
-		), `
-			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
-
-			const ___input0 = ___createElement(___parent, "input")
-			___syncTextElement(___input0, textValue)
-			___input0.placeholder = "hello"
-		`],
-		['textarea(!sync=textValue)', Tag(
-			'textarea', [],
-			[
-				Attribute('!sync', AttributeCode(true, 'textValue')),
-				Attribute('placeholder', 'hello'),
-			], [],
-		), `
-			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
-
-			const ___textarea0 = ___createElement(___parent, "textarea")
-			___syncTextElement(___textarea0, textValue)
-			___textarea0.placeholder = "hello"
 		`],
 	]
 
@@ -695,163 +677,155 @@ describe('generateTag', () => {
 			const nodes = generateTag(tag, '0', context, realParent, parent)
 			boilEqual(context.finalize(nodes), generated)
 		})
-
-	it('sync of incorrect binding on input tag', () => {
-		for (const attribute of ['!anything', '!incorrect', '!notsync'])
-			expect(() => generateTag(Tag(
-				'input', [],
-				[Attribute(attribute, AttributeCode(true, 'doit'))], [],
-			), '0', ctx(), realParent, parent)).throw()
-	})
-
-	it('sync on non-input tag', () => {
-		for (const attribute of ['!anything', '!sync', '!sync|fake'])
-			expect(() => generateTag(Tag(
-				'div', [],
-				[Attribute(attribute, AttributeCode(true, 'doit'))], [],
-			), '0', ctx(), realParent, parent)).throw()
-	})
-
-	const throwCases: [string, Attribute][] = [
-		['handler event modifier with bare code', Attribute('@click|handler', AttributeCode(true, 'doit'))],
-		['duplicate modifier', Attribute('@click|handler|handler', AttributeCode(true, 'doit'))],
-		['any modifiers on empty attribute', Attribute('anything|whatever', undefined)],
-		['any modifiers on static attribute', Attribute('anything|whatever', "doesn't matter")],
-		['any modifiers on reactive attribute', Attribute(':anything|whatever', AttributeCode(true, 'doit'))],
-		['any modifiers on node receiver', Attribute('(fn)|whatever', AttributeCode(true, 'doit'))],
-		['parentheses used as anything other than (fn)', Attribute('(notfn)', AttributeCode(true, 'doit'))],
-	]
-
-	for (const [description, attribute] of throwCases)
-		it(description, () => {
-			expect(() => generateTag(Tag('div', [], [attribute], []), '0', ctx(), realParent, parent)).throw()
-		})
-
-	for (const [type, attribute] of [['reactive', ':a'], ['sync', '!a'], ['event', '@a'], ['receiver', '(fn)']]) {
-		it(`empty for ${type}`, () => {
-			expect(() => generateTag(Tag(
-				'div', [],
-				[Attribute(attribute, undefined)], [],
-			), '0', ctx(), realParent, parent)).throw()
-		})
-
-		it(`static for ${type}`, () => {
-			expect(() => generateTag(Tag(
-				'div', [],
-				[Attribute(attribute, "something static")], [],
-			), '0', ctx(), realParent, parent)).throw()
-		})
-	}
-
-	for (const [type, attribute] of [['dynamic', 'a'], ['sync', '!a'], ['event', '@a']])
-		it(`invalid modifier for ${type}`, () => {
-			expect(() => generateTag(Tag(
-				'div', [],
-				[Attribute(attribute + '|invalidmodifier', AttributeCode(true, 'code'))], [],
-			), '0', ctx(), realParent, parent)).throw()
-		})
-
-	for (const [type, attribute] of [['static', 'a'], ['reactive', ':a'], ['sync', '!a']])
-		it(`duplicate binding against ${type}`, () => {
-			expect(() => generateTag(Tag(
-				'div', [],
-				[Attribute('a', AttributeCode(true, 'code')), Attribute(attribute, AttributeCode(true, 'w'))], [],
-			), '0', ctx(), realParent, parent)).throw()
-		})
-
-	it(`multiple id metas`, () => {
-		expect(() => generateTag(Tag(
-			'div', [Meta(false, false, 'whatever'), Meta(false, true, 'dude')], [], [],
-		), '0', ctx(), realParent, parent)).throw()
-	})
 })
 
+describe('generateHtml', () => {
+	const cases: [string, Html, string][] = [
+		['input(type="radio", !sync=textValue, value="a")', SyncedRadioInput(
+			AttributeCode(true, 'textValue'),
+			{ type: 'static', value: "a" },
+			TagAttributes(undefined, [], {
+				'type': BindingAttribute('type', { type: 'static', value: "radio" }),
+				'value': BindingAttribute('value', { type: 'static', value: "a" }),
+			}, {}, []),
+		), `
+			import { createElement as ___createElement, syncRadioElement as ___syncRadioElement } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.type = "radio"
+			___input0.value = "a"
+			___syncRadioElement(___input0, textValue)
+		`],
+		['input(type="radio", !sync=textValue, value=changing)', SyncedRadioInput(
+			AttributeCode(true, 'textValue'),
+			{ type: 'static', value: "a" },
+			TagAttributes(undefined, [], {
+				'type': BindingAttribute('type', { type: 'static', value: "radio" }),
+				'value': BindingAttribute('value', { type: 'dynamic', code: AttributeCode(true, 'changing'), initialModifier: false }),
+			}, {}, []),
+		), `
+			import { createElement as ___createElement, syncRadioElement as ___syncRadioElement } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.type = "radio"
+			___input0.value = changing
+			___syncRadioElement(___input0, textValue)
+		`],
+
+		// TODO select
+
+		['input(!sync=textValue, placeholder="hello")', SyncedTextInput(
+			false,
+			AttributeCode(true, 'textValue'),
+			TagAttributes(undefined, [], {
+				'placeholder': BindingAttribute('placeholder', { type: 'static', value: "hello" }),
+			}, {}, []),
+		), `
+			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
+
+			const ___input0 = ___createElement(___parent, "input")
+			___input0.placeholder = "hello"
+			___syncTextElement(___input0, textValue)
+		`],
+		['textarea(!sync=textValue, placeholder="hello")', SyncedTextInput(
+			true,
+			AttributeCode(true, 'textValue'),
+			TagAttributes(undefined, [], {
+				'placeholder': BindingAttribute('placeholder', { type: 'static', value: "hello" }),
+			}, {}, []),
+		), `
+			import { createElement as ___createElement, syncTextElement as ___syncTextElement } from "project-f/runtime"
+
+			const ___textarea0 = ___createElement(___parent, "textarea")
+			___textarea0.placeholder = "hello"
+			___syncTextElement(___textarea0, textValue)
+		`],
+	]
+
+	for (const [description, html, generated] of cases)
+		it(description, () => {
+			const context = ctx()
+			const nodes = generateEntity(html, '0', false, context, realParent, parent)
+			boilEqual(context.finalize(nodes), generated)
+		})
+})
 
 describe('generateText', () => {
 	const cases: [boolean, NonEmpty<TextItem>, string][] = [
 		// static
-		[true, [TextItem(false, 'hello')], `
+		[true, [TextItem(LivenessType.static, 'hello')], `
 			___real.textContent = "hello"
 		`],
-		[false, [TextItem(false, 'hello')], `
+		[false, [TextItem(LivenessType.static, 'hello')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 			___createTextNode(___parent, "hello")
 		`],
 
-		[true, [TextItem(false, 'hello "every ')], `
+		[true, [TextItem(LivenessType.static, 'hello "every ')], `
 			___real.textContent = "hello \\"every "
 		`],
-		[false, [TextItem(false, 'hello "every ')], `
+		[false, [TextItem(LivenessType.static, 'hello "every ')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 			___createTextNode(___parent, "hello \\"every ")
 		`],
 
-		[true, [TextItem(false, 'hello'), TextItem(false, '\n'), TextItem(false, 'world')], `
-			___real.textContent = "hello\\nworld"
+		[true, [TextItem(LivenessType.static, 'hello'), TextItem(LivenessType.static, '\n'), TextItem(LivenessType.static, 'world')], `
+			___real.textContent = \`hello\nworld\`
 		`],
-		[false, [TextItem(false, 'hello'), TextItem(false, '\n'), TextItem(false, 'world')], `
+		[false, [TextItem(LivenessType.static, 'hello'), TextItem(LivenessType.static, '\n'), TextItem(LivenessType.static, 'world')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
-			___createTextNode(___parent, "hello\\nworld")
+			___createTextNode(___parent, \`hello\nworld\`)
 		`],
 
 		// dynamic simple
-		[true, [TextItem(true, ' hello ')], `
+		[true, [TextItem(LivenessType.dynamic, ' hello ')], `
 			___real.textContent = hello
 		`],
-		[false, [TextItem(true, ' hello ')], `
+		[false, [TextItem(LivenessType.dynamic, ' hello ')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 			___createTextNode(___parent, hello)
 		`],
 
 		// dynamic complex
-		[true, [TextItem(true, ' hello.world().display ')], `
+		[true, [TextItem(LivenessType.dynamic, ' hello.world().display ')], `
 			___real.textContent = hello.world().display
 		`],
-		[false, [TextItem(true, ' hello.world().display ')], `
+		[false, [TextItem(LivenessType.dynamic, ' hello.world().display ')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 			___createTextNode(___parent, hello.world().display)
 		`],
 
 		// reactive simple
-		[true, [TextItem(true, ': hello ')], `
-			import { effect as ___effect } from "project-f/runtime"
-			___effect(() => {
-				___real.textContent = hello()
-			})
+		[true, [TextItem(LivenessType.reactive, ' hello ')], `
+			import { bindProperty as ___bindProperty } from "project-f/runtime"
+			___bindProperty(___real, "textContent", hello)
 		`],
-		[false, [TextItem(true, ': hello ')], `
-			import { createTextNode as ___createTextNode, effect as ___effect } from "project-f/runtime"
-
+		[false, [TextItem(LivenessType.reactive, ' hello ')], `
+			import { createTextNode as ___createTextNode, bindProperty as ___bindProperty } from "project-f/runtime"
 			const ___text0 = ___createTextNode(___parent, "")
-			___effect(() => {
-				___text0.data = hello()
-			})
+			___bindProperty(___text0, "data", hello)
 		`],
 
 		// mixed, strongest dynamic
-		[true, [TextItem(false, 'hello '), TextItem(true, 'world'), TextItem(false, '!')], `
+		[true, [TextItem(LivenessType.static, 'hello '), TextItem(LivenessType.dynamic, 'world'), TextItem(LivenessType.static, '!')], `
 			___real.textContent = \`hello \${ world }!\`
 		`],
-		[false, [TextItem(false, 'hello '), TextItem(true, ' world '), TextItem(false, '!')], `
+		[false, [TextItem(LivenessType.static, 'hello '), TextItem(LivenessType.dynamic, ' world '), TextItem(LivenessType.static, '!')], `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 			___createTextNode(___parent, \`hello \${world}!\`)
 		`],
 
 		// mixed, strongest reactive
-		[true, [TextItem(false, 'hello '), TextItem(true, ' count '), TextItem(true, ': world '), TextItem(false, '!')], `
-			import { effect as ___effect } from "project-f/runtime"
+		[true, [TextItem(LivenessType.static, 'hello '), TextItem(LivenessType.dynamic, ' count '), TextItem(LivenessType.reactive, ' world '), TextItem(LivenessType.static, '!')], `
+			import { derived as ___derived, bindProperty as ___bindProperty } from "project-f/runtime"
 
-			___effect(() => {
-				___real.textContent = \`hello \${count}\${ world() }!\`
-			})
+			___bindProperty(___real, "textContent", ___derived(___0 => \`hello \${count}\${___0}!\`, world))
 		`],
-		[false, [TextItem(false, 'hello '), TextItem(true, 'count'), TextItem(true, ': world '), TextItem(false, '!')], `
-			import { createTextNode as ___createTextNode, effect as ___effect } from "project-f/runtime"
+		[false, [TextItem(LivenessType.static, 'hello '), TextItem(LivenessType.dynamic, 'count'), TextItem(LivenessType.reactive, ' world '), TextItem(LivenessType.static, '!')], `
+			import { derived as ___derived, createTextNode as ___createTextNode, bindProperty as ___bindProperty } from "project-f/runtime"
 
 			const ___text0 = ___createTextNode(___parent, "")
-			___effect(() => {
-				___text0.data = \`hello \${count}\${ world() }!\`
-			})
+			___bindProperty(___text0, "data", ___derived(___0 => \`hello \${count}\${___0}!\`, world))
 		`],
 	]
 
@@ -860,15 +834,15 @@ describe('generateText', () => {
 		const nodes = generateText(TextSection(...items), '0', lone, context, realParent, parent)
 		const generatedCode = context.finalize(nodes)
 
-		const itemsString = items.map(({ isCode, content }) => `(isCode: ${isCode}, ${content.replace(/\n/g, ' ')})`).join(', ')
+		const itemsString = items.map(({ liveness, content }) => `(liveness: ${liveness}, ${content.replace(/\n/g, ' ')})`).join(', ')
 		it(`lone: ${lone}, ${itemsString}`, () => boilEqual(generatedCode, generated))
 	}
 })
 
 
 describe('generateIfBlock', () => {
-	const cases: [string, IfBlock, string][] = [
-		['nonreactive single if', IfBlock('checked', [emptyDiv()], [], undefined), `
+	const cases: [string, boolean, IfBlock, string][] = [
+		['nonreactive single if', false, IfBlock(LiveCode(false, 'checked'), [emptyDiv()], [], undefined), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			if (checked) {
@@ -876,7 +850,7 @@ describe('generateIfBlock', () => {
 			}
 		`],
 
-		['nonreactive if, else', IfBlock('checked', [emptyDiv()], [], [emptySpan()]), `
+		['nonreactive if, else', false, IfBlock(LiveCode(false, 'checked'), [emptyDiv()], [], [emptySpan()]), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			if (checked) {
@@ -887,7 +861,7 @@ describe('generateIfBlock', () => {
 			}
 		`],
 
-		['nonreactive if, else if', IfBlock('checked', [emptyDiv()], [['other', [emptySpan()]]], undefined), `
+		['nonreactive if, else if', false, IfBlock(LiveCode(false, 'checked'), [emptyDiv()], [[LiveCode(false, 'other'), [emptySpan()]]], undefined), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			if (checked) {
@@ -898,9 +872,9 @@ describe('generateIfBlock', () => {
 			}
 		`],
 
-		['nonreactive if, else if else if', IfBlock(
-			'checked', [emptyDiv()],
-			[['other', [emptySpan()]], ['dude', [emptyH1()]]],
+		['nonreactive if, else if else if', false, IfBlock(
+			LiveCode(false, 'checked'), [emptyDiv()],
+			[[LiveCode(false, 'other'), [emptySpan()]], [LiveCode(false, 'dude'), [emptyH1()]]],
 			undefined,
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -916,9 +890,9 @@ describe('generateIfBlock', () => {
 			}
 		`],
 
-		['nonreactive if, else if else', IfBlock(
-			'checked', [emptyDiv()],
-			[['other', [emptySpan()]]],
+		['nonreactive if, else if else', false, IfBlock(
+			LiveCode(false, 'checked'), [emptyDiv()],
+			[[LiveCode(false, 'other'), [emptySpan()]]],
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -934,9 +908,30 @@ describe('generateIfBlock', () => {
 			}
 		`],
 
-		['nonreactive if, else if else if else', IfBlock(
-			'checked', [emptyDiv()],
-			[['other', [emptySpan()]], ['dude', [emptyH1()]]],
+		['nonreactive if, else if else if else', false, IfBlock(
+			LiveCode(false, 'checked'), [emptyDiv()],
+			[[LiveCode(false, 'other'), [emptySpan()]], [LiveCode(false, 'dude'), [emptyH1()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			if (checked) {
+				___createElement(___p, "div")
+			}
+			else if (other) {
+				___createElement(___p, "span")
+			}
+			else if (dude) {
+				___createElement(___p, "h1")
+			}
+			else {
+				___createElement(___p, "strong")
+			}
+		`],
+
+		['nonreactive if, else if else if else: lone', true, IfBlock(
+			LiveCode(false, 'checked'), [emptyDiv()],
+			[[LiveCode(false, 'other'), [emptySpan()]], [LiveCode(false, 'dude'), [emptyH1()]]],
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -956,21 +951,21 @@ describe('generateIfBlock', () => {
 		`],
 
 
-		['reactive single if', IfBlock(':checked', [emptyDiv()], [], undefined), `
+		['reactive single if', false, IfBlock(LiveCode(true, 'checked'), [emptyDiv()], [], undefined), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				if (checked()) {
+				if (checked.r()) {
 					___createElement(___parent, "div")
 				}
 			}, ___r, ___p)
 		`],
 
-		['reactive if, else', IfBlock(':checked', [emptyDiv()], [], [emptySpan()]), `
+		['reactive if, else', false, IfBlock(LiveCode(true, 'checked'), [emptyDiv()], [], [emptySpan()]), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				if (checked()) {
+				if (checked.r()) {
 					___createElement(___parent, "div")
 				}
 				else {
@@ -979,11 +974,11 @@ describe('generateIfBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive if, inert else if', IfBlock(':checked', [emptyDiv()], [['other', [emptySpan()]]], undefined), `
+		['reactive if, inert else if', false, IfBlock(LiveCode(true, 'checked'), [emptyDiv()], [[LiveCode(false, 'other'), [emptySpan()]]], undefined), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				if (checked()) {
+				if (checked.r()) {
 					___createElement(___parent, "div")
 				}
 				else if (other) {
@@ -992,42 +987,42 @@ describe('generateIfBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive inert if, non-inert else if', IfBlock('checked', [emptyDiv()], [[':other', [emptySpan()]]], undefined), `
+		['reactive inert if, non-inert else if', false, IfBlock(LiveCode(false, 'checked'), [emptyDiv()], [[LiveCode(true, 'other'), [emptySpan()]]], undefined), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
 				if (checked) {
 					___createElement(___parent, "div")
 				}
-				else if (other()) {
+				else if (other.r()) {
 					___createElement(___parent, "span")
 				}
 			}, ___r, ___p)
 		`],
 
-		['reactive if, inert else if else if', IfBlock(
-			':checked', [emptyDiv()],
-			[['other', [emptySpan()]], [':dude', [emptyH1()]]],
+		['reactive if, inert else if else if', false, IfBlock(
+			LiveCode(true, 'checked'), [emptyDiv()],
+			[[LiveCode(false, 'other'), [emptySpan()]], [LiveCode(true, 'dude'), [emptyH1()]]],
 			undefined,
 		), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				if (checked()) {
+				if (checked.r()) {
 					___createElement(___parent, "div")
 				}
 				else if (other) {
 					___createElement(___parent, "span")
 				}
-				else if (dude()) {
+				else if (dude.r()) {
 					___createElement(___parent, "h1")
 				}
 			}, ___r, ___p)
 		`],
 
-		['reactive if, else if else', IfBlock(
-			'checked', [emptyDiv()],
-			[[':other', [emptySpan()]]],
+		['reactive if, else if else', false, IfBlock(
+			LiveCode(false, 'checked'), [emptyDiv()],
+			[[LiveCode(true, 'other'), [emptySpan()]]],
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
@@ -1036,7 +1031,7 @@ describe('generateIfBlock', () => {
 				if (checked) {
 					___createElement(___parent, "div")
 				}
-				else if (other()) {
+				else if (other.r()) {
 					___createElement(___parent, "span")
 				}
 				else {
@@ -1045,43 +1040,65 @@ describe('generateIfBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive if, else if else if else', IfBlock(
-			':checked', [emptyDiv()],
-			[[':other', [emptySpan()]], [':dude', [emptyH1()]]],
+		['reactive if, else if else if else', false, IfBlock(
+			LiveCode(true, 'checked'), [emptyDiv()],
+			[[LiveCode(true, 'other'), [emptySpan()]], [LiveCode(true, 'dude'), [emptyH1()]]],
 			[emptyStrong()],
 		), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				if (checked()) {
+				if (checked.r()) {
 					___createElement(___parent, "div")
 				}
-				else if (other()) {
+				else if (other.r()) {
 					___createElement(___parent, "span")
 				}
-				else if (dude()) {
+				else if (dude.r()) {
 					___createElement(___parent, "h1")
 				}
 				else {
 					___createElement(___parent, "strong")
 				}
 			}, ___r, ___p)
+		`],
+
+		['reactive if, else if else if else: lone', true, IfBlock(
+			LiveCode(true, 'checked'), [emptyDiv()],
+			[[LiveCode(true, 'other'), [emptySpan()]], [LiveCode(true, 'dude'), [emptyH1()]]],
+			[emptyStrong()],
+		), `
+			import { createElement as ___createElement, contentEffect as ___contentEffect } from "project-f/runtime"
+
+			___contentEffect((___real, ___parent) => {
+				if (checked.r()) {
+					___createElement(___parent, "div")
+				}
+				else if (other.r()) {
+					___createElement(___parent, "span")
+				}
+				else if (dude.r()) {
+					___createElement(___parent, "h1")
+				}
+				else {
+					___createElement(___parent, "strong")
+				}
+			}, ___r)
 		`],
 	]
 
-	// TODO need cases to understand the lone optimization
-	for (const [description, block, generated] of cases)
+	for (const [description, lone, block, generated] of cases)
 		it(description, () => {
 			const context = ctx()
-			const nodes = generateIfBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			const nodes = generateIfBlock(block, '0', lone, context, ...namedParentIdents('r', 'p'))
 			boilEqual(context.finalize(nodes), generated)
 		})
 })
 
 
 describe('generateEachBlock', () => {
-	const cases: [string, EachBlock, string][] = [
-		['nonreactive', EachBlock({ variableCode: 'item', indexCode: undefined }, 'list', [TextSection(TextItem(true, 'item'))]), `
+	const cases: [string, boolean, EachBlock, string][] = [
+		['nonreactive', false, EachBlock({ variableCode: 'item', indexCode: undefined }, LiveCode(false, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 
 			const ___eachBlockCollection0 = list
@@ -1091,8 +1108,33 @@ describe('generateEachBlock', () => {
 				___createTextNode(___p, item)
 			}
 		`],
+		// TODO this isn't a good way of handling each blocks
+		// - it doesn't make it possible to use arbitrary iterables
+		// - it adds a lot of code bloat
+		// pursue something like this *maybe* for the actual @for directive
+		// this should eventually be something more like this
+		// `
+		// 	// nonreactive
+		// 	import { createTextNode as ___createTextNode } from "project-f/runtime"
+		// 	for (const item of list) {
+		// 		___createTextNode(___p, item)
+		// 	}
+		// 	import { createTextNode as ___createTextNode } from "project-f/runtime"
+		// 	for (const [index, item] of list.entries()) {
+		// 		___createTextNode(___p, item)
+		// 	}
 
-		['nonreactive, requests index', EachBlock({ variableCode: 'item', indexCode: 'index' }, 'list', [TextSection(TextItem(true, 'item'))]), `
+		// 	// reactive
+		// 	import { createTextNode as ___createTextNode, bindEach as ___bindEach } from "project-f/runtime"
+		// 	___bindEach(list, item => {
+		// 		___createTextNode(___p, item)
+		// 	})
+		// 	___bindEach(list, (item, index) => {
+		// 		___createTextNode(___p, item)
+		// 	})
+		// `
+
+		['nonreactive, requests index', false, EachBlock({ variableCode: 'item', indexCode: 'index' }, LiveCode(false, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
 			import { createTextNode as ___createTextNode } from "project-f/runtime"
 
 			const ___eachBlockCollection0 = list
@@ -1103,11 +1145,22 @@ describe('generateEachBlock', () => {
 			}
 		`],
 
-		['reactive', EachBlock({ variableCode: 'item', indexCode: undefined }, ':list', [TextSection(TextItem(true, 'item'))]), `
+		['nonreactive, requests index: lone', false, EachBlock({ variableCode: 'item', indexCode: 'index' }, LiveCode(false, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
+			import { createTextNode as ___createTextNode } from "project-f/runtime"
+
+			const ___eachBlockCollection0 = list
+			const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+			for (let index = 0; index < ___eachBlockCollectionLength0; index++) {
+				const item = ___eachBlockCollection0[index]
+				___createTextNode(___p, item)
+			}
+		`],
+
+		['reactive', false, EachBlock({ variableCode: 'item', indexCode: undefined }, LiveCode(true, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
 			import { createTextNode as ___createTextNode, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				const ___eachBlockCollection0 = list()
+				const ___eachBlockCollection0 = list.r()
 				const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
 				for (let ___eachBlockIndex0 = 0; ___eachBlockIndex0 < ___eachBlockCollectionLength0; ___eachBlockIndex0++) {
 					const item = ___eachBlockCollection0[___eachBlockIndex0]
@@ -1116,11 +1169,11 @@ describe('generateEachBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive, requests index', EachBlock({ variableCode: 'item', indexCode: 'index' }, ':list', [TextSection(TextItem(true, 'item'))]), `
+		['reactive, requests index', false, EachBlock({ variableCode: 'item', indexCode: 'index' }, LiveCode(true, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
 			import { createTextNode as ___createTextNode, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				const ___eachBlockCollection0 = list()
+				const ___eachBlockCollection0 = list.r()
 				const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
 				for (let index = 0; index < ___eachBlockCollectionLength0; index++) {
 					const item = ___eachBlockCollection0[index]
@@ -1128,21 +1181,36 @@ describe('generateEachBlock', () => {
 				}
 			}, ___r, ___p)
 		`],
+
+		['reactive, requests index: lone', true, EachBlock({ variableCode: 'item', indexCode: 'index' }, LiveCode(true, 'list'), [TextSection(TextItem(LivenessType.dynamic, 'item'))]), `
+			import { createTextNode as ___createTextNode, contentEffect as ___contentEffect } from "project-f/runtime"
+
+			___contentEffect((___real, ___parent) => {
+				const ___eachBlockCollection0 = list.r()
+				const ___eachBlockCollectionLength0 = ___eachBlockCollection0.length
+				for (let index = 0; index < ___eachBlockCollectionLength0; index++) {
+					const item = ___eachBlockCollection0[index]
+					___createTextNode(___parent, item)
+				}
+			}, ___r)
+		`],
 	]
 
-	// TODO need cases for lone
-	for (const [description, block, generated] of cases)
+	for (const [description, lone, block, generated] of cases)
 		it(description, () => {
 			const context = ctx()
-			const nodes = generateEachBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			const nodes = generateEachBlock(block, '0', lone, context, ...namedParentIdents('r', 'p'))
 			boilEqual(context.finalize(nodes), generated)
 		})
 })
 
 
 describe('generateMatchBlock', () => {
-	const cases: [string, MatchBlock, string][] = [
-		['nonreactive, no default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], undefined), `
+	const cases: [string, boolean, MatchBlock, string][] = [
+		['nonreactive, no default', false, MatchBlock(LiveCode(false, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], undefined), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
 
 			switch (type) {
@@ -1158,7 +1226,10 @@ describe('generateMatchBlock', () => {
 			}
 		`],
 
-		['nonreactive, no default, empty case', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+		['nonreactive, no default, empty case', false, MatchBlock(LiveCode(false, 'type'), [
+				[LiveCode(false, '"a"'), [emptyDiv()]],
+				[LiveCode(false, 'Something.whatever'), []],
+			], undefined), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
 
 			switch (type) {
@@ -1171,7 +1242,10 @@ describe('generateMatchBlock', () => {
 			}
 		`],
 
-		['nonreactive, empty default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], []), `
+		['nonreactive, empty default', false, MatchBlock(LiveCode(false, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], []), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			switch (type) {
@@ -1187,7 +1261,32 @@ describe('generateMatchBlock', () => {
 			}
 		`],
 
-		['nonreactive, nonempty default', MatchBlock('type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], [emptyH1()]), `
+		['nonreactive, nonempty default', false, MatchBlock(LiveCode(false, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], [emptyH1()]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+					break
+				}
+				default: {
+					___createElement(___p, "h1")
+					break
+				}
+			}
+		`],
+
+		['nonreactive, nonempty default: lone', true, MatchBlock(LiveCode(false, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], [emptyH1()]), `
 			import { createElement as ___createElement } from "project-f/runtime"
 
 			switch (type) {
@@ -1207,11 +1306,14 @@ describe('generateMatchBlock', () => {
 		`],
 
 
-		['reactive, no default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], undefined), `
+		['reactive, no default', false, MatchBlock(LiveCode(true, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], undefined), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 						break
@@ -1220,7 +1322,7 @@ describe('generateMatchBlock', () => {
 						___createElement(___parent, "span")
 						break
 					}
-					default: ___exhaustive(type())
+					default: ___exhaustive(type.r())
 				}
 			}, ___r, ___p)
 		`],
@@ -1228,26 +1330,32 @@ describe('generateMatchBlock', () => {
 		// in both these reactive cases with no default
 		// in real usage these wouldn't type check, but that's fine since this isn't correct
 		// they need to assign their switch expression to something first
-		['reactive, no default, empty case', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+		['reactive, no default, empty case', false, MatchBlock(LiveCode(true, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), []],
+		], undefined), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 						break
 					}
 					case Something.whatever: { break }
-					default: ___exhaustive(type())
+					default: ___exhaustive(type.r())
 				}
 			}, ___r, ___p)
 		`],
 
-		['reactive, empty default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], []), `
+		['reactive, empty default', false, MatchBlock(LiveCode(true, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], []), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 						break
@@ -1261,11 +1369,14 @@ describe('generateMatchBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive, nonempty default', MatchBlock(':type', [['"a"', [emptyDiv()]], ['Something.whatever', [emptySpan()]]], [emptyH1()]), `
+		['reactive, nonempty default', false, MatchBlock(LiveCode(true, 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), [emptySpan()]],
+		], [emptyH1()]), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 						break
@@ -1282,11 +1393,14 @@ describe('generateMatchBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive assign, no default, empty case', MatchBlock(':ty = type', [['"a"', [emptyDiv()]], ['Something.whatever', []]], undefined), `
+		['reactive assign, no default, empty case', false, MatchBlock(AssignedLiveCode('ty', 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), []],
+		], undefined), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				const ty = type()
+				const ty = type.r()
 				switch (ty) {
 					case "a": {
 						___createElement(___parent, "div")
@@ -1297,23 +1411,41 @@ describe('generateMatchBlock', () => {
 				}
 			}, ___r, ___p)
 		`],
+
+		['reactive assign, no default, empty case: lone', true, MatchBlock(AssignedLiveCode('ty', 'type'), [
+			[LiveCode(false, '"a"'), [emptyDiv()]],
+			[LiveCode(false, 'Something.whatever'), []],
+		], undefined), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, contentEffect as ___contentEffect } from "project-f/runtime"
+
+			___contentEffect((___real, ___parent) => {
+				const ty = type.r()
+				switch (ty) {
+					case "a": {
+						___createElement(___parent, "div")
+						break
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(ty)
+				}
+			}, ___r)
+		`],
 	]
 
-	// TODO need cases for lone
-	for (const [description, block, generated] of cases)
+	for (const [description, lone, block, generated] of cases)
 		it(description, () => {
 			const context = ctx()
-			const nodes = generateMatchBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			const nodes = generateMatchBlock(block, '0', lone, context, ...namedParentIdents('r', 'p'))
 			boilEqual(context.finalize(nodes), generated)
 		})
 })
 
 
 describe('generateSwitchBlock', () => {
-	const cases: [string, SwitchBlock, string][] = [
-		['nonreactive, one fallthrough, no default', SwitchBlock('type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+	const cases: [string, boolean, SwitchBlock, string][] = [
+		['nonreactive, one fallthrough, no default', false, SwitchBlock(LiveCode(false, 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 		]), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
 
@@ -1329,9 +1461,9 @@ describe('generateSwitchBlock', () => {
 			}
 		`],
 
-		['nonreactive, no default, empty case', SwitchBlock('type', [
-			SwitchCase(false, '"a"', [emptyDiv()]),
-			SwitchCase(true, 'Something.whatever', []),
+		['nonreactive, no default, empty case', false, SwitchBlock(LiveCode(false, 'type'), [
+			SwitchCase(false, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(true, LiveCode(false, 'Something.whatever'), []),
 		]), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive } from "project-f/runtime"
 
@@ -1345,9 +1477,9 @@ describe('generateSwitchBlock', () => {
 			}
 		`],
 
-		['nonreactive, empty default', SwitchBlock('type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+		['nonreactive, empty default', false, SwitchBlock(LiveCode(false, 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 			SwitchDefault(true, []),
 		]), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -1364,9 +1496,31 @@ describe('generateSwitchBlock', () => {
 			}
 		`],
 
-		['nonreactive, nonempty default', SwitchBlock('type', [
-			SwitchCase(false, '"a"', [emptyDiv()]),
-			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+		['nonreactive, nonempty default', false, SwitchBlock(LiveCode(false, 'type'), [
+			SwitchCase(false, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(true, LiveCode(false, 'Something.whatever'), [emptySpan()]),
+			SwitchDefault(false, [emptyH1()]),
+		]), `
+			import { createElement as ___createElement } from "project-f/runtime"
+
+			switch (type) {
+				case "a": {
+					___createElement(___p, "div")
+					break
+				}
+				case Something.whatever: {
+					___createElement(___p, "span")
+				}
+				default: {
+					___createElement(___p, "h1")
+					break
+				}
+			}
+		`],
+
+		['nonreactive, nonempty default: lone', true, SwitchBlock(LiveCode(false, 'type'), [
+			SwitchCase(false, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(true, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 			SwitchDefault(false, [emptyH1()]),
 		]), `
 			import { createElement as ___createElement } from "project-f/runtime"
@@ -1387,14 +1541,14 @@ describe('generateSwitchBlock', () => {
 		`],
 
 
-		['reactive, no default', SwitchBlock(':type', [
-			SwitchCase(false, '"a"', [emptyDiv()]),
-			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+		['reactive, no default', false, SwitchBlock(LiveCode(true, 'type'), [
+			SwitchCase(false, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(true, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 		]), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 						break
@@ -1402,7 +1556,7 @@ describe('generateSwitchBlock', () => {
 					case Something.whatever: {
 						___createElement(___parent, "span")
 					}
-					default: ___exhaustive(type())
+					default: ___exhaustive(type.r())
 				}
 			}, ___r, ___p)
 		`],
@@ -1410,32 +1564,32 @@ describe('generateSwitchBlock', () => {
 		// in both these reactive cases with no default
 		// in real usage these wouldn't type check, but that's fine since this isn't correct
 		// they need to assign their switch expression to something first
-		['reactive, no default, empty case', SwitchBlock(':type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', []),
+		['reactive, no default, empty case', false, SwitchBlock(LiveCode(true, 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), []),
 		]), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 					}
 					case Something.whatever: { break }
-					default: ___exhaustive(type())
+					default: ___exhaustive(type.r())
 				}
 			}, ___r, ___p)
 		`],
 
-		['reactive, empty default', SwitchBlock(':type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', [emptySpan()]),
+		['reactive, empty default', false, SwitchBlock(LiveCode(true, 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 			SwitchDefault(false, []),
 		]), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 					}
@@ -1448,15 +1602,15 @@ describe('generateSwitchBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive, nonempty default', SwitchBlock(':type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(true, 'Something.whatever', [emptySpan()]),
+		['reactive, nonempty default', false, SwitchBlock(LiveCode(true, 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(true, LiveCode(false, 'Something.whatever'), [emptySpan()]),
 			SwitchDefault(true, [emptyH1()]),
 		]), `
 			import { createElement as ___createElement, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				switch (type()) {
+				switch (type.r()) {
 					case "a": {
 						___createElement(___parent, "div")
 					}
@@ -1470,14 +1624,14 @@ describe('generateSwitchBlock', () => {
 			}, ___r, ___p)
 		`],
 
-		['reactive assign, no default, empty case', SwitchBlock(':ty = type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', []),
+		['reactive assign, no default, empty case', false, SwitchBlock(AssignedLiveCode('ty', 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), []),
 		]), `
 			import { createElement as ___createElement, exhaustive as ___exhaustive, rangeEffect as ___rangeEffect } from "project-f/runtime"
 
 			___rangeEffect((___real, ___parent) => {
-				const ty = type()
+				const ty = type.r()
 				switch (ty) {
 					case "a": {
 						___createElement(___parent, "div")
@@ -1487,28 +1641,31 @@ describe('generateSwitchBlock', () => {
 				}
 			}, ___r, ___p)
 		`],
+
+		['reactive assign, no default, empty case: lone', true, SwitchBlock(AssignedLiveCode('ty', 'type'), [
+			SwitchCase(true, LiveCode(false, '"a"'), [emptyDiv()]),
+			SwitchCase(false, LiveCode(false, 'Something.whatever'), []),
+		]), `
+			import { createElement as ___createElement, exhaustive as ___exhaustive, contentEffect as ___contentEffect } from "project-f/runtime"
+
+			___contentEffect((___real, ___parent) => {
+				const ty = type.r()
+				switch (ty) {
+					case "a": {
+						___createElement(___parent, "div")
+					}
+					case Something.whatever: { break }
+					default: ___exhaustive(ty)
+				}
+			}, ___r)
+		`],
 	]
 
-	// TODO need cases for lone
-	for (const [description, block, generated] of cases)
+	for (const [description, lone, block, generated] of cases)
 		it(description, () => {
 			const context = ctx()
-			const nodes = generateSwitchBlock(block, '0', false, context, ...namedParentIdents('r', 'p'))
+			const nodes = generateSwitchBlock(block, '0', lone, context, ...namedParentIdents('r', 'p'))
 			boilEqual(context.finalize(nodes), generated)
-		})
-
-	const throwCases: [string, SwitchBlock][] = [
-		['reactive assign, no default, empty case', SwitchBlock(':ty = type', [
-			SwitchCase(true, '"a"', [emptyDiv()]),
-			SwitchDefault(true, [emptyDiv()]),
-			SwitchCase(false, 'Something.whatever', []),
-			SwitchDefault(false, []),
-		])],
-	]
-
-	for (const [description, block] of throwCases)
-		it(description, () => {
-			expect(() => generateSwitchBlock(block, '0', false, ctx(), ...namedParentIdents('r', 'p'))).throw()
 		})
 })
 
@@ -1525,7 +1682,7 @@ describe('generateTemplateDefinition', () => {
 		it(description, () => {
 			const context = ctx()
 			const nodes = generateTemplateDefinition(
-				TemplateDefinition('greeting', expression, [TextSection(TextItem(false, 'hello'))]),
+				TemplateDefinition('greeting', expression, [TextSection(TextItem(LivenessType.static, 'hello'))]),
 				context,
 			)
 			boilEqual(context.finalize(nodes), `

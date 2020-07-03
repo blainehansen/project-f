@@ -112,13 +112,12 @@ export function parseComponentInclusion(
 	}
 	case 'EventAttribute':
 		const { event, variety, code: untrimmedCode } = attribute
-		const rawCode = untrimmedCode.trim()
+		const code = untrimmedCode.trim()
 
 		const previous = componentArguments.get(event)
 		if (previous.is_some() && previous.value[0]) ctx.error('COMPONENT_INCLUSION_DUPLICATE_ARGUMENT', span, previous.value[1])
 		else componentArguments.set(event, [false, span])
 
-		const code = variety === 'inline' ? `() => ${rawCode}` : rawCode
 		events.get(event).push(new EventAttribute(event, variety, code))
 		break
 	case 'ReceiverAttribute':
@@ -419,8 +418,7 @@ export function parseTagAttributes(
 	}
 	case 'EventAttribute':
 		const { event, variety, code: untrimmedCode } = attribute
-		const rawCode = untrimmedCode.trim()
-		const code = variety === 'inline' ? `$event => ${rawCode}` : rawCode
+		const code = untrimmedCode.trim()
 		events.get(event).push(new EventAttribute(event, variety, code))
 		break
 

@@ -22,8 +22,8 @@ function safePrefixIdent(...segments: NonLone<string>) {
 }
 
 function createReactiveCode(code: string) {
-	// return code.trim() + '.r()'
-	return code.trim() + '()'
+	return code.trim() + '.r()'
+	// return code.trim() + '()'
 }
 function createRawCodeSegment(code: string) {
 	return ts.createIdentifier(code.trim())
@@ -32,7 +32,7 @@ function createReactiveCodeSegment(code: string) {
 	return ts.createIdentifier(createReactiveCode(code))
 }
 function createAnonCall(fnCode: string, args: ts.Expression[]) {
-	return createCall(createRawCodeSegment(`(${fnCode.trim()})`), args)
+	return createCall(createRawCodeSegment(`(${fnCode})`), args)
 }
 
 function createDynamicBinding({ code, initialModifier }: PickVariants<BindingValue, 'type', 'dynamic'>, ctx: CodegenContext) {
@@ -254,8 +254,8 @@ export function generateTagFromAttributes(
 			statements.push(createFieldAssignment(tagIdent, attribute, dynamicBinding))
 			break
 		case 'reactive':
-			const reactiveCode = createReactiveCodeSegment(value.reactiveCode.code)
-			statements.push(createBind(ctx, tagIdent, attribute, reactiveCode))
+			const code = createRawCodeSegment(value.reactiveCode.code)
+			statements.push(createBind(ctx, tagIdent, attribute, code))
 			break
 	}
 
@@ -297,14 +297,28 @@ export function generateTagFromAttributes(
 	return [tagIdent, needTagIdent, assigner, statements]
 }
 
+function generateHandlerCode({ variety, code }: EventAttribute, isComponent: boolean) {
+	return variety === 'inline'
+		? isComponent ? `() => ${code}` : `$event => ${code}`
+		: code
+}
 function generateHandler(handlers: NonEmpty<EventAttribute>, isComponent: boolean): ts.Expression {
 	if (handlers.length === 1)
-		return createRawCodeSegment(handlers[0].code)
+		return createRawCodeSegment(generateHandlerCode(handlers[0], isComponent))
 
-	const param = isComponent ? '...$args' : '$event'
-	return createArrowFunction([createParameter(param)], ts.createBlock(
-		handlers.map(({ code }) => {
-			return ts.createExpressionStatement(createAnonCall(code, [ts.createIdentifier(param)]))
+	const [param, args] = isComponent
+		? [
+			ts.createParameter(
+				undefined, undefined, ts.createToken(ts.SyntaxKind.DotDotDotToken), ts.createIdentifier('$args'),
+				undefined, undefined, undefined,
+			),
+			'...$args',
+		]
+		: [createParameter('$event'), '$event']
+
+	return createArrowFunction([param], ts.createBlock(
+		handlers.map(handler => {
+			return ts.createExpressionStatement(createAnonCall(generateHandlerCode(handler, isComponent), [ts.createIdentifier(args)]))
 		}),
 	))
 }
@@ -350,7 +364,7 @@ function generateSyncedSomething(
 ) {
 	const [tagIdent, , assigner, statements] = generateTagFromAttributes(ident, attributes, entities, offset, ctx, realParent, parent)
 	statements[0] = assigner
-	const syncStatement = createCall(runtimeFn, [tagIdent, createRawCodeSegment(code)])
+	const syncStatement = createCall(ctx.requireRuntime(runtimeFn), [tagIdent, createRawCodeSegment(code)])
 	statements.push(ts.createExpressionStatement(syncStatement))
 	return statements
 }
@@ -360,33 +374,17 @@ export function generateText(
 	{ items }: TextSection, offset: string, isRealLone: boolean,
 	ctx: CodegenContext, realParent: ts.Identifier, parent: ts.Identifier,
 ): ts.Statement[] {
-	let totalContent = ''
-	let overallLiveness: LivenessType = LivenessType.static
+	const [expression, liveness] = generateTextExpression(items, ctx)
 
-	const [wrapCode, wrapItem]: [(s: string) => string, (s: string) => string] = items.length > 1
-		? [s => '`' + s + '`', s => '${' + s + '}']
-		: [s => s, s => s]
-
-	for (const { liveness, content } of items) {
-		const finalContent = liveness === LivenessType.static ? content
-			: liveness === LivenessType.dynamic ? wrapItem(content)
-			: /*liveness === LivenessType.reactive*/ wrapItem(createReactiveCode(content))
-		// in the wolf grammar, we have information about line breaks in text sections
-		// this means that we can add empty whitespace text sections at the parser level rather than here
-		overallLiveness = LivenessType.max(overallLiveness, liveness)
-		totalContent += finalContent
-	}
-
-	if (isRealLone) switch (overallLiveness) {
+	if (isRealLone) switch (liveness) {
 		case LivenessType.reactive:
-			return [createBind(ctx, realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
+			return [createBind(ctx, realParent, 'textContent', expression)]
 		case LivenessType.dynamic:
-			return [createFieldAssignment(realParent, 'textContent', createRawCodeSegment(wrapCode(totalContent)))]
 		case LivenessType.static:
-			return [createFieldAssignment(realParent, 'textContent', ts.createStringLiteral(totalContent))]
+			return [createFieldAssignment(realParent, 'textContent', expression)]
 	}
 
-	switch (overallLiveness) {
+	switch (liveness) {
 	case LivenessType.reactive:
 		const textIdent = safePrefixIdent('text', offset)
 		return [
@@ -394,17 +392,51 @@ export function generateText(
 				textIdent,
 				createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral('')])
 			),
-			createBind(ctx, textIdent, 'data', createRawCodeSegment(wrapCode(totalContent))),
+			createBind(ctx, textIdent, 'data', expression),
 		]
 	case LivenessType.dynamic:
-		return [ts.createExpressionStatement(
-			createCall(ctx.requireRuntime('createTextNode'), [parent, createRawCodeSegment(wrapCode(totalContent))])
-		)]
 	case LivenessType.static:
 		return [ts.createExpressionStatement(
-			createCall(ctx.requireRuntime('createTextNode'), [parent, ts.createStringLiteral(totalContent)]),
+			createCall(ctx.requireRuntime('createTextNode'), [parent, expression]),
 		)]
 	}
+}
+
+function generateTextExpression(items: NonEmpty<TextItem>, ctx: CodegenContext): [ts.Expression, LivenessType] {
+	if (items.length === 1) {
+		const { content, liveness } = items[0]
+		const expression = liveness === LivenessType.static ? ts.createStringLiteral(content) : createRawCodeSegment(content)
+		return [expression, liveness]
+	}
+
+	let totalContent = ''
+	let overallLiveness: LivenessType = LivenessType.static
+	const wrapItem = (s: string) => '${' + s + '}'
+
+	let derivedArgs = [] as string[]
+	for (const { liveness, content } of items) {
+		switch (liveness) {
+			case LivenessType.static:
+				totalContent += content
+				break
+			case LivenessType.dynamic:
+				totalContent += wrapItem(content)
+				break
+			case LivenessType.reactive:
+				const derivedArgPlaceholder = safePrefix('' + derivedArgs.length)
+				derivedArgs.push(content)
+				totalContent += wrapItem(derivedArgPlaceholder)
+		}
+		overallLiveness = LivenessType.max(overallLiveness, liveness)
+	}
+
+	const finalExpression = createRawCodeSegment('`' + totalContent + '`')
+	if (derivedArgs.length === 0)
+		return [finalExpression, overallLiveness]
+
+	const arrow: ts.Expression = createArrowFunction(derivedArgs.map((_, index) => createParameter(safePrefix('' + index))), finalExpression)
+	const expression = createCall(ctx.requireRuntime('derived'), [arrow].concat(derivedArgs.map(createRawCodeSegment)))
+	return [expression, LivenessType.reactive]
 }
 
 
@@ -554,7 +586,7 @@ export function generateEachBlock(
 ): ts.Statement[] {
 	const reactive = listExpression.reactive
 	const [offset, [realParent, parent]] = reactive
-		? ['', resetParentIdents()]
+		? ['0', resetParentIdents()]
 		: [parentOffset, [aboveRealParent, aboveParent]]
 
 	const variableIdent = createRawCodeSegment(variableCode)
