@@ -1,8 +1,8 @@
 import { readFileSync } from 'fs'
 
-import { processFile } from './templating/process'
+import { compileSource } from './compiler'
 
 export function compileFile(filename: string) {
 	const source = readFileSync(filename, 'utf-8')
-	return processFile(source, process.stdout.columns, filename)
+	return compileSource(source, process.stdout.columns, filename)
 }

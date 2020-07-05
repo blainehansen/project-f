@@ -3,8 +3,8 @@ import { Parser, ParseArg, Decidable, path, branch, c } from 'kreia'
 import { IndentationLexer } from 'kreia/dist/virtual_lexers/IndentationLexer'
 import { Token, RawToken, Span, Spanned, TokenSpanned } from 'kreia/dist/runtime/lexer'
 
-import { NonEmpty } from '../utils'
-import { Context, ParseResult, unspan } from './utils'
+import { NonEmpty } from '../../utils'
+import { Context, ParseResult, unspan } from '../utils'
 
 import {
 	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
@@ -13,12 +13,12 @@ import {
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
 	Directive, ComponentInclusion, IfBlock, /*ForBlock,*/ EachBlock, MatchBlock, SwitchBlock, SwitchCase, SwitchDefault,
 	SlotUsage, SlotInsertion, TemplateDefinition, TemplateInclusion,
-} from './ast'
+} from '../ast'
 import {
 	parseAttribute, parseHtml, parseTagAttributes, parseComponentInclusion,
 	parseDynamicMeta, parseMeta, parseDynamicTextSection, parseTextSection,
 	TagDescriptor, InclusionDescriptor, DirectiveDescriptor, DirectivePending, FinalizableEntity, parseEntities,
-} from './ast.parse'
+} from '../ast.parse'
 
 export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_many_or, many, maybe_many, exit } = Parser({
 	space: / /,

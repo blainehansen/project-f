@@ -175,7 +175,9 @@ Still thinking about this
 TODO think about the syntax and consequences
 
 
-# List Rendering with `@each`
+# List Rendering
+
+## `@each`
 
 ```wolf
 ul#example-1
@@ -214,14 +216,21 @@ export function create() {
 ```
 
 
-## Using `@each` with an Object
+### Using `@each` with an Object
 
 You gotta do it right, and use the smart iterator methods to do this.
 
+## `@for`
 
-## Using `@if` and `@each` together
+```wolf
+ul#example-2
+  @for (let index = 0; index < items.length; index++)
+    li {{ items[index].message }}
+```
 
-Since `@if` and `@each` aren't attached to particular nodes, they can be intuitively composed together.
+## Using `@if` and `@each`/`@for` together
+
+Since `@if` and `@each`/`@for` aren't attached to particular nodes, they can be intuitively composed together.
 
 ```wolf
 //- only render the loop if the condition is true

@@ -4,7 +4,7 @@
 	"description": "",
 	"scripts": {
 		"lab": "ts-node lab/main.ts",
-		"dev": "ts-node lib/compiler/codegen.ts",
+		"dev": "ts-node lib/compiler/wolf/grammar.ts",
 		"test:dev": "mocha lib/compiler/codegen.test.ts",
 
 		"todos": "tsc -w -p examples/todos/tsconfig.json",
@@ -28,6 +28,9 @@
 		"lint": "eslint --fix --ext .ts lib/dom/",
 		"preversion": "npm test && npm run build",
 		"postversion": "git push origin master && git push origin master --tags && npm publish"
+	},
+	"peerDependencies": {
+		"typescript": "^3.7.0"
 	},
 	"devDependencies": {
 		"@ts-std/types": "^1.2.0",

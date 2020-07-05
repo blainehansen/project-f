@@ -5,6 +5,6 @@
 		"node_modules"
 	],
 	"include": [
-		"**/*.iron.spec"
+		"**/*.iron.test"
 	]
 }

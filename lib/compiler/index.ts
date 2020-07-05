@@ -5,7 +5,7 @@ import { Result, Ok, Err, Maybe, Some, None } from '@ts-std/monads'
 
 import { Parser, Context } from './utils'
 import { Dict, NonEmpty, exec } from '../utils'
-import { reset, exit, wolf } from './wolf.grammar'
+import { reset, exit, wolf } from './wolf/grammar'
 import { generateComponentDefinition } from './codegen'
 import { ComponentDefinition, Entity, CTXFN } from './ast'
 import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
@@ -13,7 +13,7 @@ import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
 // we generally want to allow people to have scriptless component files
 // if there's no script section at all, then we can backfill slots (which suddenly requires that useages are unique)
 
-export function processFile(source: string, lineWidth: number, filename: string): string {
+export function compileSource(source: string, lineWidth: number, filename: string): string {
 	const parser = new Parser(lineWidth)
 	const { template, script, style, ...others } = parser.expect(cutSource({ source, filename }))
 	for (const section of Object.values(others)) {
@@ -47,25 +47,23 @@ export function processFile(source: string, lineWidth: number, filename: string)
 	})
 
 	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
-	// return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
-	// TODO
-	return parser.finalize(() => generateComponentDefinition(definition))
+	return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
 }
 
 
 export function inspect(file: ts.SourceFile) {
 	const ctx = new Context<[ComponentDefinitionTypes | undefined, NonEmpty<string> | CTXFN | undefined]>()
-	let foundCreateFns = [] as [ReturnType<typeof processCreateFn> | CTXFN, Span][]
-	let foundComponents = [] as [ReturnType<typeof processComponentType>, Span][]
+	let foundCreateFns = [] as [ReturnType<typeof inspectCreateFn> | CTXFN, Span][]
+	let foundComponents = [] as [ReturnType<typeof inspectComponentType>, Span][]
 
 	function visitor(node: ts.Node): undefined {
 		if (ts.isFunctionDeclaration(node)) {
 			if (!node.name || !['create', 'createCtx'].includes(node.name.text)) return undefined
-			foundCreateFns.push([node.name.text === 'createCtx' ? CTXFN : processCreateFn(file, node), getSpan(file, node)])
+			foundCreateFns.push([node.name.text === 'createCtx' ? CTXFN : inspectCreateFn(file, node), getSpan(file, node)])
 		}
 		else if (ts.isTypeAliasDeclaration(node)) {
 			if (node.name.text !== 'Component') return undefined
-			foundComponents.push([processComponentType(file, node), getSpan(file, node)])
+			foundComponents.push([inspectComponentType(file, node), getSpan(file, node)])
 		}
 		return undefined
 	}
@@ -94,7 +92,7 @@ export function inspect(file: ts.SourceFile) {
 }
 
 
-function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeAliasDeclaration) {
+function inspectComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeAliasDeclaration) {
 	const ctx = new Context<ComponentDefinitionTypes>()
 
 	if (!isNodeExported(componentType))
@@ -111,7 +109,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 
 	const types: ComponentDefinitionTypes = { props: [], events: [], syncs: [], slots: {} }
 	for (const definitionMember of definition.members) {
-		const result = ctx.subsume(processMember(sourceFile, definitionMember))
+		const result = ctx.subsume(inspectMember(sourceFile, definitionMember))
 		if (result.is_err()) return ctx.subsumeFail(result.error)
 		const [signature, variety, optional] = result.value
 
@@ -125,7 +123,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 		switch (variety) {
 			case 'props': case 'events': case 'syncs':
 				for (const bindingMember of signatureType.members) {
-					const result = ctx.subsume(processMember(sourceFile, bindingMember))
+					const result = ctx.subsume(inspectMember(sourceFile, bindingMember))
 					if (result.is_err()) return ctx.subsumeFail(result.error)
 					const [, binding, optional] = result.value
 					if (optional)
@@ -137,7 +135,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 
 			case 'slots':
 				for (const syncsMember of signatureType.members) {
-					const result = ctx.subsume(processMember(sourceFile, syncsMember))
+					const result = ctx.subsume(inspectMember(sourceFile, syncsMember))
 					if (result.is_err()) return ctx.subsumeFail(result.error)
 					const [, sync, optional] = result.value
 					types.slots[sync] = optional
@@ -152,7 +150,7 @@ function processComponentType(sourceFile: ts.SourceFile, componentType: ts.TypeA
 	return ctx.Ok(() => types)
 }
 
-function processCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclaration) {
+function inspectCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclaration) {
 	const ctx = new Context<string[]>()
 	if (!isNodeExported(createFn))
 		ctx.warn('CREATE_NOT_EXPORTED', getSpan(sourceFile, createFn))
@@ -189,7 +187,7 @@ function processCreateFn(sourceFile: ts.SourceFile, createFn: ts.FunctionDeclara
 	return ctx.Ok(() => returnNames)
 }
 
-function processMember(sourceFile: ts.SourceFile, member: ts.TypeElement) {
+function inspectMember(sourceFile: ts.SourceFile, member: ts.TypeElement) {
 	const ctx = new Context<[ts.PropertySignature, string, boolean]>()
 	if (!ts.isPropertySignature(member))
 		return ctx.Err('COMPONENT_PROPERTY_SIGNATURE', getSpan(sourceFile, member))
