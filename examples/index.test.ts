@@ -10,13 +10,12 @@ function boilSource(source: string) {
 		.replace(/    /g, '	')
 		.replace(/\n+/g, '\n')
 		.replace(/;\n/g, '\n')
+		.trim()
 }
 
 for (const sourceFilename of glob.sync('./examples/**/*.iron')) {
 	const expected = readFileSync(sourceFilename + '.ts', 'utf-8')
 	describe(path.basename(sourceFilename, '.iron'), () => it('works', () => {
-		// expect(boilSource(compileFile(sourceFilename))).equal(boilSource(expected))
-		console.log(boilSource(compileFile(sourceFilename)))
-		console.log(boilSource(expected))
+		expect(boilSource(compileFile(sourceFilename))).equal(boilSource(expected))
 	}))
 }
