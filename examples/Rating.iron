@@ -1,7 +1,7 @@
 #! template
 .rating
 	ul.list: @each (star of :starItems)
-		li.star.{ star.active && 'active' }(@click={ stars(star.amount) })
+		li.star.{ star.active && 'active' }(@click={ stars.s(star.amount) })
 			i.{ star.active ? 'fas fa-star' : 'far fa-star' }
 
 	@if (:hasCounter): .counter
@@ -13,12 +13,8 @@
 import { Args, derived } from 'project-f'
 
 export type Component = {
-	props: {
-		maxStars: number, hasCounter: boolean,
-	},
-	syncs: {
-		stars: number,
-	},
+	props: { maxStars: number, hasCounter: boolean },
+	syncs: { stars: number },
 }
 
 export function create({ maxStars, stars }: Args<Component>) {

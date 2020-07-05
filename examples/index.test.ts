@@ -7,7 +7,7 @@ import { readFileSync } from 'fs'
 import { compileFile } from '../lib/'
 function boilSource(source: string) {
 	return source
-		.replace(/    /g, '  ')
+		.replace(/    /g, '	')
 		.replace(/\n+/g, '\n')
 		.replace(/;\n/g, '\n')
 }
@@ -17,5 +17,6 @@ for (const sourceFilename of glob.sync('./examples/**/*.iron')) {
 	describe(path.basename(sourceFilename, '.iron'), () => it('works', () => {
 		// expect(boilSource(compileFile(sourceFilename))).equal(boilSource(expected))
 		console.log(boilSource(compileFile(sourceFilename)))
+		console.log(boilSource(expected))
 	}))
 }
