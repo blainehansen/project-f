@@ -5,12 +5,16 @@
 			i.{ star.active ? 'fas fa-star' : 'far fa-star' }
 
 	@if (:hasCounter): .counter
-		span.score-rating {{: stars }}
+		span.score-rating {{: starsStr }}
 		span.divider
-		span.score-max {{: maxStars }}
+		span.score-max {{: maxStr }}
 
 #! script
 import { Args, derived } from 'project-f'
+
+function str(v: string | number) {
+	return '' + v
+}
 
 export type Component = {
 	props: { maxStars: number, hasCounter: boolean },
@@ -20,11 +24,11 @@ export type Component = {
 export function create({ maxStars, stars }: Args<Component>) {
 	const starItems = derived((stars, maxStars) => {
 		const items: { active: boolean, amount: number }[] = []
-		for (let starIndex = 0; starIndex <= maxStars; starIndex++)
+		for (let starIndex = 0; starIndex < maxStars; starIndex++)
 			items.push({ active: starIndex + 1 <= stars, amount: starIndex + 1 })
 
 		return items
 	}, stars, maxStars)
 
-	return { starItems }
+	return { starItems, starsStr: derived(str, stars), maxStr: derived(str, maxStars) }
 }

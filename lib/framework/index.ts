@@ -39,5 +39,5 @@ export type Slots<C> = C extends { slots: Dict<any> }
 export type Args<C> = Props<C> & Syncs<C> & Events<C>
 
 export type Insertable<A extends any[]> = (realParent: Node, parent: DocumentFragment, ...args: A) => void
-// export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C>]>
-export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Refs<C>, Slots<C>]>
+// export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Refs<C>, Slots<C>]>
+export type ComponentDefinition<C> = Insertable<[Props<C>, Syncs<C>, Events<C>, Slots<C>]>

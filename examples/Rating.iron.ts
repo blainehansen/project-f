@@ -1,7 +1,7 @@
 import { createElementClass as ___createElementClass, createElementClasses as ___createElementClasses, contentEffect as ___contentEffect, bindProperty as ___bindProperty, rangeEffect as ___rangeEffect, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, { maxStars, hasCounter }, { stars }, {}, {}) => {
-	const { starItems } = create(({ maxStars, hasCounter, stars } as ___Args<Component>))
+	const { starItems, starsStr, maxStr } = create(({ maxStars, hasCounter, stars } as ___Args<Component>))
 
 	const ___div_0 = ___createElementClass(___parent, "div", "rating")
 	const ___div_0fragment = document.createDocumentFragment()
@@ -25,12 +25,12 @@ const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, { m
 			const ___div_0fragment = document.createDocumentFragment()
 
 			const ___span_0_0 = ___createElementClass(___div_0fragment, "span", "score-rating")
-			___bindProperty(___span_0_0, "textContent", stars)
+			___bindProperty(___span_0_0, "textContent", starsStr)
 
 			___createElementClass(___div_0fragment, "span", "divider")
 
 			const ___span_0_2 = ___createElementClass(___div_0fragment, "span", "score-max")
-			___bindProperty(___span_0_2, "textContent", maxStars)
+			___bindProperty(___span_0_2, "textContent", maxStr)
 
 			___div_0.appendChild(___div_0fragment)
 		}
@@ -42,6 +42,10 @@ export default ___Component
 
 import { Args, derived } from 'project-f'
 
+function str(v: string | number) {
+	return '' + v
+}
+
 export type Component = {
 	props: { maxStars: number, hasCounter: boolean },
 	syncs: { stars: number },
@@ -50,11 +54,11 @@ export type Component = {
 export function create({ maxStars, stars }: Args<Component>) {
 	const starItems = derived((stars, maxStars) => {
 		const items: { active: boolean, amount: number }[] = []
-		for (let starIndex = 0; starIndex <= maxStars; starIndex++)
+		for (let starIndex = 0; starIndex < maxStars; starIndex++)
 			items.push({ active: starIndex + 1 <= stars, amount: starIndex + 1 })
 
 		return items
 	}, stars, maxStars)
 
-	return { starItems }
+	return { starItems, starsStr: derived(str, stars), maxStr: derived(str, maxStars) }
 }

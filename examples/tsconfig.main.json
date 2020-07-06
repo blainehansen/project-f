@@ -1,5 +1,4 @@
 {
-	"extends": "../../tsconfig.json",
 	"compilerOptions": {
 		"strict": true,
 		"declaration": false,
@@ -8,8 +7,12 @@
 		"module": "amd",
 		"moduleResolution": "node",
 		"outFile": "main.js",
-		"baseUrl": "."
+		"baseUrl": ".",
+		"paths": {
+			"project-f": ["../lib/runtime"],
+			"project-f/*": ["../lib/*"]
+		}
 	},
+	"include": [],
 	"files": ["main.ts"],
-	"include": []
 }

@@ -6,8 +6,7 @@
 		"target": "esnext",
 		"module": "none",
 		"moduleResolution": "node",
-		"outDir": "dist",
-		"baseUrl": "."
+		"outDir": "dist"
 	},
 	"include": [
 		"lib/**/*"

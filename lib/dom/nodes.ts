@@ -211,11 +211,15 @@ export function syncSelectMultipleElement(select: HTMLSelectElement, mutable: Mu
 	})
 }
 
-// export function bindProperty<T, K extends keyof T>(obj: T, key: K, value: Immutable<T[K]>) {
-// 	watch(value, (value, obj, key) => {
-// 		obj[key] = value
-// 	}, obj, key)
-// }
+export function bindProperty<T, K extends keyof T>(obj: T, key: K, value: Immutable<T[K]>) {
+	// TODO a watch is more efficient here
+	// watch(value, (value, obj, key) => {
+	// 	obj[key] = value
+	// }, obj, key)
+	effect(() => {
+		obj[key] = value.r()
+	})
+}
 
 export function syncElementAttribute<E extends HTMLElement, KA extends keyof E>(
 	element: E, event: KeysOfType<E, ((this: GlobalEventHandlers, ev: Event) => unknown) | null>,

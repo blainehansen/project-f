@@ -1,10 +1,18 @@
 {
 	"extends": "../tsconfig.json",
-	// this needs a path resolver to fake project-fs
-	"exclude": [
-		"node_modules"
-	],
+	"compilerOptions": {
+		"strict": true,
+		"target": "esnext",
+		"module": "none",
+		"moduleResolution": "node",
+		"outDir": "dist",
+		"baseUrl": ".",
+		"paths": {
+			"project-f": ["../lib/runtime"],
+			"project-f/*": ["../lib/*"]
+		}
+	},
 	"include": [
-		"**/*.iron.test"
+		"**/*.iron.ts"
 	]
 }
