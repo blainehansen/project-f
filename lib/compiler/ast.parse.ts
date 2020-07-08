@@ -662,7 +662,6 @@ export function parseEntities(finalizables: (ParseResult<FinalizableEntity> | un
 				const result = ctx.subsume(processInsertableCode(true, code, span))
 				if (result.is_err()) return ctx.subsumeFail(result.error)
 				const [slotName, paramsExpression] = result.value
-				// giveSlotInsertions.push(new SlotInsertion(slotName, paramsExpression, entities))
 				giveEntities.push(Spanned(new SlotInsertion(slotName, paramsExpression, entities), span))
 				break
 			}

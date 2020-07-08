@@ -123,6 +123,11 @@ function formatDiagnostics(diagnostics: (ParseError | ParseWarning)[], lineWidth
 }
 function parseDie(errors: NonEmpty<ParseError>, warnings: ParseWarning[], lineWidth: number): never {
 	const message = formatDiagnostics((errors as (ParseError | ParseWarning)[]).concat(warnings), lineWidth)
+	// if (typeof process === 'object') {
+	// 	console.error('\n\n' + message)
+	// 	process.exit(1)
+	// }
+	// else
 	throw new Error('\n\n' + message)
 }
 function withWarnings<T>(value: T, warnings: ParseWarning[], lineWidth: number): T {
@@ -327,14 +332,12 @@ export const Warnings = {
 		"Only slots really make any sense to be optional.",
 		"Consider making the inner type undefinable instead `A | undefined`."
 	),
-	UNSUPPORTED_CUSTOM_SECTION: (span: Span) => ParseWarning(span, 'UNSUPPORTED_CUSTOM_SECTION',
-		"",
-	),
 	LANGLESS_CUSTOM_SECTION: (span: Span) => ParseWarning(span, 'LANGLESS_CUSTOM_SECTION',
-		"",
+		"When using the compiler cli, custom sections must be marked with a `lang` in order to be processed.",
+		"This section will be ignored."
 	),
-	UNSUPPORTED_STYLE_SECTION: (span: Span) => ParseWarning(span, 'UNSUPPORTED_STYLE_SECTION',
-		"",
+	NO_PROCESSOR_FOR_CUSTOM_SECTION: (span: Span) => ParseWarning(span, 'LANGLESS_CUSTOM_SECTION',
+		"There isn't a processor matching this section type, so this section will be ignored.",
 	),
 	EMPTY_TEMPLATE: (span: Span) => ParseWarning(span, 'EMPTY_TEMPLATE',
 		"",

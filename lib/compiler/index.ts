@@ -13,16 +13,22 @@ import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
 // we generally want to allow people to have scriptless component files
 // if there's no script section at all, then we can backfill slots (which suddenly requires that useages are unique)
 
-export function compileSource(source: string, lineWidth: number, filename: string): string {
+// the compiler can also be called as a library, taking various hooks:
+// - custom section processors, since it doesn't seem reasonable to let them change the way we handle the template or script, we can just only call these after template and script are processed and provide them with the script section sourcefile and the template ast
+// custom section processors could return some discriminated prepend/append section for the script
+// - maybe allow custom style processors? or assume that one of these days I'll make my own?
+// - various classname hooks, things to add type assertions to class producing expressions, and possibly some "prepend" string, to include things like css library types
+
+export function compileSource(
+	source: string, filename: string,
+	lineWidth: number, requireCustomLangs: boolean,
+) {
 	const parser = new Parser(lineWidth)
 	const { template, script, style, ...others } = parser.expect(cutSource({ source, filename }))
 	for (const section of Object.values(others)) {
-		parser.warn('UNSUPPORTED_CUSTOM_SECTION', section.span)
-		if (section.lang === undefined)
+		if (requireCustomLangs && section.lang === undefined)
 			parser.warn('LANGLESS_CUSTOM_SECTION', section.span)
 	}
-	if (style !== undefined)
-		parser.warn('UNSUPPORTED_STYLE_SECTION', style.span)
 
 	const entities = exec(() => {
 		if (template === undefined)
@@ -47,7 +53,10 @@ export function compileSource(source: string, lineWidth: number, filename: strin
 	})
 
 	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
-	return parser.finalize(() => generateComponentDefinition(definition) + '\n\n' + scriptText)
+	return parser.finalize(() => ({
+		transformed: generateComponentDefinition(definition) + '\n\n' + scriptText,
+		style, others,
+	}))
 }
 
 
@@ -238,6 +247,8 @@ export function cutSource(file: SourceFile) {
 			setSection(last, '\n'.repeat(line - 2) + source.slice(0, index))
 
 		source = source.slice(sectionIndex)
+		// if (lang === undefined)
+		// 	ctx.error('LANGLESS_SECTION')
 		last = { name: sectionName, lang, span: sectionMarkerSpan }
 	}
 
