@@ -13,6 +13,6 @@
 		}
 	},
 	"include": [
-		"**/*.iron.ts"
+		"**/*.iron.expected.ts"
 	]
 }

@@ -61,7 +61,9 @@ dist
 lab/macros/transformed
 
 .local*
-lib/templating/wolf.grammar.staging.ts
+lib/compiler/wolf/grammar.staging.ts
 lab/_generate.from.ts
 lab/_generate.to.ts
 *.js
+*.iron.*
+!*.iron.expected.ts

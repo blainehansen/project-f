@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import parseArgs = require('minimist')
-import { normalize as normalizePath, join as joinPath } from 'path'
+import { normalize as normalizePath, join as joinPath, basename } from 'path'
 import { sync as globSync } from 'glob'
 import { readFileSync, writeFileSync } from 'fs'
 
@@ -29,26 +29,21 @@ function writeFile(dest: string, text: string) {
 	// writeFileSync(dest, text, { flag: 'w' })
 }
 
+// TODO make this promise based and concurrent
 export function compileDirectory(input: string, addRequire: boolean) {
 	const inputDirectory = normalizePath(input)
 
 	for (const filename of globSync(joinPath(inputDirectory, '**/*.iron'))) {
 		const source = readFileSync(filename, 'utf-8')
-		const { transformed, style, others } = compileSource(source, filename, process.stdout.columns, true)
+		// const fileBasename = basename(filename)
+		const { script, sectionFiles } = compileSource(source, filename, process.stdout.columns, undefined)
 
-		let finalScript = transformed
-		function handleSection(lang: string, text: string) {
-			const otherDest = `${filename}.${lang}`
-			if (addRequire) finalScript += `\n\nrequire("${joinPath('.', otherDest)}")`
-			writeFile(otherDest, text)
-		}
+		let finalScript = script
+		for (const { lang, text } of sectionFiles) {
 
-		if (style !== undefined)
-			handleSection(style.lang || 'css', style.text)
-
-		for (const { lang, text } of Object.values(others)) {
-			if (lang === undefined) continue
-			handleSection(lang, text)
+			const sectionDest = `${filename}.${lang}`
+			if (addRequire) finalScript += `\n\nrequire("${joinPath('.', sectionDest)}")`
+			writeFile(sectionDest, text)
 		}
 
 		const dest = filename + '.ts'

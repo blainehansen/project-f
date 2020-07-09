@@ -4,7 +4,7 @@ import * as path from 'path'
 import { expect } from 'chai'
 import { readFileSync } from 'fs'
 
-import { compileFile } from '../lib/'
+import { compileSource } from '../lib/compiler'
 function boilSource(source: string) {
 	return source
 		.replace(/    /g, '	')
@@ -13,9 +13,16 @@ function boilSource(source: string) {
 		.trim()
 }
 
-for (const sourceFilename of glob.sync('./examples/**/*.iron')) {
-	const expected = readFileSync(sourceFilename + '.ts', 'utf-8')
-	describe(path.basename(sourceFilename, '.iron'), () => it('works', () => {
-		expect(boilSource(compileFile(sourceFilename))).equal(boilSource(expected))
-	}))
-}
+describe('examples', () => {
+	for (const sourceFilename of glob.sync('./examples/**/*.iron'))
+		it(path.basename(sourceFilename, '.iron'), () => {
+			const source = readFileSync(sourceFilename, 'utf-8')
+			const expected = readFileSync(sourceFilename + '.expected.ts', 'utf-8')
+			const { script: actual } = compileSource(
+				source, sourceFilename, 0,
+				() => { throw new Error("example files shouldn't have custom sections?") },
+			)
+			expect(boilSource(actual)).equal(boilSource(expected))
+		})
+})
+

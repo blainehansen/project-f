@@ -1,13 +1,12 @@
 import ts = require('typescript')
 import { UniqueDict } from '@ts-std/collections'
 import { SourceFile, Span } from 'kreia/dist/runtime/lexer'
-import { Result, Ok, Err, Maybe, Some, None } from '@ts-std/monads'
 
 import { Parser, Context } from './utils'
 import { Dict, NonEmpty, exec } from '../utils'
 import { reset, exit, wolf } from './wolf/grammar'
-import { generateComponentDefinition } from './codegen'
-import { ComponentDefinition, Entity, CTXFN } from './ast'
+import { ComponentDefinition, CTXFN } from './ast'
+import { generateComponentDefinition, printNodesArray } from './codegen'
 import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
 
 // we generally want to allow people to have scriptless component files
@@ -19,16 +18,26 @@ import { ComponentDefinitionTypes, parseComponentDefinition } from './ast.parse'
 // - maybe allow custom style processors? or assume that one of these days I'll make my own?
 // - various classname hooks, things to add type assertions to class producing expressions, and possibly some "prepend" string, to include things like css library types
 
+export type CustomSectionProcessor = (
+	name: string,
+	section: Section,
+	component: ComponentDefinition,
+	script: ts.SourceFile | undefined,
+) => CustomSectionReturn | undefined
+
+export type CustomSectionFile = { lang: string, text: string }
+export type CustomSectionReturn = {
+	prepend?: ts.Statement[],
+	append?: ts.Statement[],
+	file?: CustomSectionFile,
+}
+
 export function compileSource(
-	source: string, filename: string,
-	lineWidth: number, requireCustomLangs: boolean,
+	source: string, filename: string, lineWidth: number,
+	customSectionProcessor: CustomSectionProcessor | undefined,
 ) {
 	const parser = new Parser(lineWidth)
-	const { template, script, style, ...others } = parser.expect(cutSource({ source, filename }))
-	for (const section of Object.values(others)) {
-		if (requireCustomLangs && section.lang === undefined)
-			parser.warn('LANGLESS_CUSTOM_SECTION', section.span)
-	}
+	const { template, script, ...sections } = parser.expect(cutSource({ source, filename }))
 
 	const entities = exec(() => {
 		if (template === undefined)
@@ -45,17 +54,42 @@ export function compileSource(
 		return entities
 	})
 
-	const [definitionArgs, createFn, scriptText] = script === undefined ? [undefined, undefined, ''] : exec(() => {
+	const [definitionArgs, createFn, scriptText, sourceFile] = script === undefined ? [undefined, undefined, '', undefined] : exec(() => {
 		if (script.lang && script.lang !== 'ts')
 			return parser.die('NON_TS_SCRIPT_LANG', script.span)
 		const sourceFile = ts.createSourceFile(filename, script.text, ts.ScriptTarget.Latest, true)
-		return [...parser.expect(inspect(sourceFile)), script.text]
+		return [...parser.expect(inspect(sourceFile)), script.text, sourceFile]
 	})
-
 	const definition = parser.expect(parseComponentDefinition(definitionArgs, createFn, entities))
+
+	function defaultSectionProcessor(name: string, { lang, span, text }: Section): CustomSectionReturn | undefined {
+		if (lang === undefined) {
+			if (name === 'style') return { file: { lang: lang || 'css', text } }
+			parser.warn('LANGLESS_CUSTOM_SECTION', span)
+			return {}
+		}
+		return { file: { lang, text } }
+	}
+	const sectionProcessor = customSectionProcessor || defaultSectionProcessor
+
+	const prepends = [] as ts.Statement[]
+	const appends = [] as ts.Statement[]
+	const sectionFiles = [] as CustomSectionFile[]
+	for (const [name, section] of Object.entries(sections)) {
+		const transformedSection = sectionProcessor(name, section, definition, sourceFile)
+		if (transformedSection === undefined) {
+			parser.warn('UNHANDLED_CUSTOM_SECTION', section.span)
+			continue
+		}
+		const { prepend, append, file } = transformedSection
+		if (prepend) Array.prototype.unshift.apply(prepends, prepend)
+		if (append) Array.prototype.push.apply(appends, append)
+		if (file) sectionFiles.push(file)
+	}
+
 	return parser.finalize(() => ({
-		transformed: generateComponentDefinition(definition) + '\n\n' + scriptText,
-		style, others,
+		script: [printNodesArray(prepends), generateComponentDefinition(definition), scriptText, printNodesArray(appends)].join('\n\n'),
+		sectionFiles,
 	}))
 }
 
@@ -247,14 +281,12 @@ export function cutSource(file: SourceFile) {
 			setSection(last, '\n'.repeat(line - 2) + source.slice(0, index))
 
 		source = source.slice(sectionIndex)
-		// if (lang === undefined)
-		// 	ctx.error('LANGLESS_SECTION')
 		last = { name: sectionName, lang, span: sectionMarkerSpan }
 	}
 
 	if (last === undefined) {
 		ctx.warn('NO_SECTIONS', file.filename || 'unknown file')
-		return ctx.Ok(() => ({ script: { lang: undefined, text: file.source, span: makeSpan(file, 0, file.source, 1, 0) } }))
+		return ctx.Ok(() => ({ template: { lang: undefined, text: file.source, span: makeSpan(file, 0, file.source, 1, 0) } }))
 	}
 	setSection(last, source)
 

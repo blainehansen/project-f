@@ -844,7 +844,7 @@ export function printNodes(...nodes: NonEmpty<ts.Node>) {
 	return _printNodes(nodes, '')
 }
 export function printNodesArray(nodes: ts.Node[], filename = '') {
-	return _printNodes(nodes, '')
+	return _printNodes(nodes, filename)
 }
 const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed, omitTrailingSemicolon: true })
 function _printNodes(nodes: ts.Node[], filename: string) {
