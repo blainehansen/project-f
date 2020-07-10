@@ -25,25 +25,21 @@ for (const directory of directories)
 
 
 function writeFile(dest: string, text: string) {
-	console.log(dest)
-	// writeFileSync(dest, text, { flag: 'w' })
+	writeFileSync(dest, text, { flag: 'w' })
 }
 
-// TODO make this promise based and concurrent
 export function compileDirectory(input: string, addRequire: boolean) {
 	const inputDirectory = normalizePath(input)
 
 	for (const filename of globSync(joinPath(inputDirectory, '**/*.iron'))) {
+		const fileBasename = basename(filename)
 		const source = readFileSync(filename, 'utf-8')
-		// const fileBasename = basename(filename)
 		const { script, sectionFiles } = compileSource(source, filename, process.stdout.columns, undefined)
 
 		let finalScript = script
 		for (const { lang, text } of sectionFiles) {
-
-			const sectionDest = `${filename}.${lang}`
-			if (addRequire) finalScript += `\n\nrequire("${joinPath('.', sectionDest)}")`
-			writeFile(sectionDest, text)
+			if (addRequire) finalScript += `\n\nrequire("./${fileBasename}.${lang}")`
+			writeFile(`${filename}.${lang}`, text)
 		}
 
 		const dest = filename + '.ts'

@@ -4,12 +4,17 @@ export const CTXFN: unique symbol = Symbol()
 export type CTXFN = typeof CTXFN
 export class ComponentDefinition {
 	constructor(
+		readonly types: ComponentTypes | undefined,
+		readonly createFn: NonEmpty<string> | CTXFN | undefined,
+		readonly entities: Entity[],
+	) {}
+}
+export class ComponentTypes {
+	constructor(
 		readonly props: string[],
 		readonly syncs: string[],
 		readonly events: string[],
 		readonly slots: Dict<boolean>,
-		readonly createFn: NonEmpty<string> | CTXFN | undefined,
-		readonly entities: Entity[],
 	) {}
 }
 

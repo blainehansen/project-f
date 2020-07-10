@@ -51,7 +51,7 @@ export const { tok, reset, lock, consume, maybe, or, maybe_or, many_or, maybe_ma
 	class_identifier: /\.(?:[0-9A-Za-z_]|-)+/
 }, { IndentationLexer: IndentationLexer() })
 
-const { _Z2nLjPg, _17D7Of, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ, _Z1bsgQT, _Z1s8tjH, _NFQGh, _ZiAKh1, _Z1O2lKj, _Z1kIVyP, _2w47cC, _Z1yGH1N, _1VQg9s, _qLI, _7HLiJ, _Z1KbEOG, _6PPJc, _Z1wyrvk, _uGx, _J5AgF, _14hbOa, _Z2cNPgr } = {
+const { _Z2nLjPg, _17D7Of, toplevel, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ, _Z1bsgQT, _Z1s8tjH, _NFQGh, _ZiAKh1, _Z1O2lKj, _Z1kIVyP, _2w47cC, _Z1yGH1N, _1VQg9s, _qLI, _7HLiJ, _Z1KbEOG, _6PPJc, _Z1wyrvk, _uGx, _J5AgF, _14hbOa, _Z2cNPgr } = {
 
 	_Z2nLjPg: branch(
 		path([tok.tag_identifier]), path([tok.id_identifier]), path([tok.class_identifier]), path([tok.dot]), path([tok.pound]),
@@ -59,6 +59,15 @@ const { _Z2nLjPg, _17D7Of, _Z1F9dGs, _ZCgW0s, _6PPuF, _Z1owlnn, _7U1Cw, _Z2evaAJ
 	),
 
 	_17D7Of: path([tok.comment]),
+
+	toplevel: path(
+		[tok.indent_continue],
+		branch(
+			path([tok.tag_identifier]), path([tok.id_identifier]), path([tok.class_identifier]), path([tok.dot]), path([tok.pound]),
+			path([tok.plus_identifier]), path([tok.at_identifier]), path([tok.text_bar]), path([tok.comment])
+		)
+	),
+
 	_Z1F9dGs: path([tok.indent_continue]),
 	_ZCgW0s: branch(
 		path([tok.tag_identifier]), path([tok.id_identifier]), path([tok.class_identifier]), path([tok.dot]), path([tok.pound]),
@@ -100,7 +109,8 @@ export function wolf(): ParseResult<(Spanned<Entity | SlotInsertion>)[]> {
 			c(entity, _Z2nLjPg),
 			c(comment, _17D7Of),
 		)
-	}, _Z1F9dGs)
+	}, toplevel)
+	maybe_many(tok.indent_continue)
 
 	return parseEntities(items)
 }

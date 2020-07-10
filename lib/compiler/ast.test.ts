@@ -14,6 +14,10 @@ export type ComponentDefinition = ast.ComponentDefinition
 export function ComponentDefinition(...params: ConstructorParameters<typeof ast.ComponentDefinition>) {
 	return new ast.ComponentDefinition(...params)
 }
+export type ComponentTypes = ast.ComponentTypes
+export function ComponentTypes(...params: ConstructorParameters<typeof ast.ComponentTypes>) {
+	return new ast.ComponentTypes(...params)
+}
 export type Tag = ast.Tag
 export function Tag(...params: ConstructorParameters<typeof ast.Tag>) {
 	return new ast.Tag(...params)

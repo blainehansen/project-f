@@ -4,8 +4,8 @@ import { expect } from 'chai'
 import {
 	reset, exit, tok,
 	wolf, entity, entity_descriptor, tag, meta, attributes, attribute_line, attribute, str, code_segment, code, paren_code, text,
-} from './wolf.grammar'
-import { boilString } from '../utils.spec'
+} from './grammar'
+import { boilString } from '../../utils.test'
 
 // _Z1s8tjH: branch(
 // 	path([tok.tag_identifier]), path([tok.id_identifier]), path([tok.class_identifier]), path([tok.dot]), path([tok.pound]),
@@ -210,14 +210,17 @@ describe('attribute_line', () => it('works', () => {
 
 const attributes_indented = `(
 	${attribute_bare},
+
 )`
 
 const attributes_indented_line = `(
+
 	${attribute_bare}, ${attribute_simple}, ${attribute_nightmare_name},
 )`
 
 const attributes_multi_indented = `(
 	${attribute_simple},
+
 	${attribute_bare}, ${attribute_simple}, ${attribute_nightmare_name},
 	${attribute_nightmare_name}, ${attribute_bare},
 )`
@@ -337,4 +340,15 @@ describe('wolf', () => it('works', () => {
 	parse(wolf, entity_text_indented_multiple)
 	parse(wolf, entity_indented)
 	parse(wolf, entity_indented_multiple)
+}))
+
+
+const Rating = `
+
++Rating(:maxStars=maxStars, :hasCounter=hasCounter, !stars=stars)
+
+`
+
+describe('special cases', () => it('works', () => {
+	parse(wolf, Rating)
 }))

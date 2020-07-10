@@ -5,7 +5,7 @@ import { UniqueDict, UniqueValue, DefaultDict } from '@ts-std/collections'
 import { Context, Warnings, ParseResult, unspan } from './utils'
 import { splitGuard, Dict, NonEmpty, OmitVariants, exec } from '../utils'
 import {
-	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	ComponentDefinition, ComponentTypes, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
 	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
 	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
@@ -62,9 +62,12 @@ export function parseComponentDefinition(
 		// }
 	const entities = removeSlotInsertions(ctx, rawEntities)
 
-	const { props = [], syncs = [], events = [], slots = {} } = component || {}
+	const types = component === undefined
+		? undefined
+		: new ComponentTypes(component.props, component.syncs, component.events, component.slots)
+
 	// slots = foundSlots.into_dict()
-	return ctx.Ok(() => new ComponentDefinition(props, syncs, events, slots, createFn, entities))
+	return ctx.Ok(() => new ComponentDefinition(types, createFn, entities))
 }
 
 function cleanResults<T>(results: ParseResult<T>[]) {

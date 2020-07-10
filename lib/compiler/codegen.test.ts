@@ -5,7 +5,7 @@ import ts = require('typescript')
 import { boilEqual } from '../utils.test'
 import { Dict, tuple as t, NonEmpty, NonLone } from '../utils'
 import {
-	ComponentDefinition, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
+	ComponentDefinition, ComponentTypes, CTXFN, Entity, Html, Tag, TagAttributes, LivenessType, LiveCode, AssignedLiveCode,
 	IdMeta, ClassMeta, AttributeCode, TextSection, TextItem,
 	BindingAttribute, BindingValue, ExistentBindingValue, InertBindingValue, EventAttribute, ReceiverAttribute, /*RefAttribute,*/ Attribute,
 	SyncedTextInput, SyncedCheckboxInput, SyncedRadioInput, SyncedSelect, SyncModifier, SyncAttribute,
@@ -40,13 +40,16 @@ const emptyStrong = () => empty('strong')
 
 describe('generateComponentDefinition', () => {
 	const cases: [string, ComponentDefinition, string][] = [
-		// props: string[],
-		// syncs: string[],
-		// events: string[],
-		// slots: Dict<boolean>,
-		// createFn: NonEmpty<string> | CTXFN | undefined,
-		// entities: Entity[],
-		['no argument component', ComponentDefinition([], [], [], {}, undefined, [emptyDiv()]), `
+	['nonexistent component', ComponentDefinition(undefined, undefined, [emptyDiv()]), `
+			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
+
+			const ___Component: ___ComponentDefinition<{}> = (___real, ___parent, {}, {}, {}, {}) => {
+				___createElement(___parent, "div")
+			}
+			export default ___Component
+		`],
+
+		['no argument component', ComponentDefinition(ComponentTypes([], [], [], {}), undefined, [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -55,7 +58,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['all component args but no createFn', ComponentDefinition(['p'], ['y'], ['e'], { s: false }, undefined, [emptyDiv()]), `
+		['all component args but no createFn', ComponentDefinition(ComponentTypes(['p'], ['y'], ['e'], { s: false }), undefined, [emptyDiv()]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (
@@ -67,7 +70,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['only createFn', ComponentDefinition([], [], [], {}, ['a', 'b'], [emptyDiv()]), `
+		['only createFn', ComponentDefinition(ComponentTypes([], [], [], {}), ['a', 'b'], [emptyDiv()]), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -77,7 +80,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['createFn signaling to use ctx instead', ComponentDefinition([], [], [], {}, CTXFN, [emptyDiv()]), `
+		['createFn signaling to use ctx instead', ComponentDefinition(ComponentTypes([], [], [], {}), CTXFN, [emptyDiv()]), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 
 			const ___Component: ___ComponentDefinition<Component> = (___real, ___parent, {}, {}, {}, {}) => {
@@ -89,7 +92,7 @@ describe('generateComponentDefinition', () => {
 
 
 		['both component args and createFn', ComponentDefinition(
-			['p1', 'p2'], ['y1', 'y2'], ['e1', 'e2'], { s1: false, s2: false }, ['a', 'b'], [emptyDiv()],
+			ComponentTypes(['p1', 'p2'], ['y1', 'y2'], ['e1', 'e2'], { s1: false, s2: false }), ['a', 'b'], [emptyDiv()],
 		), `
 			import { createElement as ___createElement, Args as ___Args, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
 			const ___Component: ___ComponentDefinition<Component> = (
@@ -102,7 +105,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot without args (default)', ComponentDefinition([], [], [], { def: false }, undefined, [
+		['usage of a required slot without args (default)', ComponentDefinition(ComponentTypes([], [], [], { def: false }), undefined, [
 			SlotUsage(undefined, undefined, undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -114,7 +117,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot without args (non-default)', ComponentDefinition([], [], [], { s: false }, undefined, [
+		['usage of a required slot without args (non-default)', ComponentDefinition(ComponentTypes([], [], [], { s: false }), undefined, [
 			SlotUsage('s', undefined, undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -126,7 +129,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot with args (default)', ComponentDefinition([], [], [], { def: false }, undefined, [
+		['usage of a required slot with args (default)', ComponentDefinition(ComponentTypes([], [], [], { def: false }), undefined, [
 			SlotUsage(undefined, 'complex.a(), hmm && something().e, ...rest', undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -138,7 +141,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of a required slot with args (non-default)', ComponentDefinition([], [], [], { s: false }, undefined, [
+		['usage of a required slot with args (non-default)', ComponentDefinition(ComponentTypes([], [], [], { s: false }), undefined, [
 			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
 		]), `
 			import { ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -150,7 +153,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['mixed default and non-default required slot usages', ComponentDefinition([], [], [], { s: false, def: false }, undefined, [
+		['mixed default and non-default required slot usages', ComponentDefinition(ComponentTypes([], [], [], { s: false, def: false }), undefined, [
 			SlotUsage(undefined, 'complex.a(), hmm && something().e, ...rest', undefined),
 			emptyDiv(),
 			SlotUsage('s', undefined, undefined),
@@ -166,7 +169,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['usage of the same required slot in multiple places, different args', ComponentDefinition([], [], [], { s: false }, undefined, [
+		['usage of the same required slot in multiple places, different args', ComponentDefinition(ComponentTypes([], [], [], { s: false }), undefined, [
 			SlotUsage('s', 'complex.a(), hmm && something().e, ...rest', undefined),
 			emptyDiv(),
 			SlotUsage('s', 'a, b, c', undefined),
@@ -186,7 +189,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, no fallback', ComponentDefinition([], [], [], { s: true }, undefined, [
+		['optional slot, no fallback', ComponentDefinition(ComponentTypes([], [], [], { s: true }), undefined, [
 			SlotUsage('s', undefined, undefined),
 		]), `
 			import { noop as ___noop, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -198,7 +201,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, has fallback', ComponentDefinition([], [], [], { s: true }, undefined, [
+		['optional slot, has fallback', ComponentDefinition(ComponentTypes([], [], [], { s: true }), undefined, [
 			SlotUsage('s', undefined, [emptyDiv()]),
 		]), `
 			import { createElement as ___createElement, ComponentDefinition as ___ComponentDefinition } from "project-f/runtime"
@@ -212,7 +215,7 @@ describe('generateComponentDefinition', () => {
 			export default ___Component
 		`],
 
-		['optional slot, one without fallback and another with', ComponentDefinition([], [], [], { s: true }, undefined, [
+		['optional slot, one without fallback and another with', ComponentDefinition(ComponentTypes([], [], [], { s: true }), undefined, [
 			SlotUsage('s', undefined, undefined),
 			emptyDiv(),
 			SlotUsage('s', undefined, [emptyDiv()]),

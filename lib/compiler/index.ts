@@ -88,7 +88,12 @@ export function compileSource(
 	}
 
 	return parser.finalize(() => ({
-		script: [printNodesArray(prepends), generateComponentDefinition(definition), scriptText, printNodesArray(appends)].join('\n\n'),
+		script: [
+			printNodesArray(prepends),
+			generateComponentDefinition(definition),
+			scriptText,
+			printNodesArray(appends),
+		].join('\n\n').trim() + '\n',
 		sectionFiles,
 	}))
 }

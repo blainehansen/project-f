@@ -1,0 +1,11 @@
+#! template
+
++Rating(:maxStars=maxStars, :hasCounter=hasCounter, !stars=stars)
+
+#! script
+import { primitive } from '../lib'
+
+import Rating from '../examples/Rating.iron'
+export function create() {
+	return { maxStars: primitive(5), hasCounter: primitive(true), stars: primitive(3) }
+}

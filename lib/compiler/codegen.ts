@@ -87,10 +87,8 @@ const typedParentParams = () => t(
 	createParameter(parentText, ts.createTypeReferenceNode(ts.createIdentifier('Node'), undefined)),
 )
 
-export function generateComponentDefinition({
-	props, syncs, events,
-	slots, createFn, entities,
-}: ComponentDefinition) {
+export function generateComponentDefinition({ types, createFn, entities }: ComponentDefinition) {
+	const { props = [], syncs = [], events = [], slots = {} } = types || {}
 	const ctx = new CodegenContext(slots)
 	const [realParentIdent, parentIdent] = resetParentIdents()
 
@@ -99,21 +97,22 @@ export function generateComponentDefinition({
 	const entitiesStatements = generateEntities(entities, '', false, ctx, realParentIdent, parentIdent)
 
 	const createFnStatements = createFn === undefined ? [] : exec(() => {
-		const args = props.concat(syncs).concat(events)
+		const args = types === undefined ? [] : [ts.createAsExpression(
+			ts.createObjectLiteral(
+				props.concat(syncs).concat(events).map(arg => {
+					return ts.createShorthandPropertyAssignment(ts.createIdentifier(arg), undefined)
+				}),
+				false,
+			),
+			ts.createTypeReferenceNode(ctx.requireRuntime('Args'), [
+				ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined),
+			]),
+		)]
+
 		const [createFnTarget, createFnCall] = createFn === CTXFN ? ['ctx', 'createCtx'] : [createFn, 'create']
 		return [createConst(
 			createFnTarget,
-			createCall(createFnCall, [ts.createAsExpression(
-				ts.createObjectLiteral(
-					args.map(arg => {
-						return ts.createShorthandPropertyAssignment(ts.createIdentifier(arg), undefined)
-					}),
-					false,
-				),
-				ts.createTypeReferenceNode(ctx.requireRuntime('Args'), [
-					ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined),
-				]),
-			)]),
+			createCall(createFnCall, args),
 		) as ts.Statement]
 	})
 
@@ -123,13 +122,13 @@ export function generateComponentDefinition({
 	const componentArrow = createArrowFunction(params, ts.createBlock(statements, true))
 
 	const componentDefinitionSymbol = ts.createIdentifier(safePrefix('Component'))
+	const componentTypeReference = types === undefined
+		? ts.createTypeLiteralNode([])
+		: ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined)
+
 	const componentDefinition = createConst(
 		componentDefinitionSymbol, componentArrow,
-		ts.createTypeReferenceNode(
-			ctx.requireRuntime('ComponentDefinition'),
-			// TODO if slots were backfilled, this is where we'd discover so
-			[ts.createTypeReferenceNode(ts.createIdentifier('Component'), undefined)],
-		),
+		ts.createTypeReferenceNode(ctx.requireRuntime('ComponentDefinition'), [componentTypeReference]),
 	)
 	const componentExport = ts.createExportAssignment(undefined, undefined, undefined, componentDefinitionSymbol)
 
