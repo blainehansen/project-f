@@ -18,10 +18,7 @@ describe('examples', () => {
 		it(path.basename(sourceFilename, '.iron'), () => {
 			const source = readFileSync(sourceFilename, 'utf-8')
 			const expected = readFileSync(sourceFilename + '.expected.ts', 'utf-8')
-			const { script: actual } = compileSource(
-				source, sourceFilename, 0,
-				() => { throw new Error("example files shouldn't have custom sections?") },
-			)
+			const { script: actual } = compileSource(source, sourceFilename, 0, () => ({}))
 			expect(boilSource(actual)).equal(boilSource(expected))
 		})
 })
