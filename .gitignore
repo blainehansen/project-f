@@ -67,3 +67,5 @@ lab/_generate.to.ts
 *.js
 *.iron.*
 !*.iron.expected.ts
+
+app/main.ts*

@@ -5,7 +5,7 @@
 #! script
 import { primitive } from '../lib'
 
-import Rating from '../examples/Rating.iron'
+import Rating from iron!!('../examples/Rating')
 export function create() {
 	return { maxStars: primitive(5), hasCounter: primitive(true), stars: primitive(3) }
 }

@@ -25,11 +25,12 @@ export type CustomSectionProcessor = (
 	script: ts.SourceFile | undefined,
 ) => CustomSectionReturn | undefined
 
-export type CustomSectionFile = { lang: string, text: string }
+export type CustomSectionFile = { extension: string, source: string }
 export type CustomSectionReturn = {
 	prepend?: ts.Statement[],
 	append?: ts.Statement[],
-	file?: CustomSectionFile,
+	// this should probably be a Dict with the keys as the intended "path" of the file
+	files?: CustomSectionFile[],
 }
 
 export function compileSource(
@@ -64,11 +65,11 @@ export function compileSource(
 
 	function defaultSectionProcessor(name: string, { lang, span, text }: Section): CustomSectionReturn | undefined {
 		if (lang === undefined) {
-			if (name === 'style') return { file: { lang: lang || 'css', text } }
+			if (name === 'style') return { files: [{ extension: lang || 'css', source: text }] }
 			parser.warn('LANGLESS_CUSTOM_SECTION', span)
 			return {}
 		}
-		return { file: { lang, text } }
+		return { files: [{ extension: lang, source: text }] }
 	}
 	const sectionProcessor = customSectionProcessor || defaultSectionProcessor
 
@@ -81,10 +82,10 @@ export function compileSource(
 			parser.warn('UNHANDLED_CUSTOM_SECTION', section.span)
 			continue
 		}
-		const { prepend, append, file } = transformedSection
+		const { prepend, append, files } = transformedSection
 		if (prepend) Array.prototype.unshift.apply(prepends, prepend)
 		if (append) Array.prototype.push.apply(appends, append)
-		if (file) sectionFiles.push(file)
+		if (files) Array.prototype.unshift.apply(sectionFiles, files)
 	}
 
 	return parser.finalize(() => ({

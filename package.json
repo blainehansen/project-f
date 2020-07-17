@@ -10,7 +10,8 @@
 	],
 	"scripts": {
 		"lab": "ts-node lab/main.ts",
-		"dev": "ts-node lib/compiler/cli.ts",
+		"dev": "ts-node app/build.ts",
+		"build:html": "topside app/main.html",
 		"app": "tsc -w -p app/tsconfig.main.json",
 
 		"dom": "tsc -w -p lib/dom/tsconfig.main.json",
@@ -53,6 +54,7 @@
 		"mocha": "^7.2.0",
 		"nyc": "^15.1.0",
 		"source-map-support": "^0.5.19",
+		"topside": "^0.6.5",
 		"ts-creator": "^1.2.5",
 		"ts-node": "^8.10.2",
 		"ttypescript": "^1.5.10",
