@@ -4,7 +4,7 @@ import {
 	BlockMacro, BlockMacroReturn,
 	FunctionMacro, FunctionMacroReturn,
 	ImportMacro, ImportMacroReturn,
-} from 'macro-ts'
+} from 'macro-ts/lib'
 import { createTransformer } from 'macro-ts/lib/transformer'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -12,11 +12,55 @@ import * as fs from 'fs'
 import { Dict } from '../lib/utils'
 import { compileSource } from '../lib/compiler'
 
-type UnprocessedFile = { extension: string, source: string }
 type BundlePayload = {
 	ts?: { path: string, source: string },
-	files: UnprocessedFile[],
+	// sources: UnprocessedFile[],
+	resources: [],
 }
+
+// TODO sourcemaps?
+type Resource =
+	|  {
+		type: 'script',
+		// https://developer.mozilla.org/en-US/docs/Learn/JavaScript/First_steps/What_is_JavaScript#Script_loading_strategies
+		// async is only valid when the script in question is independent, so my guess is it never really applies to us
+		// https://javascript.info/script-async-defer
+		mode: 'module' | 'defer' | 'async' | 'inline',
+		// module has the same behavior as defer
+		// and implicitly the other types have the nomodule addition (for modern mode)
+		path: string,
+	}
+	| {
+		type: 'style',
+		mode: 'normal' | 'preload' | 'prefetch' | 'inline',
+		path: string,
+	}
+	| {}
+	| {
+		type: 'static',
+		preload?: true,
+		path: string,
+		content: string | Buffer,
+	}
+	| {
+		// for embedding information from server rendering?
+		type: 'json',
+	}
+
+type HtmlArgs = {
+	title?: string,
+	body: string,
+	scripts: { path: string, mode: 'module' | 'defer' | 'async' | 'inline' }[],
+	styles: { path: string, mode: 'normal' | 'preload' | 'inline' }[],
+	preloadLinks: { href: string, as: string }[],
+	prefetchLinks: { href: string, dns?: true }[],
+	// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/meta
+	charset?: string,
+	contentSecurityPolicy?: string,
+	base?: { href: string, target: '_self' | '_blank' | '_parent' | '_top' },
+	metas: { name: string, content: string }[],
+}
+
 
 // TODO we need a caching mechanism for import macros to use for their results
 const macros: Dict<Macro<BundlePayload>> = {
@@ -42,127 +86,26 @@ const macros: Dict<Macro<BundlePayload>> = {
 			ts.createImportClause(clause.clause.name, undefined),
 			ts.createStringLiteral(fullTarget),
 		)]
-		return { statements, payload: { ts: { path: targetPath + '.ts', source: script }, files: sectionFiles } }
+		return { statements, payload: { ts: { path: targetPath + '.ts', source: script }, sources: sectionFiles } }
 	}),
+
+	// scss: ImportMacro(({ entryDir, currentDir }, target, clause, args, typeArgs) => {
+	// 	// const result = sass.renderSync({
+	// 	// 	data: scss_content
+	// 	// 	[, options..]
+	// 	// })
+	// }),
 }
 
 
 const alwaysOptions = {
 	strict: true, target: ts.ScriptTarget.ESNext,
 	module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.NodeJs,
-	baseUrl: './examples',
+	baseUrl: '.',
 	paths: {
-		"project-f": ["../lib/runtime"],
-		"project-f/*": ["../lib/*"]
+		"project-f": ["./lib/runtime"],
+		"project-f/*": ["./lib/*"],
 	},
-}
-
-function compile(entryScript: string, macros: Dict<Macro<BundlePayload>>) {
-	const transformedTsSourceMap: Dict<string> = {}
-	const outputFiles: Dict<string> = {}
-
-	const unprocessedFiles = [] as UnprocessedFile[]
-	function receivePayload({ ts: script, files }: BundlePayload) {
-		if (script) {
-			console.log('script.path:', script.path)
-			const sourceFile = ts.createSourceFile(script.path, script.source, alwaysOptions.target)
-			const { transformed: [newSourceFile] } = ts.transform(sourceFile, [transformer])
-			transformedTsSourceMap[script.path] = printer.printFile(newSourceFile)
-		}
-		Array.prototype.push.apply(unprocessedFiles, files)
-	}
-
-	const entryDir = path.dirname(entryScript)
-	const entryFile = path.basename(entryScript)
-	function dirMaker(sourceFileName: string) {
-		const currentDir = path.relative(entryDir, path.dirname(sourceFileName))
-		const currentFile = path.basename(sourceFileName)
-		return { currentDir, currentFile }
-	}
-
-	const transformer = createTransformer(macros, receivePayload, entryDir, entryFile, dirMaker)
-
-
-	const initialOptions = { ...alwaysOptions, noEmit: true, declaration: false, sourceMap: false }
-	const initialProgram = ts.createProgram([entryScript], initialOptions)
-
-	const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed })
-	for (const sourceFile of initialProgram.getSourceFiles()) {
-		if (sourceFile.isDeclarationFile) continue
-		const { transformed: [newSourceFile] } = ts.transform(sourceFile, [transformer])
-		transformedTsSourceMap[sourceFile.fileName] = printer.printFile(newSourceFile)
-		if (sourceFile.fileName !== 'app/App.ts') continue
-		console.log('sourceFile.fileName:', sourceFile.fileName)
-		console.log('transformedTsSourceMap[sourceFile.fileName]')
-		console.log(transformedTsSourceMap[sourceFile.fileName])
-		console.log()
-	}
-
-	// const transformedRoundOptions = { ...alwaysOptions, outDir: 'dist', declaration: true, sourceMap: true }
-	const transformedRoundOptions = {
-		...alwaysOptions, declaration: false, sourceMap: false,
-		// outDir: 'dist',
-		module: ts.ModuleKind.AMD,
-		outFile: "./app/App.js",
-	}
-	const defaultCompilerHost = ts.createCompilerHost(transformedRoundOptions)
-	// https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#customizing-module-resolution
-	const capturingCompilerHost: ts.CompilerHost = {
-		...defaultCompilerHost,
-		getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile) {
-			if (!fileName.includes('node_modules')) {
-				console.log('getSourceFile')
-				console.log(fileName)
-				console.log()
-			}
-			const transformedSource = transformedTsSourceMap[path.relative(process.cwd(), fileName)]
-			return transformedSource !== undefined
-				? ts.createSourceFile(fileName, transformedSource, languageVersion)
-				: defaultCompilerHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile)
-		},
-		fileExists(fileName) {
-			if (!fileName.includes('node_modules')) {
-				console.log('fileExists')
-				console.log(fileName)
-				console.log()
-			}
-			return path.relative(process.cwd(), fileName) in transformedTsSourceMap || defaultCompilerHost.fileExists(fileName)
-		},
-		writeFile(fileName, content) {
-			console.log()
-			console.log('writeFile')
-			console.log(fileName)
-			// console.log()
-			// console.log(content)
-			// console.log()
-			outputFiles[fileName] = content
-		},
-		// getDefaultLibFileName: () => "lib.d.ts",
-		// getCurrentDirectory: () => ts.sys.getCurrentDirectory(),
-		// getDirectories: path => ts.sys.getDirectories(path),
-		// getCanonicalFileName: fileName => ts.sys.useCaseSensitiveFileNames ? fileName : fileName.toLowerCase(),
-		// getNewLine: () => ts.sys.newLine,
-		// useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-		// fileExists,
-		// readFile,
-		// resolveModuleNames,
-	}
-	const transformedProgram = ts.createProgram([entryScript], transformedRoundOptions, capturingCompilerHost)
-
-	const diagnostics = ts.getPreEmitDiagnostics(transformedProgram)
-	// use diagnostic.category === ts.DiagnosticCategory.Error to see if any of these are actually severe
-	// if (diagnostics.length)
-	for (const diagnostic of diagnostics)
-		console.log(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))
-	// const emitResult = transformedProgram.emit()
-	transformedProgram.emit()
-
-	// const exitCode = emitResult.emitSkipped ? 1 : 0
-	// process.exit(exitCode)
-
-	// for (const { extension, source } of unprocessedFiles) {
-	// 	console.log('extension:', extension)
-	// }
 }
 
 compile('./app/App.ts', macros)
@@ -176,24 +119,14 @@ compile('./app/App.ts', macros)
 
 
 
-// https://developer.mozilla.org/en-US/docs/Glossary/Prefetch
-// https://developer.mozilla.org/en-US/docs/Web/HTML/Link_types
-// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script
 // https://developer.mozilla.org/en-US/docs/Web/HTML/Preloading_content
+// (preload is used for resources that will be needed urgently in the current page)
+// https://developer.mozilla.org/en-US/docs/Glossary/Prefetch
+// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script
 // https://developer.mozilla.org/en-US/docs/Web/HTML/Element/style
 // https://developer.mozilla.org/en-US/docs/Web/HTML/Element/link
+// https://developer.mozilla.org/en-US/docs/Web/HTML/Link_types
 // https://philipwalton.com/articles/deploying-es2015-code-in-production-today/
-
-// type Resource =
-// 	| {
-// 		// sourcemaps?
-// 		type: 'script' | 'style',
-// 		mode: 'normal' | 'preload' | 'prefetch' | 'inline',
-// 		location: 'head' | 'body',
-// 		text: string,
-// 	}
-// 	| { type: 'static', path: string, extension: string, content: Buffer }
-
 
 // let's just get brutally pragmatic and hack this thing together to understand all the ramifications
 // we'll start with a typescript entry, at least for now
