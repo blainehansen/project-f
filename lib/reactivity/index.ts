@@ -1,3 +1,5 @@
+// TODO blaine, to enable the "guardable subscription" behavior, there could either be a special version of the `r` method that accepts a function/object to mediate, or some global registration of such an object
+
 import { noop, Fn, Registrar, Handle, Primitive, Comparator, Reducer, NonEmpty } from '../utils'
 
 export interface Immutable<T> {
