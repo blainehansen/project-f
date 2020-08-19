@@ -139,7 +139,7 @@ function withWarnings<T>(value: T, warnings: ParseWarning[], lineWidth: number):
 }
 
 
-const chalk = require('chalk')
+import chalk = require('chalk')
 const info = chalk.blue.bold
 const file = chalk.magentaBright.bold
 
@@ -226,7 +226,7 @@ export const Errors = {
 		"The `Component` declaration doesn't make sense as anything other than an object.",
 	),
 	COMPONENT_BLOCK_NOT_OBJECT: (span: Span) => ParseError(span, 'COMPONENT_BLOCK_NOT_OBJECT',
-		"Sections of the `Component` declaration doesn't make sense as anything other than an object.",
+		"Sections of the `Component` declaration don't make sense as anything other than an object.",
 	),
 	UNKNOWN_COMPONENT_BLOCK: (span: Span) => ParseError(span, 'UNKNOWN_COMPONENT_BLOCK',
 		"This property isn't a valid section of a `Component` declaration.",
